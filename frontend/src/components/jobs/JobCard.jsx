@@ -4,7 +4,7 @@ import React from "react";
  * Returns a semantic class name for the fit tag badge.
  *
  * @param {"Real Junior" | "Stretch Role" | "Too Senior" | "Misleading Junior"} fitTag
- *   - Job fit label.
+ *   Job fit label.
  * @returns {string} CSS modifier class.
  */
 function getFitTagClassName(fitTag) {
@@ -24,7 +24,7 @@ function getFitTagClassName(fitTag) {
 /**
  * Returns a label for the source system.
  *
- * @param {string | null} source - Source identifier.
+ * @param {string | null | undefined} source Source identifier.
  * @returns {string | null} Human-readable source label.
  */
 function formatSourceLabel(source) {
@@ -41,6 +41,66 @@ function formatSourceLabel(source) {
 }
 
 /**
+ * Returns a safe fit tag for display.
+ *
+ * @param {string | null | undefined} fitTag Raw fit tag.
+ * @returns {"Real Junior" | "Stretch Role" | "Too Senior" | "Misleading Junior"}
+ *   Safe fit tag.
+ */
+function getSafeFitTag(fitTag) {
+  switch (fitTag) {
+    case "Real Junior":
+    case "Stretch Role":
+    case "Too Senior":
+    case "Misleading Junior":
+      return fitTag;
+    default:
+      return "Too Senior";
+  }
+}
+
+/**
+ * Returns a safe percentage match score.
+ *
+ * @param {number | null | undefined} matchScore Raw match score.
+ * @returns {number} Safe match score clamped between 0 and 100.
+ */
+function getSafeMatchScore(matchScore) {
+  if (!Number.isFinite(matchScore)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(matchScore)));
+}
+
+/**
+ * Returns non-empty tag values for rendering in the footer.
+ *
+ * @param {Object} params Tag candidates.
+ * @param {string | null | undefined} params.workplaceType Workplace type.
+ * @param {string | null | undefined} params.roleType Role type.
+ * @param {string | null | undefined} params.employmentType Employment type.
+ * @param {string | null | undefined} params.compensation Compensation label.
+ * @param {string | null | undefined} params.sourceLabel Source label.
+ * @returns {string[]} Display-ready tag labels.
+ */
+function getFooterTags({
+  workplaceType,
+  roleType,
+  employmentType,
+  compensation,
+  sourceLabel,
+}) {
+  return [
+    workplaceType,
+    roleType,
+    employmentType,
+    compensation,
+    sourceLabel ? `Source: ${sourceLabel}` : null,
+  ].filter((value) => typeof value === "string" && value.trim().length > 0);
+}
+
+/**
  * Renders a single job card.
  *
  * The component accepts a UI-ready job object that has already been transformed
@@ -50,33 +110,34 @@ function formatSourceLabel(source) {
  * @param {{
  *   job: {
  *     id: string,
- *     title: string,
- *     company: string,
- *     location: string,
- *     workplaceType: string,
- *     employmentType?: string,
- *     roleType: string,
- *     description: string,
- *     fitTag: "Real Junior" | "Stretch Role" | "Too Senior" | "Misleading Junior",
- *     matchScore: number,
+ *     title?: string,
+ *     company?: string,
+ *     location?: string,
+ *     workplaceType?: string | null,
+ *     employmentType?: string | null,
+ *     roleType?: string | null,
+ *     description?: string,
+ *     fitTag?: "Real Junior" | "Stretch Role" | "Too Senior" | "Misleading Junior",
+ *     matchScore?: number,
  *     reasons?: string[],
  *     warningFlags?: string[],
  *     compensation?: string | null,
  *     source?: string | null,
  *     sourceUrl?: string | null
  *   }
- * }} props - Component props.
+ * }} props Component props.
  * @returns {JSX.Element} Job card.
  */
 function JobCard({ job }) {
   const {
-    title,
-    company,
-    location,
-    workplaceType,
-    employmentType,
-    roleType,
-    description,
+    id,
+    title = "Untitled role",
+    company = "Unknown company",
+    location = "Location not listed",
+    workplaceType = null,
+    employmentType = null,
+    roleType = null,
+    description = "",
     fitTag,
     matchScore,
     reasons = [],
@@ -86,77 +147,109 @@ function JobCard({ job }) {
     sourceUrl = null,
   } = job;
 
+  const safeFitTag = getSafeFitTag(fitTag);
+  const safeMatchScore = getSafeMatchScore(matchScore);
   const sourceLabel = formatSourceLabel(source);
 
+  const footerTags = getFooterTags({
+    workplaceType,
+    roleType,
+    employmentType,
+    compensation,
+    sourceLabel,
+  });
+
+  const hasReasons = Array.isArray(reasons) && reasons.length > 0;
+  const hasWarningFlags = Array.isArray(warningFlags) && warningFlags.length > 0;
+  const hasDescription = typeof description === "string" && description.trim().length > 0;
+
   return (
-    <article className="job-card section-card">
+    <article
+      className="job-card section-card"
+      aria-labelledby={`job-card-title-${id}`}
+    >
       <div className="job-card__top">
         <div className="job-card__heading">
           <div className="job-card__meta-row">
-            <span className={`job-card__fit-tag ${getFitTagClassName(fitTag)}`}>
-              {fitTag}
+            <span
+              className={`job-card__fit-tag ${getFitTagClassName(safeFitTag)}`}
+            >
+              {safeFitTag}
             </span>
-            <span className="job-card__match-badge">{matchScore}% match</span>
+            <span
+              className="job-card__match-badge"
+              aria-label={`${safeMatchScore} percent match`}
+            >
+              {safeMatchScore}% match
+            </span>
           </div>
 
-          <h3 className="job-card__title">{title}</h3>
+          <h3 id={`job-card-title-${id}`} className="job-card__title">
+            {title}
+          </h3>
 
           <p className="job-card__company">
-            {company}
-            <span className="job-card__separator">•</span>
-            {location}
+            <span>{company}</span>
+            <span className="job-card__separator" aria-hidden="true">
+              •
+            </span>
+            <span>{location}</span>
           </p>
         </div>
       </div>
 
-      <p className="job-card__description">{description}</p>
+      {hasDescription ? (
+        <p className="job-card__description">{description}</p>
+      ) : null}
 
-      {reasons.length > 0 && (
-        <div className="job-card__insights">
-          <p className="job-card__insights-label">Why EarlyBloom surfaced this</p>
+      {hasReasons ? (
+        <section
+          className="job-card__insights"
+          aria-labelledby={`job-card-insights-${id}`}
+        >
+          <p id={`job-card-insights-${id}`} className="job-card__insights-label">
+            Why EarlyBloom surfaced this
+          </p>
           <ul className="job-card__reason-list">
             {reasons.map((reason, index) => (
-              <li
-                key={`${job.id}-reason-${index}`}
-                className="job-card__reason-item"
-              >
+              <li key={`${id}-reason-${index}`} className="job-card__reason-item">
                 {reason}
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        </section>
+      ) : null}
 
-      {warningFlags.length > 0 && (
-        <div className="job-card__warnings" aria-label="Job warning flags">
-          <p className="job-card__warnings-label">Watchouts</p>
+      {hasWarningFlags ? (
+        <section
+          className="job-card__warnings"
+          aria-labelledby={`job-card-warnings-${id}`}
+        >
+          <p id={`job-card-warnings-${id}`} className="job-card__warnings-label">
+            Watchouts
+          </p>
           <ul className="job-card__warning-list">
             {warningFlags.map((warning, index) => (
-              <li
-                key={`${job.id}-warning-${index}`}
-                className="job-card__warning-item"
-              >
+              <li key={`${id}-warning-${index}`} className="job-card__warning-item">
                 {warning}
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        </section>
+      ) : null}
 
       <div className="job-card__footer">
-        <div className="job-card__tags">
-          <span className="job-card__tag">{workplaceType}</span>
-          <span className="job-card__tag">{roleType}</span>
-          {employmentType ? (
-            <span className="job-card__tag">{employmentType}</span>
-          ) : null}
-          {compensation ? (
-            <span className="job-card__tag">{compensation}</span>
-          ) : null}
-          {sourceLabel ? (
-            <span className="job-card__tag">Source: {sourceLabel}</span>
-          ) : null}
-        </div>
+        {footerTags.length > 0 ? (
+          <div className="job-card__tags" aria-label="Job details">
+            {footerTags.map((tag, index) => (
+              <span key={`${id}-tag-${index}`} className="job-card__tag">
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <div className="job-card__tags" aria-hidden="true" />
+        )}
 
         {sourceUrl ? (
           <a
@@ -164,11 +257,16 @@ function JobCard({ job }) {
             target="_blank"
             rel="noreferrer"
             className="job-card__action"
+            aria-label={`View listing for ${title} at ${company}`}
           >
             View listing
           </a>
         ) : (
-          <button type="button" className="job-card__action">
+          <button
+            type="button"
+            className="job-card__action"
+            aria-label={`View details for ${title} at ${company}`}
+          >
             View details
           </button>
         )}

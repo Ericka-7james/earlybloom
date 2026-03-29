@@ -1,120 +1,76 @@
-export const MOCK_SCORED_JOBS = [
-  {
-    id: "eb-raw-001",
-    bloomFitScore: 91,
-    bloomVerdict: "Real Junior",
-    bloomReasons: [
-      "Experience range is early-career friendly",
-      "Strong overlap with core frontend skills",
-      "Listing suggests collaboration and mentorship",
-    ],
+/**
+ * @fileoverview Derived scored mock jobs for EarlyBloom.
+ *
+ * This module replaces hand-authored scored mock data with generated scores from
+ * the current raw jobs dataset and user profile. It preserves the legacy export
+ * shape expected by the current UI while sourcing scoring from the real
+ * scoreJobsForUser utility.
+ */
+
+import scoreJobsForUser from "../lib/jobs/scoreJobsForUser";
+import { MOCK_RAW_JOBS } from "./jobs.raw";
+import { MOCK_USER_PROFILE } from "./jobs.user-profile";
+
+/**
+ * Maps a numeric Bloom score to a simple confidence label for the current mock UI.
+ *
+ * This keeps confidence available while the rest of the app transitions from
+ * static mock data to fully derived scoring output.
+ *
+ * @param {number} bloomFitScore Total Bloom fit score.
+ * @returns {"high" | "medium" | "low"} Confidence label.
+ */
+function deriveConfidenceLabel(bloomFitScore = 0) {
+  if (bloomFitScore >= 80) {
+    return "high";
+  }
+
+  if (bloomFitScore >= 55) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+/**
+ * Adapts scored jobs from the scoring utility into the exact mock export shape
+ * currently expected by the UI layer.
+ *
+ * Important:
+ * - Keeps existing property names like accessibilityFit and trustFit.
+ * - Preserves Bloom-native fields for future migration.
+ *
+ * @param {Array<Object>} scoredJobs Raw scored jobs from scoreJobsForUser.
+ * @returns {Array<Object>} UI-compatible scored jobs.
+ */
+function mapScoredJobsForMockExport(scoredJobs = []) {
+  return scoredJobs.map((job) => ({
+    id: job.id,
+    bloomFitScore: job.bloomFitScore,
+    bloomVerdict: job.bloomVerdict,
+    bloomReasons: job.bloomReasons,
     scoreBreakdown: {
-      seniorityFit: 34,
-      skillsFit: 23,
-      accessibilityFit: 18,
-      trustFit: 8,
-      preferenceFit: 8,
+      seniorityFit: job.scoreBreakdown?.seniorityFit ?? 0,
+      skillsFit: job.scoreBreakdown?.skillsFit ?? 0,
+      accessibilityFit: job.scoreBreakdown?.accessibility ?? 0,
+      trustFit: job.scoreBreakdown?.trust ?? 0,
+      preferenceFit: job.scoreBreakdown?.preferenceFit ?? 0,
     },
-    warningFlags: [],
-    confidence: "high",
-  },
-  {
-    id: "eb-raw-002",
-    bloomFitScore: 86,
-    bloomVerdict: "Real Junior",
-    bloomReasons: [
-      "Role is aligned to software engineer I expectations",
-      "Strong overlap with React and API-related skills",
-      "Guidance from senior engineers is explicitly mentioned",
-    ],
-    scoreBreakdown: {
-      seniorityFit: 31,
-      skillsFit: 22,
-      accessibilityFit: 17,
-      trustFit: 6,
-      preferenceFit: 10,
-    },
-    warningFlags: ["Salary not listed"],
-    confidence: "high",
-  },
-  {
-    id: "eb-raw-003",
-    bloomFitScore: 74,
-    bloomVerdict: "Stretch Role",
-    bloomReasons: [
-      "Backend role is plausible but leans slightly above true entry level",
-      "Python and API overlap are helpful",
-      "Onsite requirement and 2 to 3 years requested reduce fit",
-    ],
-    scoreBreakdown: {
-      seniorityFit: 22,
-      skillsFit: 19,
-      accessibilityFit: 15,
-      trustFit: 9,
-      preferenceFit: 9,
-    },
-    warningFlags: [],
-    confidence: "medium",
-  },
-  {
-    id: "eb-raw-004",
-    bloomFitScore: 67,
-    bloomVerdict: "Stretch Role",
-    bloomReasons: [
-      "Good frontend overlap",
-      "Ownership language raises the bar beyond true junior",
-      "Hybrid setup may still make it worth considering",
-    ],
-    scoreBreakdown: {
-      seniorityFit: 18,
-      skillsFit: 22,
-      accessibilityFit: 11,
-      trustFit: 8,
-      preferenceFit: 8,
-    },
-    warningFlags: ["Ownership expectations may exceed early-career scope"],
-    confidence: "medium",
-  },
-  {
-    id: "eb-raw-005",
-    bloomFitScore: 28,
-    bloomVerdict: "Misleading Junior",
-    bloomReasons: [
-      "Title says junior but description requires senior-level independence",
-      "Leadership and architecture expectations are not early-career friendly",
-      "Years required are well above entry-level range",
-    ],
-    scoreBreakdown: {
-      seniorityFit: 2,
-      skillsFit: 8,
-      accessibilityFit: 3,
-      trustFit: 5,
-      preferenceFit: 10,
-    },
-    warningFlags: [
-      "Title suggests junior but requirements are senior-leaning",
-      "Leadership and architecture ownership expected",
-      "Salary not listed",
-    ],
-    confidence: "high",
-  },
-  {
-    id: "eb-raw-006",
-    bloomFitScore: 81,
-    bloomVerdict: "Real Junior",
-    bloomReasons: [
-      "Explicit early-career framing is strong",
-      "Experience expectations are realistic",
-      "Skills burden is moderate and reachable",
-    ],
-    scoreBreakdown: {
-      seniorityFit: 33,
-      skillsFit: 16,
-      accessibilityFit: 18,
-      trustFit: 7,
-      preferenceFit: 7,
-    },
-    warningFlags: [],
-    confidence: "medium",
-  },
-];
+    warningFlags: Array.isArray(job.warningFlags) ? job.warningFlags : [],
+    confidence: deriveConfidenceLabel(job.bloomFitScore),
+
+    // Optional bridge fields in case parts of the UI still read these directly.
+    matchScore: job.matchScore ?? job.bloomFitScore,
+    fitTag: job.fitTag ?? job.bloomVerdict,
+    reasons: job.reasons ?? job.bloomReasons,
+  }));
+}
+
+/**
+ * Scored mock jobs derived from the current raw mock dataset and mock user profile.
+ */
+export const MOCK_SCORED_JOBS = mapScoredJobsForMockExport(
+  scoreJobsForUser(MOCK_RAW_JOBS, MOCK_USER_PROFILE)
+);
+
+export default MOCK_SCORED_JOBS;
