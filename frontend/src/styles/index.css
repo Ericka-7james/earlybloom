@@ -297,11 +297,11 @@ button {
 }
 
 .hero__content {
-  order: 2;
+  order: 1;
 }
 
 .hero__media {
-  order: 1;
+  display: none;
 }
 
 .hero__title {
@@ -493,6 +493,7 @@ button {
   }
 
   .hero__media {
+    display: block;
     order: 2;
   }
 
