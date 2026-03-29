@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import bloombugIcon from "../assets/bloombug/BloombugAppIcon.png";
 
 /**
@@ -33,11 +33,11 @@ function Navbar() {
 
         <div className="nav-links" aria-label="Navigation links">
           <a href="#mission" className="nav-link">
-            Mission
-          </a>
-          <a href="#how-it-works" className="nav-link">
             How It Works
           </a>
+          <NavLink to="/jobs" className="nav-link">
+            Jobs
+          </NavLink>
           <a href="#future-tools" className="nav-link">
             Tools
           </a>
