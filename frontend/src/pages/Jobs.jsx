@@ -1,99 +1,15 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import JobCard from "../components/jobs/JobCard.jsx";
+import CommonModal from "../components/common/CommonModal.jsx";
 import "../styles/components/jobs.css";
 
-/**
- * Temporary mock data for the Jobs page.
- *
- * This shape is intentionally close to what a future API response could look like
- * so the page can transition to backend data with minimal refactoring.
- *
- * @type {Array<{
- *   id: string,
- *   title: string,
- *   company: string,
- *   location: string,
- *   workplaceType: "Remote" | "Onsite" | "Hybrid",
- *   roleType: "Frontend" | "Backend" | "Full Stack" | "Data" | "Product",
- *   description: string,
- *   fitTag: "Real Junior" | "Stretch Role" | "Too Senior",
- *   matchScore: number
- * }>}
- */
-const MOCK_JOBS = [
-  {
-    id: "eb-job-001",
-    title: "Junior Frontend Engineer",
-    company: "Bloomline",
-    location: "Atlanta, GA",
-    workplaceType: "Hybrid",
-    roleType: "Frontend",
-    description:
-      "Build accessible user interfaces, support design system updates, and collaborate with product and backend teams on customer-facing features.",
-    fitTag: "Real Junior",
-    matchScore: 91,
-  },
-  {
-    id: "eb-job-002",
-    title: "Software Engineer I",
-    company: "North Harbor",
-    location: "Remote",
-    workplaceType: "Remote",
-    roleType: "Full Stack",
-    description:
-      "Contribute to internal tools and platform features, ship well-tested code, and grow across both frontend and backend workstreams.",
-    fitTag: "Real Junior",
-    matchScore: 87,
-  },
-  {
-    id: "eb-job-003",
-    title: "Associate Backend Developer",
-    company: "KiteStack",
-    location: "Austin, TX",
-    workplaceType: "Onsite",
-    roleType: "Backend",
-    description:
-      "Help maintain APIs, write service integrations, and support platform reliability with strong mentorship from senior engineers.",
-    fitTag: "Stretch Role",
-    matchScore: 76,
-  },
-  {
-    id: "eb-job-004",
-    title: "Frontend Engineer",
-    company: "PetalGrid",
-    location: "New York, NY",
-    workplaceType: "Hybrid",
-    roleType: "Frontend",
-    description:
-      "Own polished UI work across core product surfaces, improve component consistency, and partner with design on new experiences.",
-    fitTag: "Stretch Role",
-    matchScore: 72,
-  },
-  {
-    id: "eb-job-005",
-    title: "Senior React Engineer",
-    company: "Riverpath Labs",
-    location: "Remote",
-    workplaceType: "Remote",
-    roleType: "Frontend",
-    description:
-      "Lead architecture decisions, define frontend standards, and mentor cross-functional engineering teams across large-scale initiatives.",
-    fitTag: "Too Senior",
-    matchScore: 43,
-  },
-  {
-    id: "eb-job-006",
-    title: "Data Analyst, Early Career",
-    company: "Larkspur Health",
-    location: "Chicago, IL",
-    workplaceType: "Hybrid",
-    roleType: "Data",
-    description:
-      "Turn hiring and product metrics into useful dashboards, support reporting workflows, and collaborate on data quality improvements.",
-    fitTag: "Real Junior",
-    matchScore: 84,
-  },
-];
+import { MOCK_RAW_JOBS } from "../mock/jobs/jobs.raw";
+import { MOCK_USER_PROFILE } from "../mock/jobs/jobs.user-profile";
+
+import scoreJobsForUser from "../lib/jobs/scoreJobsForUser";
+import mapJobsForDisplay from "../lib/jobs/mapJobsForDisplay";
+
+import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
 
 /**
  * Defines the currently available filter groups.
@@ -107,23 +23,60 @@ const FILTER_GROUPS = {
 };
 
 /**
- * Renders the jobs discovery page.
+ * Returns a CSS-safe modifier from the visible fit label.
  *
- * This page is structured to support future API integration with minimal churn:
- * - swap MOCK_JOBS for fetched data
- * - replace static filter controls with controlled inputs
- * - connect list state to query params or API request params
+ * @param {string | null | undefined} fitTag Fit tag label.
+ * @returns {string} CSS-safe modifier string.
+ */
+function getFitTagModifier(fitTag) {
+  return String(fitTag || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+}
+
+/**
+ * Renders the jobs discovery page.
  *
  * @returns {JSX.Element} Jobs page UI.
  */
 function Jobs() {
+  const [activeReasonsJob, setActiveReasonsJob] = useState(null);
+
   /**
-   * Memoizes the current dataset.
-   *
-   * This placeholder pattern makes it easy to later swap in transformed API data
-   * without changing the rendering structure below.
+   * Scores raw jobs against the current mock user profile.
    */
-  const jobs = useMemo(() => MOCK_JOBS, []);
+  const scoredJobs = useMemo(() => {
+    return scoreJobsForUser(MOCK_RAW_JOBS, MOCK_USER_PROFILE);
+  }, []);
+
+  /**
+   * Maps scored jobs into the display shape consumed by JobCard.
+   */
+  const jobs = useMemo(() => {
+    return mapJobsForDisplay(MOCK_RAW_JOBS, scoredJobs).sort(
+      (a, b) => b.matchScore - a.matchScore
+    );
+  }, [scoredJobs]);
+
+  /**
+   * Opens the shared reasons modal for a given job.
+   *
+   * @param {Object} job Display-ready job.
+   * @returns {void}
+   */
+  function handleOpenReasonsModal(job) {
+    setActiveReasonsJob(job);
+  }
+
+  /**
+   * Closes the shared reasons modal.
+   *
+   * @returns {void}
+   */
+  function handleCloseReasonsModal() {
+    setActiveReasonsJob(null);
+  }
 
   return (
     <main className="jobs-page">
@@ -151,7 +104,8 @@ function Jobs() {
             <div className="jobs-filters__header">
               <h2 className="jobs-results__title">Filters</h2>
               <p className="jobs-filters__text">
-                UI only for now. Wiring can be added later without reshaping the page.
+                UI only for now. Wiring can be added later without reshaping the
+                page.
               </p>
             </div>
 
@@ -193,19 +147,89 @@ function Jobs() {
               <div>
                 <h2 className="jobs-results__title">Open roles</h2>
                 <p className="jobs-results__text">
-                  {jobs.length} sample roles for layout and interaction development.
+                  {jobs.length} roles matched to your profile.
                 </p>
               </div>
             </div>
 
             <div className="jobs-list">
               {jobs.map((job) => (
-                <JobCard key={job.id} job={job} />
+                <JobCard
+                  key={job.id}
+                  job={job}
+                  onOpenReasonsModal={handleOpenReasonsModal}
+                />
               ))}
             </div>
           </div>
         </div>
       </section>
+
+      <CommonModal
+        isOpen={Boolean(activeReasonsJob)}
+        title="Why EarlyBloom surfaced this"
+        onClose={handleCloseReasonsModal}
+        size="md"
+        iconImage={BloombugAppIcon}
+        iconAlt="EarlyBloom Bloombug icon"
+      >
+        {activeReasonsJob ? (
+          <div className="jobs-reasons-modal">
+            <div className="jobs-reasons-modal__intro">
+              <p className="jobs-reasons-modal__eyebrow">
+                <span
+                  className={`jobs-reasons-modal__eyebrow-fit jobs-reasons-modal__eyebrow-fit--${getFitTagModifier(
+                    activeReasonsJob.fitTag
+                  )}`}
+                >
+                  {activeReasonsJob.fitTag}
+                </span>
+                {" • "}
+                {activeReasonsJob.matchScore}% match
+              </p>
+
+              <h3 className="jobs-reasons-modal__job-title">
+                {activeReasonsJob.title}
+              </h3>
+
+              <p className="jobs-reasons-modal__job-meta">
+                {activeReasonsJob.company} • {activeReasonsJob.location}
+              </p>
+            </div>
+
+            <div className="jobs-reasons-modal__section">
+              <p className="jobs-reasons-modal__label">Top reasons</p>
+              <ul className="jobs-reasons-modal__list">
+                {(activeReasonsJob.reasons || []).map((reason, index) => (
+                  <li
+                    key={`${activeReasonsJob.id}-modal-reason-${index}`}
+                    className="jobs-reasons-modal__list-item"
+                  >
+                    {reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {Array.isArray(activeReasonsJob.warningFlags) &&
+            activeReasonsJob.warningFlags.length > 0 ? (
+              <div className="jobs-reasons-modal__section">
+                <p className="jobs-reasons-modal__label">Watchouts</p>
+                <ul className="jobs-reasons-modal__list jobs-reasons-modal__list--warning">
+                  {activeReasonsJob.warningFlags.map((warning, index) => (
+                    <li
+                      key={`${activeReasonsJob.id}-modal-warning-${index}`}
+                      className="jobs-reasons-modal__list-item"
+                    >
+                      {warning}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </CommonModal>
     </main>
   );
 }

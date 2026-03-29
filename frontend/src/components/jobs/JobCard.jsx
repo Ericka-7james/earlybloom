@@ -103,10 +103,6 @@ function getFooterTags({
 /**
  * Renders a single job card.
  *
- * The component accepts a UI-ready job object that has already been transformed
- * from raw job data plus scoring results. This keeps rendering logic focused on
- * presentation rather than data mapping or scoring behavior.
- *
  * @param {{
  *   job: {
  *     id: string,
@@ -124,11 +120,12 @@ function getFooterTags({
  *     compensation?: string | null,
  *     source?: string | null,
  *     sourceUrl?: string | null
- *   }
- * }} props Component props.
+ *   },
+ *   onOpenReasonsModal?: (job: Object) => void
+ * }} props
  * @returns {JSX.Element} Job card.
  */
-function JobCard({ job }) {
+function JobCard({ job, onOpenReasonsModal }) {
   const {
     id,
     title = "Untitled role",
@@ -161,7 +158,10 @@ function JobCard({ job }) {
 
   const hasReasons = Array.isArray(reasons) && reasons.length > 0;
   const hasWarningFlags = Array.isArray(warningFlags) && warningFlags.length > 0;
-  const hasDescription = typeof description === "string" && description.trim().length > 0;
+  const hasDescription =
+    typeof description === "string" && description.trim().length > 0;
+  const canOpenWhyModal =
+    typeof onOpenReasonsModal === "function" && (hasReasons || hasWarningFlags);
 
   return (
     <article
@@ -196,46 +196,21 @@ function JobCard({ job }) {
             <span>{location}</span>
           </p>
         </div>
+
+        {canOpenWhyModal ? (
+          <button
+            type="button"
+            className="job-card__why-pill"
+            onClick={() => onOpenReasonsModal(job)}
+            aria-label={`Open why EarlyBloom surfaced ${title}`}
+          >
+            Why?
+          </button>
+        ) : null}
       </div>
 
       {hasDescription ? (
         <p className="job-card__description">{description}</p>
-      ) : null}
-
-      {hasReasons ? (
-        <section
-          className="job-card__insights"
-          aria-labelledby={`job-card-insights-${id}`}
-        >
-          <p id={`job-card-insights-${id}`} className="job-card__insights-label">
-            Why EarlyBloom surfaced this
-          </p>
-          <ul className="job-card__reason-list">
-            {reasons.map((reason, index) => (
-              <li key={`${id}-reason-${index}`} className="job-card__reason-item">
-                {reason}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {hasWarningFlags ? (
-        <section
-          className="job-card__warnings"
-          aria-labelledby={`job-card-warnings-${id}`}
-        >
-          <p id={`job-card-warnings-${id}`} className="job-card__warnings-label">
-            Watchouts
-          </p>
-          <ul className="job-card__warning-list">
-            {warningFlags.map((warning, index) => (
-              <li key={`${id}-warning-${index}`} className="job-card__warning-item">
-                {warning}
-              </li>
-            ))}
-          </ul>
-        </section>
       ) : null}
 
       <div className="job-card__footer">
