@@ -1,6 +1,7 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import Home from "./pages/Home";
+import Jobs from "./pages/Jobs";
 
 /**
  * Renders the top-level application shell.
@@ -24,6 +25,7 @@ function App() {
         <main className="page-shell">
           <Routes>
             <Route path="/" element={<Home />} />
+            <Route path="/jobs" element={<Jobs />} />
           </Routes>
         </main>
       </div>
