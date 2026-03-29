@@ -1,3 +1,4 @@
+import { describe, it, expect } from "vitest";
 import mapJobsForDisplay from "../../../src/lib/jobs/mapJobsForDisplay";
 
 describe("mapJobsForDisplay", () => {

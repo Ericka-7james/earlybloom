@@ -5,7 +5,7 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    dedupe: ["react", "react-dom"], // 👈 THIS FIXES YOUR ERROR
+    dedupe: ["react", "react-dom"],
   },
   test: {
     environment: "jsdom",
@@ -15,10 +15,12 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
-      lines: 7,
-      functions: 7,
-      branches: 7,
-      statements: 7,
+      thresholds: {
+        lines: 70,
+        functions: 70,
+        branches: 60,
+        statements: 70,
+      },
     },
   },
 });

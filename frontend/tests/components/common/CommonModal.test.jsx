@@ -1,4 +1,5 @@
 import React from "react";
+import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import CommonModal from "../../../src/components/common/CommonModal";
 

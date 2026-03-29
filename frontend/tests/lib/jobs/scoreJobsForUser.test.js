@@ -1,3 +1,4 @@
+import { describe, it, expect } from "vitest";
 import scoreJobsForUser from "../../../src/lib/jobs/scoreJobsForUser";
 
 describe("scoreJobsForUser", () => {
