@@ -1,3 +1,4 @@
+import { describe, it, expect } from "vitest";
 import { deriveBloomVerdict } from "../../../../src/lib/jobs/scoring/scoring.verdicts";
 
 describe("deriveBloomVerdict", () => {
