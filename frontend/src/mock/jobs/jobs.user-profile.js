@@ -1,0 +1,25 @@
+export const MOCK_USER_PROFILE = {
+  userId: "user-earlybloom-demo",
+  targetLevel: "entry-level",
+  yearsOfExperience: 1,
+  preferredWorkplaceTypes: ["Remote", "Hybrid"],
+  preferredRoleTypes: ["Frontend", "Full Stack", "Software Engineer"],
+  preferredLocations: ["Atlanta, GA", "Remote"],
+  skills: [
+    "JavaScript",
+    "TypeScript",
+    "React",
+    "HTML",
+    "CSS",
+    "REST APIs",
+    "Git",
+    "Python",
+    "SQL",
+  ],
+  bonusSkills: ["FastAPI", "Figma", "Jest"],
+  dealbreakers: {
+    maxYearsRequired: 2,
+    rejectSeniorTitles: true,
+    rejectLeadershipHeavyRoles: true,
+  },
+};
