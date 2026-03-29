@@ -18,6 +18,9 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
 
     steps:
       - name: Checkout repo
@@ -28,6 +31,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -38,6 +42,9 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
 
     steps:
       - name: Checkout repo
@@ -48,6 +55,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -61,6 +69,9 @@ jobs:
     needs:
       - lint
       - test
+    defaults:
+      run:
+        working-directory: frontend
 
     steps:
       - name: Checkout repo
@@ -71,6 +82,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
