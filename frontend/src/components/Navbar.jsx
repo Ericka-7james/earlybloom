@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import bloombugIcon from "../assets/bloombug/BloombugIcon.png";
+import bloombugIcon from "../assets/bloombug/BloombugAppIcon.png";
 
 /**
  * Renders the main navigation bar for EarlyBloom.
