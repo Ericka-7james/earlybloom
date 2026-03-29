@@ -1,5 +1,5 @@
 import bloombugMarketingMascot from "../assets/bloombug/BloombugMarketingMascot.png";
-import bloombugUI from "../assets/bloombug/BloombugUI.png";
+import BloombugCareerGarden from "../assets/bloombug/BloombugCareerGarden.png";
 
 /**
  * Renders the EarlyBloom landing page.
@@ -116,7 +116,7 @@ function Home() {
         <div className="callout-card">
           <div className="callout-card__media">
             <img
-              src={bloombugUI}
+              src={BloombugCareerGarden}
               alt="Bloombug user interface mascot illustration"
               className="callout-card__image"
             />

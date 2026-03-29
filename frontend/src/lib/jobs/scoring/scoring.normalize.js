@@ -19,29 +19,42 @@ import {
  */
 export function normalizeJob(rawJob = {}) {
   const title = rawJob.title ?? "";
-  const description = [
-    rawJob.description,
-    rawJob.summary,
-    rawJob.requirements,
-    rawJob.qualifications,
-    rawJob.responsibilities,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const requirements = rawJob.requirements ?? {};
+  const signals = rawJob.signals ?? {};
 
   const location =
+    rawJob.location?.display ??
     rawJob.location ??
     rawJob.jobLocation ??
     rawJob.locationText ??
     rawJob.city ??
     "";
 
-  const compensation =
-    rawJob.compensation ??
-    rawJob.salary ??
-    rawJob.salaryRange ??
-    rawJob.pay ??
-    "";
+  const descriptionParts = [
+    rawJob.description,
+    rawJob.summary,
+    rawJob.qualifications,
+    rawJob.responsibilities,
+    requirements.educationRequirement,
+    ...(Array.isArray(requirements.requiredSkills)
+      ? requirements.requiredSkills
+      : []),
+    ...(Array.isArray(requirements.preferredSkills)
+      ? requirements.preferredSkills
+      : []),
+  ];
+
+  const description = descriptionParts.filter(Boolean).join(" ");
+
+  const structuredMinYears = Number.isFinite(requirements.minYearsRequired)
+    ? requirements.minYearsRequired
+    : null;
+
+  const structuredMaxYears = Number.isFinite(requirements.maxYearsRequired)
+    ? requirements.maxYearsRequired
+    : null;
+
+  const extractedYears = extractYearsExperience(`${title} ${description}`);
 
   return {
     raw: rawJob,
@@ -53,12 +66,36 @@ export function normalizeJob(rawJob = {}) {
     source: rawJob.source ?? rawJob.platform ?? "",
     location,
     locationLower: normalizeText(location),
-    compensation,
+    workplaceType: rawJob.workplaceType ?? "",
+    employmentType: rawJob.employmentType ?? "",
+    roleType: rawJob.roleType ?? "",
+    compensation:
+      rawJob.compensation ??
+      rawJob.salary ??
+      rawJob.salaryRange ??
+      rawJob.pay ??
+      "",
     isRemote: inferRemote(rawJob, location, description),
     isHybrid: inferHybrid(rawJob, location, description),
     isOnsite: inferOnsite(rawJob, location, description),
-    yearsExperienceRequired: extractYearsExperience(`${title} ${description}`),
+    minYearsRequired: structuredMinYears ?? 0,
+    maxYearsRequired: structuredMaxYears ?? extractedYears,
+    yearsExperienceRequired: structuredMaxYears ?? extractedYears,
     skills: extractJobSkills(rawJob, description),
+    requiredSkills: normalizeSkillList(requirements.requiredSkills),
+    preferredSkills: normalizeSkillList(requirements.preferredSkills),
+    signals: {
+      mentionsMentorship: Boolean(signals.mentionsMentorship),
+      mentionsOwnership: Boolean(signals.mentionsOwnership),
+      mentionsLeadership: Boolean(signals.mentionsLeadership),
+      mentionsArchitecture: Boolean(signals.mentionsArchitecture),
+      titleSuggestsJunior: Boolean(signals.titleSuggestsJunior),
+      descriptionSuggestsJunior: Boolean(signals.descriptionSuggestsJunior),
+      titleDescriptionMismatch: Boolean(signals.titleDescriptionMismatch),
+      hasClearRequirements: Boolean(signals.hasClearRequirements),
+      hasSeparatePreferredSkills: Boolean(signals.hasSeparatePreferredSkills),
+    },
+    warnings: Array.isArray(rawJob.warnings) ? rawJob.warnings : [],
   };
 }
 
@@ -106,17 +143,24 @@ export function normalizeUserProfile(userProfile = {}) {
 /**
  * Extracts a normalized set of job skills.
  *
- * V1 keeps this intentionally simple and readable. Later, this can be swapped
- * for a richer taxonomy or embeddings-based matcher.
- *
  * @param {Object} rawJob Raw job listing.
  * @param {string} description Description text.
  * @returns {Set<string>} Normalized skill set.
  */
 function extractJobSkills(rawJob, description = "") {
-  const rawSkills = Array.isArray(rawJob.skills) ? rawJob.skills : [];
-  const combinedText = normalizeText(`${description} ${rawSkills.join(" ")}`);
+  const requirements = rawJob.requirements ?? {};
 
+  const rawSkills = [
+    ...(Array.isArray(requirements.requiredSkills)
+      ? requirements.requiredSkills
+      : []),
+    ...(Array.isArray(requirements.preferredSkills)
+      ? requirements.preferredSkills
+      : []),
+    ...(Array.isArray(rawJob.skills) ? rawJob.skills : []),
+  ];
+
+  const combinedText = normalizeText(`${description} ${rawSkills.join(" ")}`);
   const found = new Set();
 
   KNOWN_SKILLS.forEach((skill) => {
@@ -134,4 +178,16 @@ function extractJobSkills(rawJob, description = "") {
   });
 
   return found;
+}
+
+/**
+ * Normalizes a skill list into lowercase scoring-friendly strings.
+ *
+ * @param {string[] | undefined} skills Raw skills.
+ * @returns {string[]} Normalized skills.
+ */
+function normalizeSkillList(skills = []) {
+  return Array.isArray(skills)
+    ? skills.map(normalizeText).filter(Boolean)
+    : [];
 }

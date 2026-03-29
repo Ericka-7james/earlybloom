@@ -7,19 +7,15 @@
 
 import {
   collectWarningFlags,
-  deriveBloomVerdict,
   scoreAccessibility,
   scorePreferenceFit,
   scoreSeniorityFit,
   scoreSkillsFit,
   scoreTrust,
 } from "./scoring/scoring.rules";
+import { deriveBloomVerdict } from "./scoring/scoring.verdicts";
 import { normalizeJob, normalizeUserProfile } from "./scoring/scoring.normalize";
-import {
-  clamp,
-  createFallbackId,
-  dedupeStrings,
-} from "./scoring/scoring.utils";
+import { clamp, createFallbackId, dedupeStrings } from "./scoring/scoring.utils";
 
 /**
  * Returns scored job objects for a given user.
@@ -82,13 +78,16 @@ function scoreSingleJob(rawJob, userProfile) {
   });
 
   const bloomReasons = dedupeStrings(
-    [
-      ...seniorityResult.reasons,
-      ...skillsResult.reasons,
-      ...accessibilityResult.reasons,
-      ...trustResult.reasons,
-      ...preferenceResult.reasons,
-    ].filter(Boolean)
+    prioritizeReasonsForVerdict(
+      {
+        seniority: seniorityResult.reasons,
+        skills: skillsResult.reasons,
+        accessibility: accessibilityResult.reasons,
+        trust: trustResult.reasons,
+        preference: preferenceResult.reasons,
+      },
+      bloomVerdict
+    )
   ).slice(0, 4);
 
   return {
@@ -110,6 +109,53 @@ function scoreSingleJob(rawJob, userProfile) {
     fitTag: bloomVerdict,
     reasons: bloomReasons,
   };
+}
+
+/**
+ * Prioritizes reasons based on the final verdict so the explanation feels more honest.
+ *
+ * @param {{
+ *   seniority: string[],
+ *   skills: string[],
+ *   accessibility: string[],
+ *   trust: string[],
+ *   preference: string[]
+ * }} groupedReasons Grouped reasons by scoring bucket.
+ * @param {string} verdict Final verdict.
+ * @returns {string[]} Prioritized reasons.
+ */
+function prioritizeReasonsForVerdict(groupedReasons, verdict) {
+  const allReasons = [
+    ...groupedReasons.seniority,
+    ...groupedReasons.skills,
+    ...groupedReasons.accessibility,
+    ...groupedReasons.preference,
+    ...groupedReasons.trust,
+  ];
+
+  const negativeLikeReasons = allReasons.filter((reason) =>
+    /stretch|senior|beyond|ownership|leadership|architecture|limited|weak|mismatch|too many|not listed|more senior|exceed/i.test(
+      reason
+    )
+  );
+
+  const positiveLikeReasons = allReasons.filter(
+    (reason) => !negativeLikeReasons.includes(reason)
+  );
+
+  if (verdict === "Misleading Junior" || verdict === "Too Senior") {
+    return [...negativeLikeReasons, ...positiveLikeReasons];
+  }
+
+  if (verdict === "Stretch Role") {
+    return [
+      ...negativeLikeReasons.slice(0, 2),
+      ...positiveLikeReasons,
+      ...negativeLikeReasons.slice(2),
+    ];
+  }
+
+  return [...positiveLikeReasons, ...negativeLikeReasons];
 }
 
 export default scoreJobsForUser;
