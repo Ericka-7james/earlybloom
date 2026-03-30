@@ -1,27 +1,15 @@
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status
 from supabase import Client, create_client
 
-
-def _read_setting(name: str) -> str | None:
-    try:
-        from app.core.config import settings  # type: ignore
-
-        value = getattr(settings, name, None)
-        if value:
-            return value
-    except Exception:
-        pass
-
-    return os.getenv(name)
+from app.core.config import settings
 
 
-SUPABASE_URL = _read_setting("SUPABASE_URL")
-SUPABASE_SERVICE_ROLE_KEY = _read_setting("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_URL = (settings.SUPABASE_URL or "").strip()
+SUPABASE_SERVICE_ROLE_KEY = (settings.SUPABASE_SERVICE_ROLE_KEY or "").strip()
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError(
@@ -35,7 +23,7 @@ def get_supabase_admin() -> Client:
     global _supabase_admin
 
     if _supabase_admin is None:
-        _supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+      _supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
     return _supabase_admin
 
