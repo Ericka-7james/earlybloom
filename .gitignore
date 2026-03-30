@@ -26,3 +26,6 @@ Thumbs.db
 
 # Vite
 vite.config.ts.timestamp-*
+
+# Ignore accidental root lock file
+/package-lock.json

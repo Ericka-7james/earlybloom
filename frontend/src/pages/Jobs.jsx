@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import JobCard from "../components/jobs/JobCard.jsx";
+import ResumeUploadModal from "../components/jobs/ResumeUploadModal.jsx";
 import CommonModal from "../components/common/CommonModal.jsx";
 import "../styles/components/jobs.css";
 
@@ -8,16 +9,15 @@ import { MOCK_USER_PROFILE } from "../mock/jobs/jobs.user-profile";
 
 import scoreJobsForUser from "../lib/jobs/scoreJobsForUser";
 import mapJobsForDisplay from "../lib/jobs/mapJobsForDisplay";
+import { readCachedResumeUiState } from "../lib/resumes";
 
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
-import BloomHire from "../assets/bloombug/BloomHire.png";
 
 const FILTER_GROUPS = {
   workplace: ["Remote", "Onsite", "Hybrid"],
   roleType: ["Frontend", "Backend", "Full Stack", "Data", "Product"],
 };
 
-const RESUME_STORAGE_KEY = "earlybloom_resume_upload";
 const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
 
 function getFitTagModifier(fitTag) {
@@ -30,17 +30,7 @@ function getFitTagModifier(fitTag) {
 function Jobs() {
   const [activeReasonsJob, setActiveReasonsJob] = useState(null);
   const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
-  const [resumeError, setResumeError] = useState("");
-  const [resumeFile, setResumeFile] = useState(() => {
-    try {
-      const cachedResume = window.localStorage.getItem(RESUME_STORAGE_KEY);
-      return cachedResume ? JSON.parse(cachedResume) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const fileInputRef = useRef(null);
+  const [resumeFile, setResumeFile] = useState(() => readCachedResumeUiState());
 
   const scoredJobs = useMemo(() => {
     return scoreJobsForUser(MOCK_RAW_JOBS, MOCK_USER_PROFILE);
@@ -61,7 +51,7 @@ function Jobs() {
     /**
      * Placeholder for future signed-in resume checks.
      * Example later:
-     * const hasUploadedResume = Boolean(user?.resumeUrl);
+     * const hasUploadedResume = Boolean(userResumeId);
      */
     const hasUploadedResume = false;
 
@@ -79,85 +69,20 @@ function Jobs() {
   }
 
   function handleCloseResumeModal() {
-    setResumeError("");
     setIsResumeModalOpen(false);
     window.sessionStorage.setItem(RESUME_MODAL_DISMISSED_KEY, "true");
   }
 
-  function isPdfFile(file) {
-    if (!file) {
-      return false;
-    }
-
-    const isPdfMimeType = file.type === "application/pdf";
-    const hasPdfExtension = file.name.toLowerCase().endsWith(".pdf");
-
-    return isPdfMimeType || hasPdfExtension;
-  }
-
-  function cacheResumeFile(file) {
-    const cachedResume = {
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      uploadedAt: new Date().toISOString(),
-    };
-
-    setResumeFile(cachedResume);
-    window.localStorage.setItem(
-      RESUME_STORAGE_KEY,
-      JSON.stringify(cachedResume)
-    );
-
-    window.sessionStorage.setItem(RESUME_MODAL_DISMISSED_KEY, "true");
+  function handleResumeSaved(savedResumeUiState) {
+    setResumeFile(savedResumeUiState);
     setIsResumeModalOpen(false);
-  }
-
-  function handleResumeFileChange(event) {
-    const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    if (!isPdfFile(file)) {
-      setResumeError("Please upload a PDF resume.");
-      event.target.value = "";
-      return;
-    }
-
-    setResumeError("");
-    cacheResumeFile(file);
-    event.target.value = "";
-  }
-
-  function handleResumeDrop(event) {
-    event.preventDefault();
-
-    const file = event.dataTransfer.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    if (!isPdfFile(file)) {
-      setResumeError("Please upload a PDF resume.");
-      return;
-    }
-
-    setResumeError("");
-    cacheResumeFile(file);
-  }
-
-  function handleResumeDragOver(event) {
-    event.preventDefault();
   }
 
   return (
     <main className="jobs-page">
       <section className="section-pad">
         <div className="container">
-          <div className="jobs-hero section-card">
+          <div className="jobs-hero section-card jobs-hero--with-upload">
             <div className="jobs-hero__content">
               <span className="eyebrow-pill">EarlyBloom Jobs</span>
               <h1 className="jobs-hero__title">
@@ -169,6 +94,21 @@ function Jobs() {
                 where it makes sense.
               </p>
             </div>
+
+            <button
+              type="button"
+              className="jobs-hero__upload"
+              onClick={() => setIsResumeModalOpen(true)}
+            >
+              <div className="jobs-hero__upload-box">
+                <p className="jobs-hero__upload-title">
+                  {resumeFile ? "Resume uploaded" : "Upload your resume"}
+                </p>
+                <p className="jobs-hero__upload-subtext">
+                  {resumeFile ? resumeFile.name : "PDF only • click to upload"}
+                </p>
+              </div>
+            </button>
           </div>
         </div>
       </section>
@@ -306,51 +246,12 @@ function Jobs() {
         ) : null}
       </CommonModal>
 
-      <CommonModal
+      <ResumeUploadModal
         isOpen={isResumeModalOpen}
-        title="Upload your resume"
         onClose={handleCloseResumeModal}
-        size="sm"
-        iconImage={BloomHire}
-        iconAlt="EarlyBloom resume upload icon"
-      >
-        <div className="resume-upload-modal">
-          <p className="resume-upload-modal__text">
-            Upload your resume to personalize your job matches.
-          </p>
-
-          <button
-            type="button"
-            className="resume-upload-dropzone"
-            onClick={() => fileInputRef.current?.click()}
-            onDrop={handleResumeDrop}
-            onDragOver={handleResumeDragOver}
-          >
-            <span className="resume-upload-dropzone__label">Upload file</span>
-            <span className="resume-upload-dropzone__hint">PDF only</span>
-          </button>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,application/pdf"
-            className="resume-upload-modal__input"
-            onChange={handleResumeFileChange}
-          />
-
-          {resumeError ? (
-            <p className="resume-upload-modal__error" role="alert">
-              {resumeError}
-            </p>
-          ) : null}
-
-          {resumeFile ? (
-            <p className="resume-upload-modal__success" aria-live="polite">
-              Cached resume: {resumeFile.name}
-            </p>
-          ) : null}
-        </div>
-      </CommonModal>
+        onResumeSaved={handleResumeSaved}
+        resumeFile={resumeFile}
+      />
     </main>
   );
 }
