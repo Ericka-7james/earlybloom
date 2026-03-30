@@ -1,0 +1,26 @@
+from fastapi import FastAPI
+
+from app.api.routes.jobs import router as jobs_router
+from app.api.routes.resume import router as resume_router
+# Temp rm - will add back when tracker is ready
+# from app.api.routes.tracker import router as tracker_router
+
+app = FastAPI(
+    title="EarlyBloom API",
+    version="0.1.0",
+    description="Backend API for EarlyBloom job ingestion, resume parsing, and tracking.",
+)
+
+app.include_router(jobs_router)
+app.include_router(resume_router)
+# app.include_router(tracker_router)
+
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {"message": "EarlyBloom API is running."}
+
+
+@app.get("/health")
+def healthcheck() -> dict[str, str]:
+    return {"status": "ok"}
