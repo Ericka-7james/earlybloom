@@ -1,17 +1,33 @@
-TODO: Investigate layout inconsistencies at browser zoom levels (e.g. 110%–125%)
+---
+
+TODO: Fix favicon rendering in browser search / navigation bar
 
 Context:
-- Layout appears correct in DevTools responsive mode
-- At increased browser zoom (125%), spacing and scaling feel off on large screens
+- Current icon does not scale consistently across browser UI (tabs, search bar, bookmarks)
+- Limited control from frontend, must rely on proper asset setup
+- Icon appears too small / unclear at certain sizes
 
 Potential causes:
-- Use of fixed spacing values instead of responsive clamps
-- Container max-width interaction with zoom scaling
-- Font-size and rem scaling differences under zoom
-- Hero / section spacing not clamped properly
+- Missing required favicon sizes
+- Incorrect aspect ratio or padding in source image
+- Browser fallback behavior using lowest-quality icon
+- Lack of proper <link> tags in index.html
+
+Tasks:
+- Generate proper favicon set:
+  - favicon-16x16.png
+  - favicon-32x32.png
+  - apple-touch-icon.png (180x180)
+  - optional: android-chrome-192x192.png, 512x512
+- Ensure icon has correct padding (not touching edges)
+- Optimize for clarity at very small sizes (16px especially)
+- Update index.html with all required <link> tags
+- Remove old/unused favicon assets to avoid conflicts
 
 Next steps:
-- Audit spacing using clamp() for padding, margins, and gaps
-- Test layout across zoom levels (100%, 110%, 125%, 150%)
-- Verify typography scaling (rem vs px usage)
-- Consider tightening max-width and spacing rhythm for large screens
+- Redesign icon specifically for small-scale readability
+- Test across browsers (Chrome, Safari, Edge)
+- Verify appearance in:
+  - browser tab
+  - bookmarks bar
+  - mobile home screen (if installed)
