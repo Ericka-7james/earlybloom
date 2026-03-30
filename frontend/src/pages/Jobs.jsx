@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import JobCard from "../components/jobs/JobCard.jsx";
 import ResumeUploadModal from "../components/jobs/ResumeUploadModal.jsx";
 import CommonModal from "../components/common/CommonModal.jsx";
@@ -29,8 +29,22 @@ function getFitTagModifier(fitTag) {
 
 function Jobs() {
   const [activeReasonsJob, setActiveReasonsJob] = useState(null);
-  const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
   const [resumeFile, setResumeFile] = useState(() => readCachedResumeUiState());
+
+  const wasDismissed =
+    window.sessionStorage.getItem(RESUME_MODAL_DISMISSED_KEY) === "true";
+  const hasCachedResume = Boolean(resumeFile);
+
+  /**
+   * Placeholder for future signed-in resume checks.
+   * Example later:
+   * const hasUploadedResume = Boolean(userResumeId);
+   */
+  const hasUploadedResume = false;
+
+  const [isResumeModalOpen, setIsResumeModalOpen] = useState(
+    !hasCachedResume && !hasUploadedResume && !wasDismissed
+  );
 
   const scoredJobs = useMemo(() => {
     return scoreJobsForUser(MOCK_RAW_JOBS, MOCK_USER_PROFILE);
@@ -41,24 +55,6 @@ function Jobs() {
       (a, b) => b.matchScore - a.matchScore
     );
   }, [scoredJobs]);
-
-  useEffect(() => {
-    const wasDismissed =
-      window.sessionStorage.getItem(RESUME_MODAL_DISMISSED_KEY) === "true";
-
-    const hasCachedResume = Boolean(resumeFile);
-
-    /**
-     * Placeholder for future signed-in resume checks.
-     * Example later:
-     * const hasUploadedResume = Boolean(userResumeId);
-     */
-    const hasUploadedResume = false;
-
-    if (!hasCachedResume && !hasUploadedResume && !wasDismissed) {
-      setIsResumeModalOpen(true);
-    }
-  }, [resumeFile]);
 
   function handleOpenReasonsModal(job) {
     setActiveReasonsJob(job);
@@ -89,9 +85,9 @@ function Jobs() {
                 Find roles that actually fit where you are.
               </h1>
               <p className="jobs-hero__text">
-                We highlight realistic entry-level and junior opportunities so you
-                can spend less time decoding vague listings and more time applying
-                where it makes sense.
+                We highlight realistic entry-level and junior opportunities so
+                you can spend less time decoding vague listings and more time
+                applying where it makes sense.
               </p>
             </div>
 

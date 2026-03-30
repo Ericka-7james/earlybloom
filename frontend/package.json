@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "eslint .",
+    "lint": "eslint . --ignore-pattern coverage/** --ignore-pattern dist/**",
     "preview": "vite preview",
     "test": "vitest",
     "test:coverage": "vitest run --coverage"
