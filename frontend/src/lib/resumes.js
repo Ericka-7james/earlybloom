@@ -1,8 +1,8 @@
 import { supabase } from "./supabaseClient";
-import { ensureUserSession } from "./auth";
 
 export const RESUME_STORAGE_KEY = "earlybloom_resume_upload";
 export const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
+export const RESUME_RAW_TEXT_SESSION_KEY = "earlybloom_resume_raw_text";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -14,6 +14,7 @@ export function buildResumeUiCache(file, resumeRecord = null) {
     type: file.type || "application/pdf",
     uploadedAt: new Date().toISOString(),
     parseStatus: resumeRecord?.parse_status ?? "pending",
+    isLocalOnly: resumeRecord?.isLocalOnly ?? false,
   };
 }
 
@@ -38,6 +39,47 @@ export function readCachedResumeUiState() {
 export function clearCachedResumeUiState() {
   window.localStorage.removeItem(RESUME_STORAGE_KEY);
   window.sessionStorage.removeItem(RESUME_MODAL_DISMISSED_KEY);
+  window.sessionStorage.removeItem(RESUME_RAW_TEXT_SESSION_KEY);
+}
+
+export function cacheResumeRawText(rawText) {
+  if (!rawText) {
+    window.sessionStorage.removeItem(RESUME_RAW_TEXT_SESSION_KEY);
+    return;
+  }
+
+  window.sessionStorage.setItem(RESUME_RAW_TEXT_SESSION_KEY, rawText);
+}
+
+export function readCachedResumeRawText() {
+  try {
+    return window.sessionStorage.getItem(RESUME_RAW_TEXT_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function getOptionalSession() {
+  const {
+    data: { session },
+    error,
+  } = await supabase.auth.getSession();
+
+  if (error) {
+    throw error;
+  }
+
+  return session ?? null;
+}
+
+export async function requireAuthenticatedSession() {
+  const session = await getOptionalSession();
+
+  if (!session?.user) {
+    throw new Error("Please sign in before saving your resume.");
+  }
+
+  return session;
 }
 
 export async function saveResumeRecord({
@@ -48,16 +90,18 @@ export async function saveResumeRecord({
   rawText = null,
   parsedJson = null,
   parseWarnings = [],
+  uploadSource = "web",
 }) {
-  const user = await ensureUserSession();
+  const session = await requireAuthenticatedSession();
 
   const { data, error } = await supabase
     .from("resumes")
     .insert({
-      user_id: user.id,
+      user_id: session.user.id,
       original_filename: originalFilename,
       file_size_bytes: fileSizeBytes,
       file_type: fileType,
+      upload_source: uploadSource,
       parse_status: parseStatus,
       raw_text: rawText,
       parsed_json: parsedJson,
@@ -83,35 +127,21 @@ export async function parseResumeRecord({
     throw new Error("Missing VITE_API_BASE_URL.");
   }
 
-  const {
-    data: { session },
-    error: sessionError,
-  } = await supabase.auth.getSession();
+  const session = await requireAuthenticatedSession();
+  const accessToken = session.access_token;
 
-  if (sessionError) {
-    throw sessionError;
-  }
-
-  const accessToken = session?.access_token;
-  if (!accessToken) {
-    throw new Error("Missing authenticated session token.");
-  }
-
-  const response = await fetch(
-    `${API_BASE_URL}/resume/${resumeId}/parse`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        raw_text: rawText,
-        file_type: fileType,
-        extraction_method: extractionMethod,
-      }),
-    }
-  );
+  const response = await fetch(`${API_BASE_URL}/resume/${resumeId}/parse`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      raw_text: rawText,
+      file_type: fileType,
+      extraction_method: extractionMethod,
+    }),
+  });
 
   if (!response.ok) {
     let message = "Resume parse request failed.";
@@ -130,6 +160,8 @@ export async function parseResumeRecord({
 }
 
 export async function fetchMyResumes() {
+  await requireAuthenticatedSession();
+
   const { data, error } = await supabase
     .from("resumes")
     .select("*")

@@ -31,3 +31,24 @@ Next steps:
   - browser tab
   - bookmarks bar
   - mobile home screen (if installed)
+
+---
+
+TODO: Prepare environment variables for external job data providers
+
+Context:
+- Moving from mock jobs to real provider-backed listings
+- Some providers use public endpoints, while others require API keys or company-specific identifiers
+- Greenhouse was tested but will stay in future sources for now until valid board tokens are curated
+
+Tasks:
+- Add backend-only .env entries for active providers
+- Keep Arbeitnow and RemoteOK as initial active data sources
+- Reserve placeholders for Greenhouse, USAJOBS, Adzuna, The Muse, and Lever
+- Document which providers require API keys versus company lists
+- Ensure secrets and provider config never reach the frontend
+
+Next steps:
+- Start ingestion with Arbeitnow and RemoteOK
+- Add USAJOBS and Adzuna after obtaining credentials
+- Revisit Greenhouse once a validated board-token list is created
