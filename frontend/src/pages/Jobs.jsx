@@ -4,12 +4,12 @@ import ResumeUploadModal from "../components/jobs/ResumeUploadModal.jsx";
 import CommonModal from "../components/common/CommonModal.jsx";
 import "../styles/components/jobs.css";
 
-import { MOCK_RAW_JOBS } from "../mock/jobs/jobs.raw";
 import { MOCK_USER_PROFILE } from "../mock/jobs/jobs.user-profile";
 
 import scoreJobsForUser from "../lib/jobs/scoreJobsForUser";
 import mapJobsForDisplay from "../lib/jobs/mapJobsForDisplay";
 import { readCachedResumeUiState } from "../lib/resumes";
+import { useJobs } from "../hooks/useJobs";
 
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
 
@@ -31,15 +31,12 @@ function Jobs() {
   const [activeReasonsJob, setActiveReasonsJob] = useState(null);
   const [resumeFile, setResumeFile] = useState(() => readCachedResumeUiState());
 
+  const { jobs: rawJobs, isLoading, error, isMockMode, retry } = useJobs();
+
   const wasDismissed =
     window.sessionStorage.getItem(RESUME_MODAL_DISMISSED_KEY) === "true";
   const hasCachedResume = Boolean(resumeFile);
 
-  /**
-   * Placeholder for future signed-in resume checks.
-   * Example later:
-   * const hasUploadedResume = Boolean(userResumeId);
-   */
   const hasUploadedResume = false;
 
   const [isResumeModalOpen, setIsResumeModalOpen] = useState(
@@ -47,14 +44,14 @@ function Jobs() {
   );
 
   const scoredJobs = useMemo(() => {
-    return scoreJobsForUser(MOCK_RAW_JOBS, MOCK_USER_PROFILE);
-  }, []);
+    return scoreJobsForUser(rawJobs, MOCK_USER_PROFILE);
+  }, [rawJobs]);
 
   const jobs = useMemo(() => {
-    return mapJobsForDisplay(MOCK_RAW_JOBS, scoredJobs).sort(
+    return mapJobsForDisplay(rawJobs, scoredJobs).sort(
       (a, b) => b.matchScore - a.matchScore
     );
-  }, [scoredJobs]);
+  }, [rawJobs, scoredJobs]);
 
   function handleOpenReasonsModal(job) {
     setActiveReasonsJob(job);
@@ -89,6 +86,12 @@ function Jobs() {
                 you can spend less time decoding vague listings and more time
                 applying where it makes sense.
               </p>
+
+              {isMockMode ? (
+                <p className="jobs-hero__text" style={{ marginTop: "0.75rem" }}>
+                  Using mock mode right now.
+                </p>
+              ) : null}
             </div>
 
             <button
@@ -158,20 +161,71 @@ function Jobs() {
               <div>
                 <h2 className="jobs-results__title">Open roles</h2>
                 <p className="jobs-results__text">
-                  {jobs.length} roles matched to your profile.
+                  {isLoading
+                    ? "Loading roles..."
+                    : error
+                    ? "We could not load jobs right now."
+                    : `${jobs.length} roles matched to your profile.`}
                 </p>
               </div>
+
+              {!isLoading ? (
+                <button
+                  type="button"
+                  className="jobs-chip"
+                  onClick={retry}
+                  aria-label="Refresh jobs"
+                >
+                  Refresh
+                </button>
+              ) : null}
             </div>
 
-            <div className="jobs-list">
-              {jobs.map((job) => (
-                <JobCard
-                  key={job.id}
-                  job={job}
-                  onOpenReasonsModal={handleOpenReasonsModal}
-                />
-              ))}
-            </div>
+            {isLoading ? (
+              <div className="section-card" role="status" aria-live="polite">
+                <p className="jobs-results__text">Loading jobs...</p>
+              </div>
+            ) : null}
+
+            {!isLoading && error ? (
+              <div className="section-card" role="alert" aria-live="polite">
+                <h3 className="jobs-results__title">Unable to load jobs</h3>
+                <p className="jobs-results__text" style={{ marginTop: "0.5rem" }}>
+                  {error}
+                </p>
+                <div style={{ marginTop: "1rem" }}>
+                  <button
+                    type="button"
+                    className="jobs-chip"
+                    onClick={retry}
+                  >
+                    Try again
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {!isLoading && !error && jobs.length === 0 ? (
+              <div className="section-card" aria-live="polite">
+                <h3 className="jobs-results__title">No jobs available yet</h3>
+                <p className="jobs-results__text" style={{ marginTop: "0.5rem" }}>
+                  There are no roles to show right now. Try refreshing in a bit
+                  or switch to mock mode while backend data is still being wired.
+                </p>
+              </div>
+            ) : null}
+
+            {!isLoading && !error && jobs.length > 0 ? (
+              <div className="jobs-list">
+                {jobs.map((job) => (
+                  <JobCard
+                    key={job.id}
+                    job={job}
+                    onOpenReasonsModal={handleOpenReasonsModal}
+                  />
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
       </section>

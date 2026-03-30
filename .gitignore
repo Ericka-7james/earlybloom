@@ -29,3 +29,6 @@ vite.config.ts.timestamp-*
 
 # Ignore accidental root lock file
 /package-lock.json
+
+__pycache__/
+*.pyc
