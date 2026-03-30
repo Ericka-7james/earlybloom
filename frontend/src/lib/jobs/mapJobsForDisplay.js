@@ -18,6 +18,27 @@ function formatCompensation(comp) {
   return null;
 }
 
+function buildCompensation(job) {
+  if (job.compensation) {
+    return job.compensation;
+  }
+
+  const salaryMinUsd = job.salaryMinUsd ?? job.salary_min ?? null;
+  const salaryMaxUsd = job.salaryMaxUsd ?? job.salary_max ?? null;
+  const currency = job.salaryCurrency ?? job.salary_currency ?? job.currency ?? "USD";
+
+  if (!salaryMinUsd && !salaryMaxUsd) {
+    return null;
+  }
+
+  return {
+    salaryMinUsd,
+    salaryMaxUsd,
+    currency,
+    salaryVisible: true,
+  };
+}
+
 function normalizeScoreBreakdown(breakdown) {
   if (!breakdown) return null;
 
@@ -39,66 +60,78 @@ function resolveLocation(job) {
 }
 
 function resolveWorkplaceType(job) {
-  return job.workplaceType ?? job.location?.workplaceType ?? null;
+  return (
+    job.workplaceType ??
+    job.workplace_type ??
+    job.remote_type ??
+    job.workplace ??
+    job.location?.workplaceType ??
+    null
+  );
+}
+
+function resolveEmploymentType(job) {
+  return job.employmentType ?? job.employment_type ?? null;
+}
+
+function resolveRoleType(job) {
+  return job.roleType ?? job.role_type ?? null;
 }
 
 function resolveFitTag(scored) {
-  return (
-    scored?.bloomVerdict ??
-    scored?.fitTag ??
-    "Too Senior"
-  );
+  return scored?.bloomVerdict ?? scored?.fitTag ?? "Too Senior";
 }
 
 function resolveMatchScore(scored) {
-  return (
-    scored?.bloomFitScore ??
-    scored?.matchScore ??
-    0
-  );
+  return scored?.bloomFitScore ?? scored?.matchScore ?? 0;
 }
 
 function resolveReasons(scored) {
-  return (
-    scored?.bloomReasons ??
-    scored?.reasons ??
-    []
-  );
+  return scored?.bloomReasons ?? scored?.reasons ?? [];
 }
 
 function resolveWarnings(raw, scored) {
   return scored?.warningFlags ?? raw?.warnings ?? [];
 }
 
+function resolveCompany(job) {
+  return job.company ?? job.company_name ?? "Unknown company";
+}
+
+function resolvePostedAt(job) {
+  return job.postedAt ?? job.posted_at ?? null;
+}
+
+function resolveSourceUrl(job) {
+  return job.sourceUrl ?? job.source_url ?? job.url ?? job.apply_url ?? null;
+}
+
 export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
-  const scoredMap = new Map(
-    scoredJobs.map((job) => [job.id, job])
-  );
+  const scoredMap = new Map(scoredJobs.map((job) => [job.id, job]));
 
   return rawJobs.map((job) => {
     const scored = scoredMap.get(job.id);
+    const compensation = buildCompensation(job);
 
     return {
       id: job.id,
       title: job.title ?? "Untitled role",
-      company: job.company ?? "Unknown company",
+      company: resolveCompany(job),
       location: resolveLocation(job),
       workplaceType: resolveWorkplaceType(job),
-      employmentType: job.employmentType ?? null,
-      roleType: job.roleType ?? null,
+      employmentType: resolveEmploymentType(job),
+      roleType: resolveRoleType(job),
       description: job.description ?? "",
       fitTag: resolveFitTag(scored),
       matchScore: resolveMatchScore(scored),
       reasons: resolveReasons(scored),
       warningFlags: resolveWarnings(job, scored),
-      scoreBreakdown: normalizeScoreBreakdown(
-        scored?.scoreBreakdown
-      ),
+      scoreBreakdown: normalizeScoreBreakdown(scored?.scoreBreakdown),
       confidence: scored?.confidence ?? null,
-      compensation: formatCompensation(job.compensation),
-      postedAt: job.postedAt ?? null,
-      source: job.source ?? null,
-      sourceUrl: job.sourceUrl ?? null,
+      compensation: formatCompensation(compensation),
+      postedAt: resolvePostedAt(job),
+      source: job.source ?? job.source_name ?? null,
+      sourceUrl: resolveSourceUrl(job),
     };
   });
 }
