@@ -8,8 +8,12 @@
     "build": "vite build",
     "lint": "eslint . --ignore-pattern coverage/** --ignore-pattern dist/**",
     "preview": "vite preview",
-    "test": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "vitest run",
+    "test:frontend:watch": "vitest",
+    "test:backend": "cd ../backend && pytest",
+    "test:coverage": "vitest run --coverage",
+    "check": "npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.1",
