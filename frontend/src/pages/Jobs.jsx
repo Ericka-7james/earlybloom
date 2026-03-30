@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import JobCard from "../components/jobs/JobCard.jsx";
 import CommonModal from "../components/common/CommonModal.jsx";
 import "../styles/components/jobs.css";
@@ -10,24 +10,16 @@ import scoreJobsForUser from "../lib/jobs/scoreJobsForUser";
 import mapJobsForDisplay from "../lib/jobs/mapJobsForDisplay";
 
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
+import BloomHire from "../assets/bloombug/BloomHire.png";
 
-/**
- * Defines the currently available filter groups.
- *
- * The UI is intentionally present but non-functional for now.
- * Keeping the structure separate makes it easier to attach state and query params later.
- */
 const FILTER_GROUPS = {
   workplace: ["Remote", "Onsite", "Hybrid"],
   roleType: ["Frontend", "Backend", "Full Stack", "Data", "Product"],
 };
 
-/**
- * Returns a CSS-safe modifier from the visible fit label.
- *
- * @param {string | null | undefined} fitTag Fit tag label.
- * @returns {string} CSS-safe modifier string.
- */
+const RESUME_STORAGE_KEY = "earlybloom_resume_upload";
+const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
+
 function getFitTagModifier(fitTag) {
   return String(fitTag || "")
     .trim()
@@ -35,47 +27,130 @@ function getFitTagModifier(fitTag) {
     .replace(/\s+/g, "-");
 }
 
-/**
- * Renders the jobs discovery page.
- *
- * @returns {JSX.Element} Jobs page UI.
- */
 function Jobs() {
   const [activeReasonsJob, setActiveReasonsJob] = useState(null);
+  const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
+  const [resumeError, setResumeError] = useState("");
+  const [resumeFile, setResumeFile] = useState(() => {
+    try {
+      const cachedResume = window.localStorage.getItem(RESUME_STORAGE_KEY);
+      return cachedResume ? JSON.parse(cachedResume) : null;
+    } catch {
+      return null;
+    }
+  });
 
-  /**
-   * Scores raw jobs against the current mock user profile.
-   */
+  const fileInputRef = useRef(null);
+
   const scoredJobs = useMemo(() => {
     return scoreJobsForUser(MOCK_RAW_JOBS, MOCK_USER_PROFILE);
   }, []);
 
-  /**
-   * Maps scored jobs into the display shape consumed by JobCard.
-   */
   const jobs = useMemo(() => {
     return mapJobsForDisplay(MOCK_RAW_JOBS, scoredJobs).sort(
       (a, b) => b.matchScore - a.matchScore
     );
   }, [scoredJobs]);
 
-  /**
-   * Opens the shared reasons modal for a given job.
-   *
-   * @param {Object} job Display-ready job.
-   * @returns {void}
-   */
+  useEffect(() => {
+    const wasDismissed =
+      window.sessionStorage.getItem(RESUME_MODAL_DISMISSED_KEY) === "true";
+
+    const hasCachedResume = Boolean(resumeFile);
+
+    /**
+     * Placeholder for future signed-in resume checks.
+     * Example later:
+     * const hasUploadedResume = Boolean(user?.resumeUrl);
+     */
+    const hasUploadedResume = false;
+
+    if (!hasCachedResume && !hasUploadedResume && !wasDismissed) {
+      setIsResumeModalOpen(true);
+    }
+  }, [resumeFile]);
+
   function handleOpenReasonsModal(job) {
     setActiveReasonsJob(job);
   }
 
-  /**
-   * Closes the shared reasons modal.
-   *
-   * @returns {void}
-   */
   function handleCloseReasonsModal() {
     setActiveReasonsJob(null);
+  }
+
+  function handleCloseResumeModal() {
+    setResumeError("");
+    setIsResumeModalOpen(false);
+    window.sessionStorage.setItem(RESUME_MODAL_DISMISSED_KEY, "true");
+  }
+
+  function isPdfFile(file) {
+    if (!file) {
+      return false;
+    }
+
+    const isPdfMimeType = file.type === "application/pdf";
+    const hasPdfExtension = file.name.toLowerCase().endsWith(".pdf");
+
+    return isPdfMimeType || hasPdfExtension;
+  }
+
+  function cacheResumeFile(file) {
+    const cachedResume = {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      uploadedAt: new Date().toISOString(),
+    };
+
+    setResumeFile(cachedResume);
+    window.localStorage.setItem(
+      RESUME_STORAGE_KEY,
+      JSON.stringify(cachedResume)
+    );
+
+    window.sessionStorage.setItem(RESUME_MODAL_DISMISSED_KEY, "true");
+    setIsResumeModalOpen(false);
+  }
+
+  function handleResumeFileChange(event) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    if (!isPdfFile(file)) {
+      setResumeError("Please upload a PDF resume.");
+      event.target.value = "";
+      return;
+    }
+
+    setResumeError("");
+    cacheResumeFile(file);
+    event.target.value = "";
+  }
+
+  function handleResumeDrop(event) {
+    event.preventDefault();
+
+    const file = event.dataTransfer.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    if (!isPdfFile(file)) {
+      setResumeError("Please upload a PDF resume.");
+      return;
+    }
+
+    setResumeError("");
+    cacheResumeFile(file);
+  }
+
+  function handleResumeDragOver(event) {
+    event.preventDefault();
   }
 
   return (
@@ -229,6 +304,52 @@ function Jobs() {
             ) : null}
           </div>
         ) : null}
+      </CommonModal>
+
+      <CommonModal
+        isOpen={isResumeModalOpen}
+        title="Upload your resume"
+        onClose={handleCloseResumeModal}
+        size="sm"
+        iconImage={BloomHire}
+        iconAlt="EarlyBloom resume upload icon"
+      >
+        <div className="resume-upload-modal">
+          <p className="resume-upload-modal__text">
+            Upload your resume to personalize your job matches.
+          </p>
+
+          <button
+            type="button"
+            className="resume-upload-dropzone"
+            onClick={() => fileInputRef.current?.click()}
+            onDrop={handleResumeDrop}
+            onDragOver={handleResumeDragOver}
+          >
+            <span className="resume-upload-dropzone__label">Upload file</span>
+            <span className="resume-upload-dropzone__hint">PDF only</span>
+          </button>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            className="resume-upload-modal__input"
+            onChange={handleResumeFileChange}
+          />
+
+          {resumeError ? (
+            <p className="resume-upload-modal__error" role="alert">
+              {resumeError}
+            </p>
+          ) : null}
+
+          {resumeFile ? (
+            <p className="resume-upload-modal__success" aria-live="polite">
+              Cached resume: {resumeFile.name}
+            </p>
+          ) : null}
+        </div>
       </CommonModal>
     </main>
   );
