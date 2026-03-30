@@ -9,7 +9,9 @@ import {
   buildResumeUiCache,
   cacheResumeUiState,
   parseResumeRecord,
-} from "../../lib/resumes";
+  getOptionalSession,
+  cacheResumeRawText,
+} from "../../lib/resumes.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -68,6 +70,23 @@ function ResumeUploadModal({
         throw new Error("No extractable text found in PDF.");
       }
 
+      const session = await getOptionalSession();
+
+      if (!session) {
+        const cachedResume = buildResumeUiCache(file, {
+          id: null,
+          parse_status: "local_only",
+          isLocalOnly: true,
+        });
+
+        cacheResumeUiState(cachedResume);
+        cacheResumeRawText(rawText);
+
+        setResumeError("");
+        onResumeSaved?.(cachedResume);
+        return;
+      }
+
       const savedResume = await saveResumeRecord({
         originalFilename: file.name,
         fileSizeBytes: file.size,
@@ -96,7 +115,8 @@ function ResumeUploadModal({
     } catch (error) {
       console.error("Failed to save or parse resume:", error);
       setResumeError(
-        "We couldn't process your resume right now. Please try another PDF."
+        error?.message ||
+          "We couldn't process your resume right now. Please try again."
       );
     } finally {
       setIsSavingResume(false);
