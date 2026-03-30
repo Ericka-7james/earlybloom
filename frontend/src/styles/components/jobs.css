@@ -389,15 +389,13 @@
 .common-modal__title-wrap {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
-  min-width: 0;
+  gap: 0.75rem;
 }
 
 .common-modal__icon-image {
-  width: 1.4rem;
-  height: 1.4rem;
+  width: 48px;
+  height: 48px;
   object-fit: contain;
-  flex-shrink: 0;
 }
 
 .common-modal__title {
@@ -531,6 +529,64 @@
   display: inline-flex;
   align-items: center;
   width: fit-content;
+}
+
+.resume-upload-modal {
+  display: grid;
+  gap: 1rem;
+}
+
+.resume-upload-modal__text {
+  margin: 0;
+  color: var(--muted-text-color, #58627a);
+}
+
+.resume-upload-dropzone {
+  width: 100%;
+  min-height: 180px;
+  border: 2px dashed var(--border-color, #d7dce5);
+  border-radius: 1rem;
+  background: #fafbff;
+  padding: 1.5rem;
+  display: grid;
+  place-items: center;
+  gap: 0.4rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease,
+    transform 0.18s ease;
+}
+
+.resume-upload-dropzone:hover {
+  border-color: var(--brand-color, #7c5cff);
+  background: #f7f5ff;
+  transform: translateY(-1px);
+}
+
+.resume-upload-dropzone__label {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.resume-upload-dropzone__hint {
+  font-size: 0.95rem;
+  color: var(--muted-text-color, #58627a);
+}
+
+.resume-upload-modal__input {
+  display: none;
+}
+
+.resume-upload-modal__error {
+  margin: 0;
+  color: #b42318;
+  font-weight: 600;
+}
+
+.resume-upload-modal__success {
+  margin: 0;
+  color: #067647;
+  font-weight: 600;
 }
 
 @media (min-width: 640px) {
