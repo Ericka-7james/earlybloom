@@ -1,0 +1,16 @@
+cd frontend || exit 1
+
+echo "🧹 Verifying clean install..."
+rm -rf node_modules
+npm ci || exit 1
+
+echo "🔍 Running lint..."
+npm run lint || exit 1
+
+echo "🧪 Running tests..."
+npm run test:coverage || exit 1
+
+echo "🏗️ Running build..."
+npm run build || exit 1
+
+echo "✅ All checks passed. Proceeding with push."
