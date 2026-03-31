@@ -9,11 +9,11 @@ from app.core.config import settings
 
 
 SUPABASE_URL = (settings.SUPABASE_URL or "").strip()
-SUPABASE_SERVICE_ROLE_KEY = (settings.SUPABASE_SERVICE_ROLE_KEY or "").strip()
+SUPABASE_SECRET_KEY = (settings.SUPABASE_SECRET_KEY or "").strip()
 
-if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+if not SUPABASE_URL or not SUPABASE_SECRET_KEY:
     raise RuntimeError(
-        "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for backend database access."
+        "Missing SUPABASE_URL or SUPABASE_SECRET_KEY for backend database access."
     )
 
 _supabase_admin: Client | None = None
@@ -23,7 +23,7 @@ def get_supabase_admin() -> Client:
     global _supabase_admin
 
     if _supabase_admin is None:
-      _supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+      _supabase_admin = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
 
     return _supabase_admin
 

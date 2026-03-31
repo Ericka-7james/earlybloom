@@ -10,8 +10,16 @@ load_dotenv(BASE_DIR / ".env")
 
 
 class Settings:
+    # -----------------------------
+    # Supabase
+    # -----------------------------
     SUPABASE_URL: str | None = os.getenv("SUPABASE_URL")
-    SUPABASE_SERVICE_ROLE_KEY: str | None = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    SUPABASE_SECRET_KEY: str | None = os.getenv("SUPABASE_SECRET_KEY")
+    SUPABASE_PUBLISHABLE_KEY: str | None = os.getenv("SUPABASE_PUBLISHABLE_KEY")
+
+    # -----------------------------
+    # App behavior
+    # -----------------------------
     JOB_DATA_MODE: str = os.getenv("JOB_DATA_MODE", "mock").strip().lower()
 
 
