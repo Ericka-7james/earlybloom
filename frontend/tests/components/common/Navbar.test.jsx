@@ -1,8 +1,25 @@
 import React from "react";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import Navbar from "../../../src/components/Navbar";
+
+const mockNavigate = vi.fn();
+const mockHandleSignOut = vi.fn();
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual("react-router-dom");
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
+vi.mock("../../../src/hooks/useAuth", () => ({
+  useAuth: vi.fn(),
+}));
+
+import { useAuth } from "../../../src/hooks/useAuth";
 
 describe("Navbar", () => {
   function renderWithRouter() {
@@ -13,16 +30,26 @@ describe("Navbar", () => {
     );
   }
 
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    useAuth.mockReturnValue({
+      user: null,
+      loading: false,
+      handleSignOut: mockHandleSignOut,
+    });
+  });
+
   it("renders brand icon and text", () => {
     renderWithRouter();
 
     expect(
-      screen.getByAltText("Bloombug EarlyBloom mascot icon")
+      screen.getByAltText("EarlyBloom Bloombug icon")
     ).toBeInTheDocument();
 
     expect(screen.getByText("EarlyBloom")).toBeInTheDocument();
     expect(
-      screen.getByText("Real roles for early careers")
+      screen.getByText("Grow into the right role")
     ).toBeInTheDocument();
   });
 
@@ -36,12 +63,13 @@ describe("Navbar", () => {
     expect(brandLink).toHaveAttribute("href", "/");
   });
 
-  it("renders navigation links", () => {
+  it("renders public navigation links when signed out", () => {
     renderWithRouter();
 
-    expect(screen.getByText("How It Works")).toBeInTheDocument();
-    expect(screen.getByText("Jobs")).toBeInTheDocument();
-    expect(screen.getByText("Tools")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Jobs" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sign in" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sign up" })).toBeInTheDocument();
   });
 
   it("jobs link points to /jobs route", () => {
@@ -52,18 +80,38 @@ describe("Navbar", () => {
     expect(jobsLink).toHaveAttribute("href", "/jobs");
   });
 
-  it("renders anchor links for sections", () => {
+  it("renders authenticated navigation when user is signed in", () => {
+    useAuth.mockReturnValue({
+      user: { email: "test@example.com" },
+      loading: false,
+      handleSignOut: mockHandleSignOut,
+    });
+
     renderWithRouter();
 
-    const missionLink = screen.getByRole("link", {
-      name: "How It Works",
+    expect(screen.getByText("test@example.com")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Sign out" })
+    ).toBeInTheDocument();
+
+    expect(screen.queryByRole("link", { name: "Sign in" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Sign up" })).not.toBeInTheDocument();
+  });
+
+  it("hides auth actions while loading", () => {
+    useAuth.mockReturnValue({
+      user: null,
+      loading: true,
+      handleSignOut: mockHandleSignOut,
     });
 
-    const toolsLink = screen.getByRole("link", {
-      name: "Tools",
-    });
+    renderWithRouter();
 
-    expect(missionLink).toHaveAttribute("href", "#mission");
-    expect(toolsLink).toHaveAttribute("href", "#future-tools");
+    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Jobs" })).toBeInTheDocument();
+
+    expect(screen.queryByRole("link", { name: "Sign in" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Sign up" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
   });
 });
