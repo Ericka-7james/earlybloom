@@ -29,7 +29,7 @@ function validatePassword(password) {
     return "Include at least one number.";
   }
 
-  if (!/[!@#$%^&*(),.?\":{}|<>]/.test(password)) {
+  if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
     return "Include at least one special character.";
   }
 

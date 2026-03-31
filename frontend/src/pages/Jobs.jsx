@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import JobCard from "../components/jobs/JobCard.jsx";
 import ResumeUploadModal from "../components/jobs/ResumeUploadModal.jsx";
 import CommonModal from "../components/common/CommonModal.jsx";
@@ -31,30 +31,25 @@ function getFitTagModifier(fitTag) {
 function Jobs() {
   const [activeReasonsJob, setActiveReasonsJob] = useState(null);
   const [resumeFile, setResumeFile] = useState(() => readCachedResumeUiState());
-  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(false);
+
+  const hasUploadedResume = false;
+  const hasCachedResume = Boolean(readCachedResumeUiState());
+  const wasDismissed =
+    window.sessionStorage.getItem(RESUME_MODAL_DISMISSED_KEY) === "true";
+  const welcomePending =
+    window.sessionStorage.getItem(WELCOME_MODAL_PENDING_KEY) === "true";
+
+  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(
+    welcomePending && !hasCachedResume && !hasUploadedResume
+  );
 
   const { jobs: rawJobs, isLoading, error, isMockMode, retry } = useJobs();
 
-  const wasDismissed =
-    window.sessionStorage.getItem(RESUME_MODAL_DISMISSED_KEY) === "true";
-  const hasCachedResume = Boolean(resumeFile);
-
-  const hasUploadedResume = false;
+  const hasResumeCachedNow = Boolean(resumeFile);
 
   const [isResumeModalOpen, setIsResumeModalOpen] = useState(
-    !hasCachedResume && !hasUploadedResume && !wasDismissed
+    !hasResumeCachedNow && !hasUploadedResume && !wasDismissed
   );
-
-  useEffect(() => {
-    const welcomePending =
-      window.sessionStorage.getItem(WELCOME_MODAL_PENDING_KEY) === "true";
-
-    if (welcomePending && !hasCachedResume && !hasUploadedResume) {
-      setIsWelcomeModalOpen(true);
-    } else {
-      setIsWelcomeModalOpen(false);
-    }
-  }, [hasCachedResume, hasUploadedResume]);
 
   const scoredJobs = useMemo(() => {
     return scoreJobsForUser(rawJobs, MOCK_USER_PROFILE);
@@ -216,7 +211,10 @@ function Jobs() {
             {!isLoading && error ? (
               <div className="section-card" role="alert" aria-live="polite">
                 <h3 className="jobs-results__title">Unable to load jobs</h3>
-                <p className="jobs-results__text" style={{ marginTop: "0.5rem" }}>
+                <p
+                  className="jobs-results__text"
+                  style={{ marginTop: "0.5rem" }}
+                >
                   {error}
                 </p>
                 <div style={{ marginTop: "1rem" }}>
@@ -234,7 +232,10 @@ function Jobs() {
             {!isLoading && !error && jobs.length === 0 ? (
               <div className="section-card" aria-live="polite">
                 <h3 className="jobs-results__title">No jobs available yet</h3>
-                <p className="jobs-results__text" style={{ marginTop: "0.5rem" }}>
+                <p
+                  className="jobs-results__text"
+                  style={{ marginTop: "0.5rem" }}
+                >
                   There are no roles to show right now. Try refreshing in a bit
                   or switch to mock mode while backend data is still being wired.
                 </p>
@@ -280,7 +281,14 @@ function Jobs() {
             </p>
           </div>
 
-          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginTop: "1rem" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "0.75rem",
+              flexWrap: "wrap",
+              marginTop: "1rem",
+            }}
+          >
             <button
               type="button"
               className="button button--primary"
