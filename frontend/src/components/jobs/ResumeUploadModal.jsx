@@ -1,6 +1,5 @@
 import React, { useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 import CommonModal from "../common/CommonModal.jsx";
 import BloomHire from "../../assets/bloombug/BloomHire.png";
@@ -13,7 +12,10 @@ import {
   cacheResumeRawText,
 } from "../../lib/resumes.js";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url
+).toString();
 
 function isPdfFile(file) {
   if (!file) {
