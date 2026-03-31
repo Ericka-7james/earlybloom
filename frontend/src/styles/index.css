@@ -152,6 +152,9 @@ button {
   justify-content: space-between;
   gap: 1rem;
   min-height: 76px;
+  flex-wrap: wrap;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
 }
 
 .brand {
@@ -188,9 +191,12 @@ button {
 }
 
 .nav-links {
-  display: none;
+  display: flex;
   align-items: center;
   gap: 1rem;
+  width: 100%;
+  flex-wrap: nowrap;
+  justify-content: center;
 }
 
 .nav-link {
@@ -198,6 +204,7 @@ button {
   border-radius: 999px;
   color: var(--color-text-soft);
   transition: background-color 180ms ease, color 180ms ease, transform 180ms ease;
+  white-space: nowrap;
 }
 
 .nav-link:hover {
@@ -452,6 +459,13 @@ button {
 
 /* Responsive */
 
+/* Hide "Sign up" on smaller screens */
+@media (max-width: 520px) {
+  .nav-links .nav-link:last-child {
+    display: none;
+  }
+}
+
 @media (min-width: 640px) {
   .container {
     width: min(calc(100% - 2.5rem), var(--container-width));
@@ -477,7 +491,15 @@ button {
 }
 
 @media (min-width: 860px) {
+  .navbar {
+    flex-wrap: nowrap;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
   .nav-links {
+    width: auto;
+    flex-wrap: nowrap;
     display: inline-flex;
   }
 
