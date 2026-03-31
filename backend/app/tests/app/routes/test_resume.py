@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import importlib
 from types import SimpleNamespace
 
 import pytest
 
-from app.api.routes import resume as resume_routes
+resume_routes = importlib.import_module("app.api.routes.resume")
 
 
 class FakeResponseModel:
