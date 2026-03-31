@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import JobCard from "../components/jobs/JobCard.jsx";
 import ResumeUploadModal from "../components/jobs/ResumeUploadModal.jsx";
 import CommonModal from "../components/common/CommonModal.jsx";
@@ -19,6 +19,7 @@ const FILTER_GROUPS = {
 };
 
 const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
+const WELCOME_MODAL_PENDING_KEY = "earlybloom_welcome_modal_pending";
 
 function getFitTagModifier(fitTag) {
   return String(fitTag || "")
@@ -30,6 +31,7 @@ function getFitTagModifier(fitTag) {
 function Jobs() {
   const [activeReasonsJob, setActiveReasonsJob] = useState(null);
   const [resumeFile, setResumeFile] = useState(() => readCachedResumeUiState());
+  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(false);
 
   const { jobs: rawJobs, isLoading, error, isMockMode, retry } = useJobs();
 
@@ -42,6 +44,17 @@ function Jobs() {
   const [isResumeModalOpen, setIsResumeModalOpen] = useState(
     !hasCachedResume && !hasUploadedResume && !wasDismissed
   );
+
+  useEffect(() => {
+    const welcomePending =
+      window.sessionStorage.getItem(WELCOME_MODAL_PENDING_KEY) === "true";
+
+    if (welcomePending && !hasCachedResume && !hasUploadedResume) {
+      setIsWelcomeModalOpen(true);
+    } else {
+      setIsWelcomeModalOpen(false);
+    }
+  }, [hasCachedResume, hasUploadedResume]);
 
   const scoredJobs = useMemo(() => {
     return scoreJobsForUser(rawJobs, MOCK_USER_PROFILE);
@@ -69,6 +82,19 @@ function Jobs() {
   function handleResumeSaved(savedResumeUiState) {
     setResumeFile(savedResumeUiState);
     setIsResumeModalOpen(false);
+    setIsWelcomeModalOpen(false);
+    window.sessionStorage.removeItem(WELCOME_MODAL_PENDING_KEY);
+  }
+
+  function handleCloseWelcomeModal() {
+    setIsWelcomeModalOpen(false);
+    window.sessionStorage.removeItem(WELCOME_MODAL_PENDING_KEY);
+  }
+
+  function handleOpenResumeFromWelcome() {
+    setIsWelcomeModalOpen(false);
+    setIsResumeModalOpen(true);
+    window.sessionStorage.removeItem(WELCOME_MODAL_PENDING_KEY);
   }
 
   return (
@@ -229,6 +255,50 @@ function Jobs() {
           </div>
         </div>
       </section>
+
+      <CommonModal
+        isOpen={isWelcomeModalOpen}
+        title="Welcome to EarlyBloom"
+        onClose={handleCloseWelcomeModal}
+        size="md"
+        iconImage={BloombugAppIcon}
+        iconAlt="EarlyBloom Bloombug icon"
+      >
+        <div className="jobs-reasons-modal">
+          <div className="jobs-reasons-modal__intro">
+            <p className="jobs-reasons-modal__job-meta">
+              You’re in 🌱 Let’s get your setup started.
+            </p>
+
+            <h3 className="jobs-reasons-modal__job-title">
+              Upload your resume to make your search feel more tailored.
+            </h3>
+
+            <p className="jobs-results__text" style={{ marginTop: "0.5rem" }}>
+              You can skip it for now, but adding your resume helps EarlyBloom
+              organize your experience and shape the flow around you.
+            </p>
+          </div>
+
+          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginTop: "1rem" }}>
+            <button
+              type="button"
+              className="button button--primary"
+              onClick={handleOpenResumeFromWelcome}
+            >
+              Upload resume
+            </button>
+
+            <button
+              type="button"
+              className="jobs-chip"
+              onClick={handleCloseWelcomeModal}
+            >
+              Maybe later
+            </button>
+          </div>
+        </div>
+      </CommonModal>
 
       <CommonModal
         isOpen={Boolean(activeReasonsJob)}
