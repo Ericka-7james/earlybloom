@@ -7,7 +7,7 @@
     "prepare": "husky",
     "dev": "vite",
     "build": "vite build",
-    "lint": "eslint . --ignore-pattern coverage/** --ignore-pattern dist/**",
+    "lint": "eslint .",
     "preview": "vite preview",
     "test": "npm run test:frontend && npm run test:backend",
     "test:frontend": "vitest run",
