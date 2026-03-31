@@ -1,4 +1,16 @@
-# Node
+# -----------------------------
+# 🔐 Environment / Secrets
+# -----------------------------
+.env
+.env.*
+*.env
+*.env.*
+backend/.env
+frontend/.env
+
+# -----------------------------
+# 🟢 Node / Frontend
+# -----------------------------
 node_modules/
 npm-debug.log*
 yarn-debug.log*
@@ -8,27 +20,44 @@ yarn-error.log*
 dist/
 coverage/
 
-# Env files
-.env
-.env.local
-.env.*.local
-
-# OS junk
-.DS_Store
-Thumbs.db
-
-# IDE
-.vscode/
-.idea/
-
-# Logs
-*.log
-
 # Vite
 vite.config.ts.timestamp-*
 
 # Ignore accidental root lock file
 /package-lock.json
 
+# -----------------------------
+# 🐍 Python / Backend
+# -----------------------------
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# -----------------------------
+# 💻 IDE / Editor
+# -----------------------------
+.vscode/
+.idea/
+
+# -----------------------------
+# 🧾 Logs
+# -----------------------------
+*.log
+
+# -----------------------------
+# 🗂 OS junk
+# -----------------------------
+.DS_Store
+Thumbs.db
+
+# -----------------------------
+# 🔒 Optional: local test artifacts
+# -----------------------------
+*.sqlite3
+*.db
