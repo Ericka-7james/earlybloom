@@ -1,12 +1,25 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
+import { useAuth } from "../hooks/useAuth";
 
 /**
  * Renders the shared site navigation.
  *
+ * Now session-aware:
+ * - Shows auth actions based on login state
+ * - Uses backend session (secure cookies)
+ *
  * @returns {JSX.Element} Top navigation bar.
  */
 function Navbar() {
+  const navigate = useNavigate();
+  const { user, loading, handleSignOut } = useAuth();
+
+  async function onSignOut() {
+    await handleSignOut();
+    navigate("/"); // clean redirect
+  }
+
   return (
     <header className="site-header">
       <div className="container navbar">
@@ -26,15 +39,35 @@ function Navbar() {
           <Link to="/" className="nav-link">
             Home
           </Link>
+
           <Link to="/jobs" className="nav-link">
             Jobs
           </Link>
-          <Link to="/sign-in" className="nav-link">
-            Sign in
-          </Link>
-          <Link to="/sign-up" className="nav-link">
-            Sign up
-          </Link>
+
+          {loading ? null : user ? (
+            <>
+              <span className="nav-link nav-link--muted">
+                {user.email}
+              </span>
+
+              <button
+                type="button"
+                className="nav-link nav-link--button"
+                onClick={onSignOut}
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <>
+              <Link to="/sign-in" className="nav-link">
+                Sign in
+              </Link>
+              <Link to="/sign-up" className="nav-link">
+                Sign up
+              </Link>
+            </>
+          )}
         </nav>
       </div>
     </header>

@@ -207,6 +207,19 @@ button {
   white-space: nowrap;
 }
 
+.nav-link--button {
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+}
+
+.nav-link--muted {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
 .nav-link:hover {
   background: rgba(255, 255, 255, 0.7);
   color: var(--color-heading);

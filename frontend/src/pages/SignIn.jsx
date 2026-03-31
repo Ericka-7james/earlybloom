@@ -4,6 +4,8 @@ import "../styles/components/auth.css";
 import { signIn } from "../lib/auth/authApi";
 import PetalloMascot from "../assets/bloombug/bloombugFam/Petaloo.png";
 
+const WELCOME_MODAL_PENDING_KEY = "earlybloom_welcome_modal_pending";
+
 function SignIn() {
   const navigate = useNavigate();
 
@@ -30,6 +32,8 @@ function SignIn() {
         email: form.email.trim(),
         password: form.password,
       });
+
+      window.sessionStorage.setItem(WELCOME_MODAL_PENDING_KEY, "true");
       navigate("/jobs");
     } catch (submitError) {
       setError(submitError.message || "Login failed.");
