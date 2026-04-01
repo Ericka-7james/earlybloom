@@ -12,15 +12,29 @@ from app.schemas.resume import (
     ResumeRecordResponse,
 )
 from app.services.parser import parse_resume_text
+from app.services.resumes.ats_tags import extract_ats_tags
 
 router = APIRouter(prefix="/resume", tags=["resume"])
 
 
 def get_current_user_id(authorization: Optional[str] = Header(default=None)) -> str:
+    """Resolve the authenticated user ID from the bearer token.
+
+    Args:
+        authorization: Authorization header value.
+
+    Returns:
+        Authenticated user ID.
+    """
     return get_user_id_from_bearer_token(authorization)
 
 
 def get_resume_repository() -> ResumeRepository:
+    """Create a resume repository instance.
+
+    Returns:
+        Resume repository.
+    """
     return ResumeRepository()
 
 
@@ -30,6 +44,16 @@ def get_resume(
     user_id: str = Depends(get_current_user_id),
     repository: ResumeRepository = Depends(get_resume_repository),
 ) -> ResumeRecordResponse:
+    """Fetch a single stored resume for the authenticated user.
+
+    Args:
+        resume_id: Resume record ID.
+        user_id: Authenticated user ID.
+        repository: Resume repository.
+
+    Returns:
+        Stored resume record.
+    """
     record = repository.get_resume_for_user(resume_id=resume_id, user_id=user_id)
     return ResumeRecordResponse(**record)
 
@@ -40,6 +64,16 @@ def get_resume_logs(
     user_id: str = Depends(get_current_user_id),
     repository: ResumeRepository = Depends(get_resume_repository),
 ) -> list[ResumeLogResponse]:
+    """Fetch processing logs for a stored resume.
+
+    Args:
+        resume_id: Resume record ID.
+        user_id: Authenticated user ID.
+        repository: Resume repository.
+
+    Returns:
+        Resume log entries.
+    """
     repository.get_resume_for_user(resume_id=resume_id, user_id=user_id)
     logs = repository.list_resume_logs(resume_id=resume_id, user_id=user_id)
     return [ResumeLogResponse(**log) for log in logs]
@@ -52,6 +86,17 @@ def parse_resume(
     user_id: str = Depends(get_current_user_id),
     repository: ResumeRepository = Depends(get_resume_repository),
 ) -> ParseResumeResponse:
+    """Parse extracted resume text and persist the result.
+
+    Args:
+        resume_id: Resume record ID.
+        payload: Resume parse request.
+        user_id: Authenticated user ID.
+        repository: Resume repository.
+
+    Returns:
+        Parse response including parsed JSON, warnings, and ATS tags.
+    """
     repository.get_resume_for_user(resume_id=resume_id, user_id=user_id)
 
     repository.create_resume_log(
@@ -72,6 +117,8 @@ def parse_resume(
         extraction_method=payload.extraction_method,
     )
 
+    ats_tags = extract_ats_tags(parsed_json)
+
     updated_record = repository.update_resume_parse_result(
         resume_id=resume_id,
         user_id=user_id,
@@ -80,6 +127,7 @@ def parse_resume(
         parsed_json=parsed_json,
         parse_warnings=warnings,
         latest_error=None,
+        ats_tags=ats_tags,
     )
 
     repository.create_resume_log(
@@ -91,6 +139,7 @@ def parse_resume(
         metadata={
             "warning_count": len(warnings),
             "confidence": parsed_json.get("meta", {}).get("confidence"),
+            "ats_tag_count": len(ats_tags),
         },
     )
 
@@ -100,4 +149,5 @@ def parse_resume(
         warnings=warnings,
         parsed_json=parsed_json,
         raw_text_preview=payload.raw_text[:280],
+        ats_tags=ats_tags,
     )
