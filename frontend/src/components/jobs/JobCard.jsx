@@ -102,6 +102,35 @@ function getPreviewText(value, maxLength = 140) {
 }
 
 /**
+ * Formats experience level for display.
+ *
+ * @param {string | null | undefined} experienceLevel Raw level value.
+ * @returns {string | null} Display-ready level label.
+ */
+function formatExperienceLevel(experienceLevel) {
+  const normalized = String(experienceLevel || "")
+    .trim()
+    .toLowerCase();
+
+  switch (normalized) {
+    case "entry-level":
+      return "Entry-level";
+    case "junior":
+      return "Junior";
+    case "mid":
+    case "mid-level":
+      return "Mid-level";
+    case "senior":
+      return "Senior";
+    case "unknown":
+    case "":
+      return "Unknown";
+    default:
+      return experienceLevel || null;
+  }
+}
+
+/**
  * Builds compact metadata pills for the card.
  *
  * @param {Object} params Metadata candidates.
@@ -111,7 +140,11 @@ function getPreviewText(value, maxLength = 140) {
  * @returns {string[]} Display-ready compact metadata.
  */
 function getCompactMeta({ location, experienceLevel, sourceLabel }) {
-  return [location, experienceLevel, sourceLabel ? `Source: ${sourceLabel}` : null]
+  return [
+    location,
+    formatExperienceLevel(experienceLevel),
+    sourceLabel ? `Source: ${sourceLabel}` : null,
+  ]
     .filter((value) => typeof value === "string" && value.trim().length > 0)
     .slice(0, 3);
 }
@@ -126,32 +159,33 @@ function getCompactMeta({ location, experienceLevel, sourceLabel }) {
  *     company?: string,
  *     location?: string,
  *     experienceLevel?: string | null,
+ *     experience_level?: string | null,
  *     summary?: string | null,
  *     fitTag?: "Real Junior" | "Stretch Role" | "Too Senior" | "Misleading Junior",
  *     matchScore?: number,
  *     reasons?: string[],
  *     warningFlags?: string[],
  *     source?: string | null,
- *     sourceUrl?: string | null
+ *     sourceUrl?: string | null,
+ *     url?: string | null
  *   },
  *   onOpenReasonsModal?: (job: Object) => void
  * }} props
  * @returns {JSX.Element} Job card.
  */
 function JobCard({ job, onOpenReasonsModal }) {
-  const {
-    id,
-    title = "Untitled role",
-    company = "Unknown company",
-    location = "Location not listed",
-    experienceLevel = "unknown",
-    summary = "",
-    fitTag,
-    matchScore,
-    reasons = [],
-    warningFlags = [],
-    source = null,
-  } = job;
+  const id = job.id;
+  const title = job.title || "Untitled role";
+  const company = job.company || "Unknown company";
+  const location = job.location || "Location not listed";
+  const experienceLevel =
+    job.experienceLevel || job.experience_level || "unknown";
+  const summary = job.summary || "";
+  const fitTag = job.fitTag;
+  const matchScore = job.matchScore;
+  const reasons = Array.isArray(job.reasons) ? job.reasons : [];
+  const warningFlags = Array.isArray(job.warningFlags) ? job.warningFlags : [];
+  const source = job.source || null;
 
   const safeFitTag = getSafeFitTag(fitTag);
   const safeMatchScore = getSafeMatchScore(matchScore);
@@ -164,10 +198,10 @@ function JobCard({ job, onOpenReasonsModal }) {
   });
 
   const reasonPreview =
-    Array.isArray(reasons) && reasons.length > 0 ? getPreviewText(reasons[0], 120) : "";
+    reasons.length > 0 ? getPreviewText(reasons[0], 120) : "";
 
   const summaryPreview = getPreviewText(summary, 150);
-  const hasWarningFlags = Array.isArray(warningFlags) && warningFlags.length > 0;
+  const hasWarningFlags = warningFlags.length > 0;
 
   const canOpenModal = typeof onOpenReasonsModal === "function";
 
