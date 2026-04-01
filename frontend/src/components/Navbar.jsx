@@ -17,7 +17,7 @@ function Navbar() {
 
   async function onSignOut() {
     await handleSignOut();
-    navigate("/"); // clean redirect
+    navigate("/");
   }
 
   return (
@@ -46,7 +46,10 @@ function Navbar() {
 
           {loading ? null : user ? (
             <>
-              <span className="nav-link nav-link--muted">
+              <span
+                className="nav-link nav-link--muted nav-link--email"
+                title={user.email}
+              >
                 {user.email}
               </span>
 

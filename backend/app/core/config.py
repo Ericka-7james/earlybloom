@@ -1,12 +1,13 @@
-from __future__ import annotations
+"""
+Central application settings for EarlyBloom job ingestion.
 
-import os
-from pathlib import Path
+This config is designed for lightweight, serverless-friendly ingestion on Vercel.
+"""
 
-from dotenv import load_dotenv
+from functools import lru_cache
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-load_dotenv(BASE_DIR / ".env")
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings:
@@ -23,4 +24,7 @@ class Settings:
     JOB_DATA_MODE: str = os.getenv("JOB_DATA_MODE", "mock").strip().lower()
 
 
-settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    """Return cached settings instance."""
+    return Settings()

@@ -25,7 +25,8 @@ function buildCompensation(job) {
 
   const salaryMinUsd = job.salaryMinUsd ?? job.salary_min ?? null;
   const salaryMaxUsd = job.salaryMaxUsd ?? job.salary_max ?? null;
-  const currency = job.salaryCurrency ?? job.salary_currency ?? job.currency ?? "USD";
+  const currency =
+    job.salaryCurrency ?? job.salary_currency ?? job.currency ?? "USD";
 
   if (!salaryMinUsd && !salaryMaxUsd) {
     return null;
@@ -63,6 +64,7 @@ function resolveWorkplaceType(job) {
   return (
     job.workplaceType ??
     job.workplace_type ??
+    job.remoteType ??
     job.remote_type ??
     job.workplace ??
     job.location?.workplaceType ??
@@ -76,6 +78,15 @@ function resolveEmploymentType(job) {
 
 function resolveRoleType(job) {
   return job.roleType ?? job.role_type ?? null;
+}
+
+function resolveExperienceLevel(job) {
+  return (
+    job.experienceLevel ??
+    job.experience_level ??
+    job.level ??
+    null
+  );
 }
 
 function resolveFitTag(scored) {
@@ -106,12 +117,26 @@ function resolveSourceUrl(job) {
   return job.sourceUrl ?? job.source_url ?? job.url ?? job.apply_url ?? null;
 }
 
+function resolveSummary(job) {
+  return job.summary ?? job.short_summary ?? "";
+}
+
+function resolveRemote(job) {
+  if (typeof job.remote === "boolean") {
+    return job.remote;
+  }
+
+  const remoteType = resolveWorkplaceType(job);
+  return remoteType === "remote";
+}
+
 export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
   const scoredMap = new Map(scoredJobs.map((job) => [job.id, job]));
 
   return rawJobs.map((job) => {
     const scored = scoredMap.get(job.id);
     const compensation = buildCompensation(job);
+    const sourceUrl = resolveSourceUrl(job);
 
     return {
       id: job.id,
@@ -119,9 +144,13 @@ export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
       company: resolveCompany(job),
       location: resolveLocation(job),
       workplaceType: resolveWorkplaceType(job),
+      remoteType: resolveWorkplaceType(job),
+      remote: resolveRemote(job),
       employmentType: resolveEmploymentType(job),
       roleType: resolveRoleType(job),
+      experienceLevel: resolveExperienceLevel(job),
       description: job.description ?? "",
+      summary: resolveSummary(job),
       fitTag: resolveFitTag(scored),
       matchScore: resolveMatchScore(scored),
       reasons: resolveReasons(scored),
@@ -131,7 +160,8 @@ export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
       compensation: formatCompensation(compensation),
       postedAt: resolvePostedAt(job),
       source: job.source ?? job.source_name ?? null,
-      sourceUrl: resolveSourceUrl(job),
+      sourceUrl,
+      url: sourceUrl,
     };
   });
 }
