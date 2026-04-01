@@ -1,14 +1,21 @@
-"""
-USAJOBS job provider.
+"""USAJOBS job provider.
 
-Fetches and normalizes job listings from the USAJOBS Search API.
+This module fetches and lightly normalizes job listings from the USAJOBS Search
+API before they enter the shared EarlyBloom normalization pipeline.
+
+Current strategy:
+- Use USAJOBS as the primary and only live source
+- Support pagination so the feed is not limited to a single page
+- Preserve a focused first-round search configuration
+- Produce a clean provider-specific shape for the shared normalizer
+
 USAJOBS requires Host, User-Agent, and Authorization-Key headers.
 """
 
 from __future__ import annotations
 
 import os
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 import requests
 
@@ -22,11 +29,13 @@ USAJOBS_BASE_URL = os.getenv(
 
 
 def fetch_usajobs_jobs() -> List[Dict[str, Any]]:
-    """
-    Fetch raw jobs from the USAJOBS API.
+    """Fetch raw jobs from the USAJOBS Search API.
+
+    This implementation supports paging so the provider can collect more than
+    one page of job announcements when desired.
 
     Returns:
-        List of USAJOBS SearchResultItems.
+        A list of raw USAJOBS SearchResultItems.
     """
     settings = get_settings()
 
@@ -40,49 +49,115 @@ def fetch_usajobs_jobs() -> List[Dict[str, Any]]:
         "Authorization-Key": settings.USAJOBS_API_KEY,
     }
 
-    params = {
-        "ResultsPerPage": settings.USAJOBS_RESULTS_PER_PAGE,
-        "Page": 1,
-    }
+    requested_results_per_page = getattr(settings, "USAJOBS_RESULTS_PER_PAGE", 50) or 50
+    results_per_page = max(1, min(int(requested_results_per_page), 500))
 
-    if settings.USAJOBS_JOB_CATEGORY_CODE:
-        params["JobCategoryCode"] = settings.USAJOBS_JOB_CATEGORY_CODE
-
-    if settings.USAJOBS_POSITION_OFFER_TYPE_CODE:
-        params["PositionOfferTypeCode"] = settings.USAJOBS_POSITION_OFFER_TYPE_CODE
-
-    try:
-        response = requests.get(
-            USAJOBS_BASE_URL,
-            headers=headers,
-            params=params,
-            timeout=settings.JOB_PROVIDER_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        data = response.json()
-    except requests.RequestException as e:
-        print(f"[USAJOBS] fetch failed: {e}")
+    # Small and safe pagination strategy for this phase.
+    # If your config exposes a dedicated page count later, swap this out for that.
+    max_total_jobs = settings.JOB_PROVIDER_MAX_JOBS_PER_SOURCE
+    if max_total_jobs <= 0:
         return []
 
-    search_result = data.get("SearchResult", {})
-    items = search_result.get("SearchResultItems", [])
+    pages_to_fetch = max(1, (max_total_jobs + results_per_page - 1) // results_per_page)
 
-    if not isinstance(items, list):
-        return []
+    collected_items: List[Dict[str, Any]] = []
 
-    return items[: settings.JOB_PROVIDER_MAX_JOBS_PER_SOURCE]
+    for page in range(1, pages_to_fetch + 1):
+        params: dict[str, Any] = {
+            "ResultsPerPage": results_per_page,
+            "Page": page,
+        }
+
+        if settings.USAJOBS_JOB_CATEGORY_CODE:
+            params["JobCategoryCode"] = settings.USAJOBS_JOB_CATEGORY_CODE
+
+        if settings.USAJOBS_POSITION_OFFER_TYPE_CODE:
+            params["PositionOfferTypeCode"] = settings.USAJOBS_POSITION_OFFER_TYPE_CODE
+
+        try:
+            response = requests.get(
+                USAJOBS_BASE_URL,
+                headers=headers,
+                params=params,
+                timeout=settings.JOB_PROVIDER_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException as exc:
+            print(f"[USAJOBS] fetch failed on page {page}: {exc}")
+            break
+
+        search_result = data.get("SearchResult", {})
+        items = search_result.get("SearchResultItems", [])
+
+        if not isinstance(items, list) or not items:
+            break
+
+        collected_items.extend(item for item in items if isinstance(item, dict))
+
+        if len(items) < results_per_page:
+            # Last page reached naturally.
+            break
+
+        if len(collected_items) >= max_total_jobs:
+            break
+
+    collected_items = collected_items[:max_total_jobs]
+    print(f"[USAJOBS] raw jobs fetched: {len(collected_items)}")
+    return collected_items
 
 
 def normalize_usajobs_job(job: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Normalize a single USAJOBS job into the internal EarlyBloom ingestion schema.
+    """Normalize a single USAJOBS item into the internal provider schema.
+
+    The returned structure is intentionally lightweight. The shared normalizer
+    performs the deeper cleaning, extraction, and filtering steps.
+
+    Args:
+        job: A USAJOBS SearchResultItem.
+
+    Returns:
+        A dictionary in the internal provider schema expected by the shared
+        normalizer.
     """
     descriptor = job.get("MatchedObjectDescriptor", {})
 
-    organization = descriptor.get("OrganizationName") or "USAJOBS"
-    title = descriptor.get("PositionTitle")
-    url = descriptor.get("PositionURI")
+    organization = (descriptor.get("OrganizationName") or "USAJOBS").strip()
+    title = (descriptor.get("PositionTitle") or "").strip()
+    url = (descriptor.get("PositionURI") or "").strip()
 
+    location = _extract_location(descriptor)
+    description = _build_description(descriptor)
+
+    return {
+        "source": "usajobs",
+        "external_id": str(descriptor.get("PositionID") or url or ""),
+        "title": title,
+        "company": organization,
+        "location": location,
+        "remote": _infer_remote_flag(descriptor, location, description),
+        "remote_type": _infer_remote_type(descriptor, location, description),
+        "url": url,
+        "salary_min": _extract_salary_min(descriptor),
+        "salary_max": _extract_salary_max(descriptor),
+        "currency": _extract_currency(descriptor),
+        "description": description,
+        "posted_at": descriptor.get("PublicationStartDate"),
+        "employment_type": _extract_employment_type(descriptor),
+        "seniority_hint": None,
+        "tags": _extract_tags(descriptor),
+    }
+
+
+def _extract_location(descriptor: Dict[str, Any]) -> str:
+    """Build a readable location string from USAJOBS location objects.
+
+    Args:
+        descriptor: USAJOBS matched object descriptor.
+
+    Returns:
+        A comma-separated location string.
+    """
     locations = descriptor.get("PositionLocation", [])
     location_chunks: List[str] = []
 
@@ -97,36 +172,62 @@ def normalize_usajobs_job(job: Dict[str, Any]) -> Dict[str, Any]:
             if chunk:
                 location_chunks.append(chunk)
 
-    location = ", ".join(dict.fromkeys(location_chunks))
+    if not location_chunks:
+        position_location_display = descriptor.get("PositionLocationDisplay")
+        if position_location_display:
+            return str(position_location_display).strip()
 
-    qualification_summary = descriptor.get("QualificationSummary")
-    job_summary = descriptor.get("UserArea", {}).get("Details", {}).get("JobSummary")
-
-    description_parts = [part for part in [job_summary, qualification_summary] if part]
-    description = "\n\n".join(description_parts) if description_parts else None
-
-    return {
-        "source": "usajobs",
-        "external_id": str(descriptor.get("PositionID") or url or ""),
-        "title": title,
-        "company": organization,
-        "location": location,
-        "remote_type": _infer_remote_type(descriptor, location),
-        "url": url,
-        "salary_min": _extract_salary_min(descriptor),
-        "salary_max": _extract_salary_max(descriptor),
-        "currency": _extract_currency(descriptor),
-        "description": description,
-        "posted_at": descriptor.get("PublicationStartDate"),
-        "employment_type": _extract_employment_type(descriptor),
-        "seniority_hint": None,
-        "tags": _extract_tags(descriptor),
-    }
+    return ", ".join(dict.fromkeys(location_chunks))
 
 
-def _infer_remote_type(descriptor: Dict[str, Any], location: str) -> str:
+def _build_description(descriptor: Dict[str, Any]) -> str | None:
+    """Build a richer description from available USAJOBS fields.
+
+    Args:
+        descriptor: USAJOBS matched object descriptor.
+
+    Returns:
+        A combined description string, or None if nothing useful exists.
     """
-    Infer remote classification from USAJOBS fields.
+    details = descriptor.get("UserArea", {}).get("Details", {})
+
+    description_parts = [
+        details.get("JobSummary"),
+        descriptor.get("QualificationSummary"),
+        details.get("MajorDuties"),
+        details.get("Education"),
+        details.get("Evaluations"),
+        details.get("HowToApply"),
+    ]
+
+    cleaned_parts: List[str] = []
+    for part in description_parts:
+        if not part:
+            continue
+        normalized_part = str(part).strip()
+        if normalized_part:
+            cleaned_parts.append(normalized_part)
+
+    if not cleaned_parts:
+        return None
+
+    return "\n\n".join(dict.fromkeys(cleaned_parts))
+
+
+def _infer_remote_flag(
+    descriptor: Dict[str, Any],
+    location: str,
+    description: str | None,
+) -> bool:
+    """Infer whether a USAJOBS role should be treated as remote.
+
+    Args:
+        descriptor: USAJOBS matched object descriptor.
+        location: Normalized location string.
+        description: Combined description text.
+
+    Returns:
+        True if the role appears remote or telework-based, otherwise False.
     """
     combined = " ".join(
         str(value or "")
@@ -134,9 +235,44 @@ def _infer_remote_type(descriptor: Dict[str, Any], location: str) -> str:
             location,
             descriptor.get("PositionTitle"),
             descriptor.get("QualificationSummary"),
+            description,
             descriptor.get("PositionSchedule"),
+            descriptor.get("UserArea", {}).get("Details", {}).get("JobSummary"),
         ]
     ).lower()
+
+    return "remote" in combined or "telework" in combined
+
+
+def _infer_remote_type(
+    descriptor: Dict[str, Any],
+    location: str,
+    description: str | None,
+) -> str:
+    """Infer remote classification from USAJOBS fields.
+
+    Args:
+        descriptor: USAJOBS matched object descriptor.
+        location: Normalized location string.
+        description: Combined description text.
+
+    Returns:
+        One of the coarse remote type labels used by the shared schema.
+    """
+    combined = " ".join(
+        str(value or "")
+        for value in [
+            location,
+            descriptor.get("PositionTitle"),
+            descriptor.get("QualificationSummary"),
+            description,
+            descriptor.get("PositionSchedule"),
+            descriptor.get("UserArea", {}).get("Details", {}).get("JobSummary"),
+        ]
+    ).lower()
+
+    if "hybrid" in combined:
+        return "hybrid"
 
     if "remote" in combined or "telework" in combined:
         return "remote"
@@ -145,6 +281,14 @@ def _infer_remote_type(descriptor: Dict[str, Any], location: str) -> str:
 
 
 def _extract_salary_min(descriptor: Dict[str, Any]) -> int | None:
+    """Extract minimum salary from USAJOBS remuneration data.
+
+    Args:
+        descriptor: USAJOBS matched object descriptor.
+
+    Returns:
+        The minimum salary if parseable, otherwise None.
+    """
     remuneration = descriptor.get("PositionRemuneration", [])
     if not remuneration or not isinstance(remuneration, list):
         return None
@@ -157,6 +301,14 @@ def _extract_salary_min(descriptor: Dict[str, Any]) -> int | None:
 
 
 def _extract_salary_max(descriptor: Dict[str, Any]) -> int | None:
+    """Extract maximum salary from USAJOBS remuneration data.
+
+    Args:
+        descriptor: USAJOBS matched object descriptor.
+
+    Returns:
+        The maximum salary if parseable, otherwise None.
+    """
     remuneration = descriptor.get("PositionRemuneration", [])
     if not remuneration or not isinstance(remuneration, list):
         return None
@@ -169,41 +321,85 @@ def _extract_salary_max(descriptor: Dict[str, Any]) -> int | None:
 
 
 def _extract_currency(descriptor: Dict[str, Any]) -> str | None:
+    """Extract compensation currency code.
+
+    USAJOBS often exposes rate interval codes rather than a pure currency code.
+    For now, keep compatibility with the existing internal shape and default
+    to USD when remuneration exists.
+
+    Args:
+        descriptor: USAJOBS matched object descriptor.
+
+    Returns:
+        A currency string or None.
+    """
     remuneration = descriptor.get("PositionRemuneration", [])
     if not remuneration or not isinstance(remuneration, list):
         return None
 
-    return remuneration[0].get("RateIntervalCode") or "USD"
+    return "USD"
 
 
 def _extract_employment_type(descriptor: Dict[str, Any]) -> str | None:
+    """Extract employment type from the position schedule.
+
+    Args:
+        descriptor: USAJOBS matched object descriptor.
+
+    Returns:
+        A human-readable schedule label if available.
+    """
     schedules = descriptor.get("PositionSchedule", [])
     if isinstance(schedules, list) and schedules:
         first = schedules[0]
         if isinstance(first, dict):
             return first.get("Name")
         return str(first)
+
     return None
 
 
 def _extract_tags(descriptor: Dict[str, Any]) -> List[str]:
+    """Extract useful category tags from USAJOBS fields.
+
+    Args:
+        descriptor: USAJOBS matched object descriptor.
+
+    Returns:
+        A list of category labels for downstream display or parsing.
+    """
     tags: List[str] = []
 
     series = descriptor.get("JobCategory", [])
     if isinstance(series, list):
         for item in series:
             if isinstance(item, dict) and item.get("Name"):
-                tags.append(item["Name"])
+                tags.append(str(item["Name"]).strip())
 
-    return tags
+    hiring_paths = descriptor.get("UserArea", {}).get("Details", {}).get("HiringPath", [])
+    if isinstance(hiring_paths, list):
+        for item in hiring_paths:
+            if isinstance(item, dict) and item.get("Name"):
+                tags.append(str(item["Name"]).strip())
+
+    # Deduplicate while preserving order.
+    deduped: List[str] = []
+    seen: set[str] = set()
+    for tag in tags:
+        lowered = tag.casefold()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        deduped.append(tag)
+
+    return deduped
 
 
 def get_usajobs_jobs() -> List[Dict[str, Any]]:
-    """
-    Fetch and normalize USAJOBS jobs.
+    """Fetch and normalize USAJOBS jobs.
 
     Returns:
-        List of normalized jobs.
+        A list of provider-normalized USAJOBS jobs.
     """
     raw_jobs = fetch_usajobs_jobs()
     normalized_jobs: List[Dict[str, Any]] = []
@@ -211,4 +407,5 @@ def get_usajobs_jobs() -> List[Dict[str, Any]]:
     for job in raw_jobs:
         normalized_jobs.append(normalize_usajobs_job(job))
 
+    print(f"[USAJOBS] normalized jobs: {len(normalized_jobs)}")
     return normalized_jobs
