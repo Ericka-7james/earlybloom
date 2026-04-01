@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class JobResponse(BaseModel):
@@ -18,7 +18,7 @@ class JobResponse(BaseModel):
     salary_min: Optional[int] = None
     salary_max: Optional[int] = None
     salary_currency: Optional[str] = "USD"
-    requirements: list[str] = []
+    requirements: list[str] = Field(default_factory=list)
 
 
 class JobsListResponse(BaseModel):

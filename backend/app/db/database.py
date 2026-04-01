@@ -5,9 +5,9 @@ from typing import Any, Dict, Optional
 from fastapi import HTTPException, status
 from supabase import Client, create_client
 
-from app.core.config import settings
+from app.core.config import get_settings
 
-
+settings = get_settings()
 SUPABASE_URL = (settings.SUPABASE_URL or "").strip()
 SUPABASE_SECRET_KEY = (settings.SUPABASE_SECRET_KEY or "").strip()
 
@@ -20,15 +20,17 @@ _supabase_admin: Client | None = None
 
 
 def get_supabase_admin() -> Client:
+    """Return a cached Supabase admin client."""
     global _supabase_admin
 
     if _supabase_admin is None:
-      _supabase_admin = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
+        _supabase_admin = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
 
     return _supabase_admin
 
 
 def get_user_id_from_bearer_token(authorization_header: Optional[str]) -> str:
+    """Resolve the authenticated Supabase user id from a bearer token."""
     if not authorization_header:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -72,6 +74,8 @@ def get_user_id_from_bearer_token(authorization_header: Optional[str]) -> str:
 
 
 class ResumeRepository:
+    """Repository for resume records and logs."""
+
     def __init__(self, client: Client | None = None) -> None:
         self.client = client or get_supabase_admin()
 

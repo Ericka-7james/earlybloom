@@ -8,13 +8,16 @@ Docs: https://remoteok.com/api
 from __future__ import annotations
 
 import os
-import requests
 from typing import List, Dict, Any
+
+import requests
+
+from app.core.config import get_settings
 
 
 REMOTEOK_BASE_URL = os.getenv(
     "REMOTEOK_BASE_URL",
-    "https://remoteok.com/api"
+    "https://remoteok.com/api",
 )
 
 
@@ -23,20 +26,24 @@ def fetch_remoteok_jobs() -> List[Dict[str, Any]]:
     Fetch raw jobs from RemoteOK API.
 
     Returns:
-        List of raw job objects
+        List of raw job objects.
     """
+    settings = get_settings()
+
     try:
         response = requests.get(
             REMOTEOK_BASE_URL,
             headers={"User-Agent": "EarlyBloom/1.0"},
-            timeout=10,
+            timeout=settings.JOB_PROVIDER_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
 
         data = response.json()
 
         if isinstance(data, list) and len(data) > 1:
-            return data[1:]
+            # First row is commonly metadata.
+            jobs = [item for item in data[1:] if isinstance(item, dict)]
+            return jobs[: settings.JOB_PROVIDER_MAX_JOBS_PER_SOURCE]
 
         return []
 
@@ -47,7 +54,7 @@ def fetch_remoteok_jobs() -> List[Dict[str, Any]]:
 
 def normalize_remoteok_job(job: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Normalize a single RemoteOK job into EarlyBloom schema.
+    Normalize a single RemoteOK job into the internal EarlyBloom ingestion schema.
     """
     salary_min = _extract_salary_min(job)
     salary_max = _extract_salary_max(job)
@@ -55,10 +62,10 @@ def normalize_remoteok_job(job: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "source": "remoteok",
-        "external_id": job.get("id"),
+        "external_id": str(job.get("id") or ""),
         "title": job.get("position"),
         "company": job.get("company"),
-        "location": job.get("location"),
+        "location": job.get("location") or "Remote",
         "remote_type": "remote",
         "url": job.get("url"),
         "salary_min": salary_min,
@@ -88,13 +95,12 @@ def _extract_salary_max(job: Dict[str, Any]) -> int | None:
 
 def get_remoteok_jobs() -> List[Dict[str, Any]]:
     """
-    Fetch + normalize RemoteOK jobs.
+    Fetch and normalize RemoteOK jobs.
 
     Returns:
-        List of normalized jobs
+        List of normalized jobs.
     """
     raw_jobs = fetch_remoteok_jobs()
-
     normalized_jobs: List[Dict[str, Any]] = []
 
     for job in raw_jobs:
