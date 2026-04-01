@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchJobs, shouldUseMockJobs } from "../lib/jobs/jobsApi";
+import {
+  fetchJobs,
+  fetchResolvedJobProfile,
+  shouldUseMockJobs,
+} from "../lib/jobs/jobsApi";
+
+const DEFAULT_RESOLVED_USER_PROFILE = {
+  desiredLevels: ["entry-level", "junior"],
+  preferredRoleTypes: [],
+  preferredWorkplaceTypes: [],
+  skills: [],
+  isLgbtFriendlyOnly: false,
+};
 
 export function useJobs() {
   const [jobs, setJobs] = useState([]);
+  const [resolvedUserProfile, setResolvedUserProfile] = useState(
+    DEFAULT_RESOLVED_USER_PROFILE
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -14,19 +29,36 @@ export function useJobs() {
   useEffect(() => {
     const controller = new AbortController();
 
-    async function loadJobs() {
+    async function loadJobsData() {
       setIsLoading(true);
       setError("");
 
       try {
-        const nextJobs = await fetchJobs({ signal: controller.signal });
+        const [nextJobs, nextResolvedUserProfile] = await Promise.all([
+          fetchJobs({ signal: controller.signal }),
+          fetchResolvedJobProfile({ signal: controller.signal }),
+        ]);
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
         setJobs(Array.isArray(nextJobs) ? nextJobs : []);
+        setResolvedUserProfile(
+          nextResolvedUserProfile && typeof nextResolvedUserProfile === "object"
+            ? {
+                ...DEFAULT_RESOLVED_USER_PROFILE,
+                ...nextResolvedUserProfile,
+              }
+            : DEFAULT_RESOLVED_USER_PROFILE
+        );
       } catch (err) {
         if (err?.name === "AbortError") {
           return;
         }
 
         setJobs([]);
+        setResolvedUserProfile(DEFAULT_RESOLVED_USER_PROFILE);
         setError(
           err instanceof Error
             ? err.message
@@ -39,16 +71,19 @@ export function useJobs() {
       }
     }
 
-    loadJobs();
+    loadJobsData();
 
     return () => controller.abort();
   }, [reloadKey]);
 
   return {
     jobs,
+    resolvedUserProfile,
     isLoading,
     error,
     isMockMode: shouldUseMockJobs(),
     retry,
   };
 }
+
+export default useJobs;

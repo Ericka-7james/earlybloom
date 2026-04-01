@@ -9,17 +9,15 @@ describe("JobCard", () => {
     title: "Junior Frontend Engineer",
     company: "Bloom Labs",
     location: "Atlanta, GA",
-    workplaceType: "Remote",
-    employmentType: "Full-time",
-    roleType: "Frontend",
-    description: "Build polished UI for early-career job seekers.",
+    experienceLevel: "junior",
+    summary: "Build polished UI for early-career job seekers.",
     fitTag: "Real Junior",
     matchScore: 87,
     reasons: ["Entry-level title", "React experience aligns"],
     warningFlags: [],
-    compensation: "$90k - $105k",
     source: "greenhouse",
     sourceUrl: "https://example.com/job-1",
+    url: "https://example.com/job-1",
   };
 
   it("renders the core job information", () => {
@@ -29,68 +27,49 @@ describe("JobCard", () => {
     expect(screen.getByText("Bloom Labs")).toBeInTheDocument();
     expect(screen.getByText("Atlanta, GA")).toBeInTheDocument();
     expect(screen.getByText("Real Junior")).toBeInTheDocument();
+    expect(screen.getByText("Junior")).toBeInTheDocument();
+    expect(screen.getByText("Source: Greenhouse")).toBeInTheDocument();
     expect(screen.getByLabelText("87 percent match")).toBeInTheDocument();
     expect(
       screen.getByText("Build polished UI for early-career job seekers.")
     ).toBeInTheDocument();
   });
 
-  it("renders footer tags including formatted source label", () => {
+  it("renders the main surface button with the expected accessible name", () => {
     render(<JobCard job={baseJob} />);
-
-    expect(screen.getByText("Remote")).toBeInTheDocument();
-    expect(screen.getByText("Frontend")).toBeInTheDocument();
-    expect(screen.getByText("Full-time")).toBeInTheDocument();
-    expect(screen.getByText("$90k - $105k")).toBeInTheDocument();
-    expect(screen.getByText("Source: Greenhouse")).toBeInTheDocument();
-  });
-
-  it("renders a listing link when sourceUrl is present", () => {
-    render(<JobCard job={baseJob} />);
-
-    const link = screen.getByRole("link", {
-      name: "View listing for Junior Frontend Engineer at Bloom Labs",
-    });
-
-    expect(link).toBeInTheDocument();
-    expect(link).toHaveAttribute("href", "https://example.com/job-1");
-  });
-
-  it("renders a details button when sourceUrl is missing", () => {
-    render(
-      <JobCard
-        job={{
-          ...baseJob,
-          sourceUrl: null,
-        }}
-      />
-    );
 
     expect(
       screen.getByRole("button", {
-        name: "View details for Junior Frontend Engineer at Bloom Labs",
+        name: "Open details for Junior Frontend Engineer at Bloom Labs",
       })
     ).toBeInTheDocument();
   });
 
-  it("shows the Why button and calls onOpenReasonsModal when clicked", () => {
+  it("shows the Why preview block using the first reason", () => {
+    render(<JobCard job={baseJob} />);
+
+    expect(screen.getByText("Why")).toBeInTheDocument();
+    expect(screen.getByText("Entry-level title")).toBeInTheDocument();
+  });
+
+  it("calls onOpenReasonsModal when the card surface is clicked", () => {
     const onOpenReasonsModal = vi.fn();
 
     render(
       <JobCard job={baseJob} onOpenReasonsModal={onOpenReasonsModal} />
     );
 
-    const whyButton = screen.getByRole("button", {
-      name: "Open why EarlyBloom surfaced Junior Frontend Engineer",
-    });
-
-    fireEvent.click(whyButton);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Open details for Junior Frontend Engineer at Bloom Labs",
+      })
+    );
 
     expect(onOpenReasonsModal).toHaveBeenCalledTimes(1);
     expect(onOpenReasonsModal).toHaveBeenCalledWith(baseJob);
   });
 
-  it("shows the Why button when there are warning flags even without reasons", () => {
+  it("shows watchout text when there are warning flags even without reasons", () => {
     render(
       <JobCard
         job={{
@@ -102,14 +81,10 @@ describe("JobCard", () => {
       />
     );
 
-    expect(
-      screen.getByRole("button", {
-        name: "Open why EarlyBloom surfaced Junior Frontend Engineer",
-      })
-    ).toBeInTheDocument();
+    expect(screen.getByText("Includes watchouts")).toBeInTheDocument();
   });
 
-  it("does not show the Why button when there are no reasons or warning flags", () => {
+  it("does not show the Why preview block when there are no reasons", () => {
     render(
       <JobCard
         job={{
@@ -121,11 +96,8 @@ describe("JobCard", () => {
       />
     );
 
-    expect(
-      screen.queryByRole("button", {
-        name: "Open why EarlyBloom surfaced Junior Frontend Engineer",
-      })
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Why")).not.toBeInTheDocument();
+    expect(screen.queryByText("Entry-level title")).not.toBeInTheDocument();
   });
 
   it("falls back to safe defaults for invalid fitTag and matchScore", () => {
@@ -183,12 +155,12 @@ describe("JobCard", () => {
     expect(screen.getByLabelText("0 percent match")).toBeInTheDocument();
   });
 
-  it("does not render the description when it is empty", () => {
+  it("does not render the summary when it is empty", () => {
     render(
       <JobCard
         job={{
           ...baseJob,
-          description: "   ",
+          summary: "   ",
         }}
       />
     );
@@ -205,6 +177,7 @@ describe("JobCard", () => {
           ...baseJob,
           source: "custom-board",
           sourceUrl: null,
+          url: null,
         }}
       />
     );
@@ -226,5 +199,19 @@ describe("JobCard", () => {
     expect(screen.getByText("Untitled role")).toBeInTheDocument();
     expect(screen.getByText("Unknown company")).toBeInTheDocument();
     expect(screen.getByText("Location not listed")).toBeInTheDocument();
+  });
+
+  it("supports snake_case experience level fields", () => {
+    render(
+      <JobCard
+        job={{
+          ...baseJob,
+          experienceLevel: undefined,
+          experience_level: "mid-level",
+        }}
+      />
+    );
+
+    expect(screen.getByText("Mid-level")).toBeInTheDocument();
   });
 });

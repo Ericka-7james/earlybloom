@@ -120,6 +120,40 @@ def normalize_provider_job(raw_job: dict[str, Any], source: str) -> NormalizedJo
             title=title,
             description=cleaned_description,
         )
+
+        normalized_title = f" {title.lower()} "
+
+        if any(
+            keyword in normalized_title
+            for keyword in [
+                " chief ",
+                " ciso ",
+                " cto ",
+                " cio ",
+                " director ",
+                " head ",
+                " principal ",
+                " staff ",
+                " senior ",
+                " sr ",
+                " lead ",
+                " manager ",
+                " architect ",
+            ]
+        ):
+            experience_level = "senior"
+        elif any(
+            keyword in normalized_title
+            for keyword in [
+                " junior ",
+                " entry ",
+                " associate ",
+                " new grad ",
+                " graduate ",
+            ]
+        ):
+            experience_level = "junior"
+
         employment_type = detect_employment_type(cleaned_description)
         summary = extract_summary(cleaned_description)
 

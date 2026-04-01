@@ -28,6 +28,106 @@ SINGLE_SALARY_RE = re.compile(
     re.IGNORECASE,
 )
 
+_EXPERIENCE_LEVEL_ORDER = {
+    "unknown": 0,
+    "entry-level": 1,
+    "junior": 2,
+    "mid-level": 3,
+    "senior": 4,
+}
+
+_TITLE_PATTERNS_BY_LEVEL: dict[str, tuple[str, ...]] = {
+    "senior": (
+        r"\bchief\b",
+        r"\bciso\b",
+        r"\bcto\b",
+        r"\bcio\b",
+        r"\bvp\b",
+        r"\bvice president\b",
+        r"\bdirector\b",
+        r"\bhead\b",
+        r"\bprincipal\b",
+        r"\bstaff\b",
+        r"\bsenior\b",
+        r"\bsr\.?\b",
+        r"\blead\b",
+        r"\bmanager\b",
+        r"\barchitect\b",
+    ),
+    "mid-level": (
+        r"\bmid[-\s]?level\b",
+        r"\bintermediate\b",
+        r"\bii\b",
+        r"\biii\b",
+        r"\blevel\s?2\b",
+        r"\blevel\s?3\b",
+        r"\bjourneyman\b",
+        r"\bexperienced\b",
+    ),
+    "junior": (
+        r"\bjunior\b",
+        r"\bjr\.?\b",
+        r"\bassociate\b",
+        r"\bgraduate\b",
+        r"\bnew grad\b",
+        r"\bearly career\b",
+        r"\bapprentice\b",
+        r"\btrainee\b",
+    ),
+    "entry-level": (
+        r"\bentry[-\s]?level\b",
+        r"\bintern(ship)?\b",
+        r"\bco-?op\b",
+        r"\bfellow(ship)?\b",
+        r"\brotation(?:al)?\b",
+        r"\bdevelopment program\b",
+    ),
+}
+
+_DESCRIPTION_PATTERNS_BY_LEVEL: dict[str, tuple[str, ...]] = {
+    "senior": (
+        r"\b(?:8|9|10|1[1-9]|[2-9][0-9])\+?\s+years?\b",
+        r"\b(?:minimum of|at least)\s+(?:8|9|10|1[1-9]|[2-9][0-9])\s+years?\b",
+        r"\bmanag(?:e|ing)\b",
+        r"\blead(?:ership)?\b",
+        r"\bown(?:er|ership)\b",
+        r"\bmentor(?:ing)?\b",
+        r"\bstrategy\b",
+        r"\broadmap\b",
+    ),
+    "mid-level": (
+        r"\b(?:3|4|5|6|7)\+?\s+years?\b",
+        r"\b(?:minimum of|at least)\s+(?:3|4|5|6|7)\s+years?\b",
+        r"\bintermediate\b",
+        r"\bmid[-\s]?level\b",
+    ),
+    "junior": (
+        r"\b(?:0|1|2)\+?\s+years?\b",
+        r"\b(?:0\s*-\s*2|1\s*-\s*2|0\s*-\s*3)\s+years?\b",
+        r"\b(?:minimum of|at least)\s+(?:0|1|2)\s+years?\b",
+        r"\bnew grad\b",
+        r"\brecent graduate\b",
+        r"\bearly career\b",
+        r"\bentry into\b",
+    ),
+    "entry-level": (
+        r"\bno experience required\b",
+        r"\bno prior experience\b",
+        r"\bentry[-\s]?level\b",
+        r"\bintern(ship)?\b",
+        r"\btraining provided\b",
+    ),
+}
+
+_NEGATIVE_TITLE_PATTERNS = (
+    r"\bassistant manager\b",
+    r"\bproject manager\b",
+    r"\bproduct manager\b",
+)
+
+_TITLE_WEIGHT = 3
+_DESCRIPTION_WEIGHT = 1
+
 
 def _normalize_header(value: str) -> str:
     return value.strip().lower().rstrip(":")
@@ -43,6 +143,68 @@ def _normalize_money(raw: str) -> int | None:
     if value.isdigit():
         return int(value)
     return None
+
+
+def _normalize_experience_text(value: str | None) -> str:
+    """Normalize text used for experience-level classification."""
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _count_pattern_hits(text: str, patterns: tuple[str, ...]) -> int:
+    """Count regex pattern hits within normalized text."""
+    return sum(1 for pattern in patterns if re.search(pattern, text))
+
+
+def _extract_year_values(text: str) -> list[int]:
+    """Extract likely years-of-experience integers from text."""
+    values: list[int] = []
+
+    for match in re.finditer(r"\b(\d{1,2})\+?\s+years?\b", text):
+        values.append(int(match.group(1)))
+
+    for match in re.finditer(r"\b(\d{1,2})\s*-\s*(\d{1,2})\s+years?\b", text):
+        values.append(int(match.group(2)))
+
+    for match in re.finditer(
+        r"\b(?:minimum of|at least)\s+(\d{1,2})\s+years?\b",
+        text,
+    ):
+        values.append(int(match.group(1)))
+
+    return values
+
+
+def _classify_years_signal(years: list[int]) -> str:
+    """Map extracted years-of-experience values to a normalized level."""
+    if not years:
+        return "unknown"
+
+    strongest = max(years)
+
+    if strongest >= 8:
+        return "senior"
+    if strongest >= 3:
+        return "mid-level"
+    if strongest >= 0:
+        return "junior"
+
+    return "unknown"
+
+
+def _best_scored_level(scores: dict[str, int]) -> str:
+    """Return the highest-confidence experience level from weighted scores."""
+    best_level = "unknown"
+    best_score = 0
+
+    for level, score in scores.items():
+        if score > best_score:
+            best_level = level
+            best_score = score
+        elif score == best_score and score > 0:
+            if _EXPERIENCE_LEVEL_ORDER[level] > _EXPERIENCE_LEVEL_ORDER[best_level]:
+                best_level = level
+
+    return best_level if best_score > 0 else "unknown"
 
 
 def split_lines(text: str | None) -> list[str]:
@@ -65,19 +227,64 @@ def detect_remote_type(title: str | None, location: str | None, description: str
 
 
 def detect_experience_level(title: str | None, description: str | None) -> str:
-    """Infer experience level using lightweight keyword rules."""
-    haystack = " ".join(filter(None, [title, description])).lower()
+    """Detect a normalized experience level from title and description.
 
-    if any(term in haystack for term in {"entry level", "entry-level", "new grad", "graduate", "early career", "associate"}):
-        return "entry-level"
-    if any(term in haystack for term in {"junior", "jr.", "jr ", "level i", "level 1"}):
-        return "junior"
-    if any(term in haystack for term in {"senior", "sr.", "sr ", "staff", "principal", "lead"}):
+    Returns one of:
+    - entry-level
+    - junior
+    - mid-level
+    - senior
+    - unknown
+
+    Detection strategy:
+    1. Strong title signals win first.
+    2. Description signals contribute weighted evidence.
+    3. Years-of-experience evidence acts as a structured fallback.
+    4. Conflicting weak signals fall back to the strongest weighted level.
+    """
+    normalized_title = _normalize_experience_text(title)
+    normalized_description = _normalize_experience_text(description)
+
+    if not normalized_title and not normalized_description:
+        return "unknown"
+
+    for pattern in _NEGATIVE_TITLE_PATTERNS:
+        if re.search(pattern, normalized_title):
+            normalized_title = re.sub(pattern, "", normalized_title)
+
+    title_scores = {
+        level: _count_pattern_hits(normalized_title, patterns) * _TITLE_WEIGHT
+        for level, patterns in _TITLE_PATTERNS_BY_LEVEL.items()
+    }
+    description_scores = {
+        level: _count_pattern_hits(normalized_description, patterns) * _DESCRIPTION_WEIGHT
+        for level, patterns in _DESCRIPTION_PATTERNS_BY_LEVEL.items()
+    }
+
+    combined_scores = {
+        level: title_scores.get(level, 0) + description_scores.get(level, 0)
+        for level in ("entry-level", "junior", "mid-level", "senior")
+    }
+
+    title_winner = _best_scored_level(title_scores)
+    if title_winner == "senior":
         return "senior"
-    if any(term in haystack for term in {"mid", "mid-level", "intermediate", "level ii", "level 2"}):
-        return "mid"
 
-    return "unknown"
+    if title_winner in {"entry-level", "junior"} and title_scores[title_winner] >= _TITLE_WEIGHT:
+        return title_winner
+
+    years_signal = _classify_years_signal(_extract_year_values(normalized_description))
+    if years_signal == "senior":
+        return "senior"
+
+    combined_winner = _best_scored_level(combined_scores)
+    if combined_winner != "unknown":
+        if years_signal != "unknown":
+            if _EXPERIENCE_LEVEL_ORDER[years_signal] > _EXPERIENCE_LEVEL_ORDER[combined_winner]:
+                return years_signal
+        return combined_winner
+
+    return years_signal
 
 
 def detect_employment_type(description: str | None) -> str | None:
@@ -162,7 +369,6 @@ def _collect_bullets_under_section(lines: list[str], header_set: set[str]) -> li
         if current_section in header_set and BULLET_RE.match(line):
             items.append(clean_bullet_text(line))
         elif current_section in header_set and len(line) < 220:
-            # Accept short non-bullet lines in sections too.
             items.append(clean_bullet_text(line))
 
     return dedupe_preserve_order(items)
@@ -211,7 +417,6 @@ def split_required_and_preferred_skills(
     required_skills = extract_skills_from_items(required_items)
     preferred_skills = extract_skills_from_items(preferred_items)
 
-    # Fallback: search full description if sectioned qualifications are thin.
     if not required_skills and description:
         required_skills = extract_skills_from_items(split_lines(description))
 

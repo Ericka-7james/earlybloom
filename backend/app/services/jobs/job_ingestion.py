@@ -20,6 +20,10 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.core.config import get_settings
+from app.services.jobs.job_filters import (
+    build_filter_options,
+    should_include_job,
+)
 from app.services.jobs.normalizer import normalize_provider_job
 from app.services.jobs.providers.usajobs import get_usajobs_jobs
 
@@ -77,11 +81,8 @@ def get_jobs(
 
     live_jobs = _get_live_jobs(remote_only=remote_only)
 
-    if not live_jobs:
-        fallback_jobs = _get_mock_jobs()
-        _set_cache(cache_key, fallback_jobs)
-        return fallback_jobs
-
+    # In live mode, do not silently fall back to mock jobs.
+    # Returning an empty list makes it obvious when filters are too strict.
     _set_cache(cache_key, live_jobs)
     return live_jobs
 
@@ -103,6 +104,10 @@ def _get_live_jobs(
         A list of normalized job dictionaries matching the jobs API shape.
     """
     aggregated: list[dict[str, Any]] = []
+    options = build_filter_options(
+        levels=None,
+        role_types=None,
+    )
 
     provider_calls: list[tuple[str, Any]] = [
         ("usajobs", get_usajobs_jobs),
@@ -112,26 +117,42 @@ def _get_live_jobs(
         try:
             raw_jobs = provider_fn()
             if not raw_jobs:
-                logger.info(
+                logger.warning(
                     "Provider returned no jobs. provider=%s",
                     provider_name,
                 )
                 continue
 
+            normalized_count = 0
+            filtered_out_count = 0
             kept_count = 0
+
             for raw_job in raw_jobs:
                 normalized = normalize_provider_job(raw_job=raw_job, source=provider_name)
                 if normalized is None:
                     continue
 
+                normalized_count += 1
                 normalized_dict = normalized.model_dump(mode="json")
+
+                if not should_include_job(
+                    title=normalized_dict.get("title"),
+                    normalized_level=normalized_dict.get("experience_level"),
+                    normalized_role_type=normalized_dict.get("role_type"),
+                    options=options,
+                ):
+                    filtered_out_count += 1
+                    continue
+
                 aggregated.append(normalized_dict)
                 kept_count += 1
 
-            logger.info(
-                "Provider normalization complete. provider=%s raw=%s kept=%s",
+            logger.warning(
+                "Provider normalization complete. provider=%s raw=%s normalized=%s filtered_out=%s kept=%s",
                 provider_name,
                 len(raw_jobs),
+                normalized_count,
+                filtered_out_count,
                 kept_count,
             )
         except Exception as exc:
@@ -142,9 +163,20 @@ def _get_live_jobs(
             )
 
     if remote_only:
+        before_remote_filter = len(aggregated)
         aggregated = [job for job in aggregated if _is_remote_job(job)]
+        logger.warning(
+            "Remote-only filter applied. before=%s after=%s",
+            before_remote_filter,
+            len(aggregated),
+        )
 
     deduped = _dedupe_jobs(aggregated)
+    logger.warning(
+        "Live ingestion complete. aggregated=%s deduped=%s",
+        len(aggregated),
+        len(deduped),
+    )
     return [_map_internal_job_to_response(job) for job in deduped]
 
 

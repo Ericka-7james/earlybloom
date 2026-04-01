@@ -8,7 +8,13 @@ from pydantic import BaseModel, Field, HttpUrl
 
 
 RemoteType = Literal["remote", "hybrid", "onsite", "unknown"]
-ExperienceLevel = Literal["entry-level", "junior", "mid", "senior", "unknown"]
+ExperienceLevel = Literal[
+    "entry-level",
+    "junior",
+    "mid-level",
+    "senior",
+    "unknown",
+]
 
 
 class NormalizedJob(BaseModel):
