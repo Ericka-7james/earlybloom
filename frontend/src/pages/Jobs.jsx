@@ -13,6 +13,11 @@ import { useJobs } from "../hooks/useJobs";
 
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
 
+const FILTER_GROUPS = {
+  workplace: ["Remote", "Onsite", "Hybrid"],
+  roleType: ["Frontend", "Backend", "Full Stack", "Data", "Product"],
+};
+
 const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
 const WELCOME_MODAL_PENDING_KEY = "earlybloom_welcome_modal_pending";
 
@@ -25,6 +30,7 @@ function getFitTagModifier(fitTag) {
 
 function Jobs() {
   const [activeReasonsJob, setActiveReasonsJob] = useState(null);
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [resumeFile, setResumeFile] = useState(() => readCachedResumeUiState());
 
   const hasUploadedResume = false;
@@ -87,6 +93,52 @@ function Jobs() {
     window.sessionStorage.removeItem(WELCOME_MODAL_PENDING_KEY);
   }
 
+  function renderFiltersContent() {
+    return (
+      <>
+        <div className="jobs-filters__header">
+          <h2 className="jobs-results__title">Filters</h2>
+          <p className="jobs-filters__text">
+            UI only for now. Wiring can be added later without reshaping the
+            page.
+          </p>
+        </div>
+
+        <div className="jobs-filter-group">
+          <h3 className="jobs-filter-group__title">Workplace</h3>
+          <div className="jobs-chip-list">
+            {FILTER_GROUPS.workplace.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className="jobs-chip"
+                aria-pressed="false"
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="jobs-filter-group">
+          <h3 className="jobs-filter-group__title">Role Type</h3>
+          <div className="jobs-chip-list">
+            {FILTER_GROUPS.roleType.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className="jobs-chip"
+                aria-pressed="false"
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </div>
+      </>
+    );
+  }
+
   return (
     <main className="jobs-page">
       <section className="section-pad">
@@ -129,9 +181,30 @@ function Jobs() {
       </section>
 
       <section className="section-pad jobs-section">
-        <div className="container">
-          <div className="jobs-results jobs-results--single-column">
-            <div className="jobs-results__header jobs-results__header--compact">
+        <div className="container jobs-layout">
+          <aside
+            className="jobs-filters section-card jobs-filters--desktop"
+            aria-label="Job filters"
+          >
+            {renderFiltersContent()}
+          </aside>
+
+          <div className="jobs-results">
+            <div className="jobs-mobile-filters">
+              <button
+                type="button"
+                className="jobs-mobile-filters__trigger section-card"
+                onClick={() => setIsFiltersModalOpen(true)}
+                aria-label="Open job filters"
+              >
+                <span className="jobs-mobile-filters__label">Filters</span>
+                <span className="jobs-mobile-filters__summary">
+                  Workplace, role type
+                </span>
+              </button>
+            </div>
+
+            <div className="jobs-results__header">
               <div>
                 <h2 className="jobs-results__title">Open roles</h2>
                 <p className="jobs-results__text">
@@ -154,12 +227,6 @@ function Jobs() {
                 </button>
               ) : null}
             </div>
-
-            {!isLoading && !error ? (
-              <p className="jobs-results__helper">
-                Tap a role to see more details in the modal.
-              </p>
-            ) : null}
 
             {isLoading ? (
               <div className="section-card" role="status" aria-live="polite">
@@ -202,7 +269,7 @@ function Jobs() {
             ) : null}
 
             {!isLoading && !error && jobs.length > 0 ? (
-              <div className="jobs-list jobs-list--compact">
+              <div className="jobs-list">
                 {jobs.map((job) => (
                   <JobCard
                     key={job.id}
@@ -215,6 +282,19 @@ function Jobs() {
           </div>
         </div>
       </section>
+
+      <CommonModal
+        isOpen={isFiltersModalOpen}
+        title="Filters"
+        onClose={() => setIsFiltersModalOpen(false)}
+        size="md"
+        iconImage={BloombugAppIcon}
+        iconAlt="EarlyBloom Bloombug icon"
+      >
+        <div className="jobs-filters jobs-filters--modal">
+          {renderFiltersContent()}
+        </div>
+      </CommonModal>
 
       <CommonModal
         isOpen={isWelcomeModalOpen}
@@ -343,7 +423,7 @@ function Jobs() {
                   href={activeReasonsJob.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="button button--primary"
+                  className="button button--primary jobs-reasons-modal__listing-link"
                 >
                   View listing
                 </a>
