@@ -1,0 +1,19 @@
+# Core API framework
+fastapi
+uvicorn[standard]
+
+# HTTP clients (providers use requests)
+requests
+
+# Pydantic v2 + settings
+pydantic
+pydantic-settings
+
+# Environment + config support
+python-dotenv
+
+# Optional but recommended (better typing + validation helpers)
+typing-extensions
+
+# If you're using file uploads anywhere (FastAPI forms)
+python-multipart
