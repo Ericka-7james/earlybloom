@@ -8,7 +8,8 @@ Docs: https://remoteok.com/api
 from __future__ import annotations
 
 import os
-from typing import List, Dict, Any
+import re
+from typing import Any, Dict, List
 
 import requests
 
@@ -60,22 +61,40 @@ def normalize_remoteok_job(job: Dict[str, Any]) -> Dict[str, Any]:
     salary_max = _extract_salary_max(job)
     currency = "USD" if salary_min is not None or salary_max is not None else None
 
+    raw_description = job.get("description")
+    cleaned_description = _clean_remoteok_text(raw_description)
+
+    location = _clean_remoteok_text(job.get("location")) or "Remote"
+    title = _clean_remoteok_text(job.get("position"))
+    company = _clean_remoteok_text(job.get("company"))
+
+    tags = job.get("tags", [])
+    if not isinstance(tags, list):
+        tags = []
+
+    cleaned_tags = [
+        _clean_remoteok_text(str(tag)).strip()
+        for tag in tags
+        if str(tag).strip()
+    ]
+
     return {
         "source": "remoteok",
         "external_id": str(job.get("id") or ""),
-        "title": job.get("position"),
-        "company": job.get("company"),
-        "location": job.get("location") or "Remote",
+        "title": title,
+        "company": company,
+        "location": location,
+        "remote": True,
         "remote_type": "remote",
         "url": job.get("url"),
         "salary_min": salary_min,
         "salary_max": salary_max,
         "currency": currency,
-        "description": job.get("description"),
+        "description": cleaned_description,
         "posted_at": job.get("date"),
         "employment_type": None,
         "seniority_hint": None,
-        "tags": job.get("tags", []),
+        "tags": cleaned_tags,
     }
 
 
@@ -91,6 +110,40 @@ def _extract_salary_max(job: Dict[str, Any]) -> int | None:
         return int(job.get("salary_max")) if job.get("salary_max") else None
     except (ValueError, TypeError):
         return None
+
+
+def _clean_remoteok_text(value: Any) -> str:
+    """
+    Normalize RemoteOK text fields before they hit the shared cleaner.
+
+    Handles common mojibake / encoding junk like:
+    - Â
+    - â
+    - â¢
+    - &nbsp;
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    replacements = {
+        "\u00a0": " ",
+        "&nbsp;": " ",
+        "Â": "",
+        "â": "'",
+        "â": '"',
+        "â": '"',
+        "â": "-",
+        "â": "-",
+        "â¢": "•",
+        "â¦": "...",
+    }
+
+    for bad, good in replacements.items():
+        text = text.replace(bad, good)
+
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 def get_remoteok_jobs() -> List[Dict[str, Any]]:

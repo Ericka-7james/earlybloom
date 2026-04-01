@@ -1,134 +1,76 @@
 """Job ingestion service for EarlyBloom.
 
-V2 behavior:
-- Strictly U.S.-focused job results
-- Keep remote U.S. roles
-- Exclude clearly non-U.S. jobs
-- Preserve current response schema expected by the jobs API
+This module orchestrates provider ingestion for the jobs API.
+
+Current V2 strategy:
+- Use USAJOBS as the primary and only live source for now
+- Normalize all provider data through the shared normalization pipeline
+- Keep the ingestion layer focused on trust, structure, and U.S. relevance
+- Preserve the response schema expected by the jobs API
+
+This intentionally narrows scope so the team can validate one provider end to end
+before reintroducing noisier providers.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 import time
 from typing import Any
 from urllib.parse import urlparse
 
 from app.core.config import get_settings
-# TODO(earlybloom-v3): Re-enable Arbeitnow when international / overseas feeds
-# are handled separately. For V2 we are strictly U.S.-focused.
-# from app.services.jobs.providers.arbeitnow import get_arbeitnow_jobs
-from app.services.jobs.providers.jobicy import get_jobicy_jobs
-from app.services.jobs.providers.remoteok import get_remoteok_jobs
+from app.services.jobs.normalizer import normalize_provider_job
 from app.services.jobs.providers.usajobs import get_usajobs_jobs
 
 logger = logging.getLogger(__name__)
 
 _CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
-US_STATE_CODES = {
-    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-    "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-    "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-    "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-    "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
-    "DC",
-}
-
-US_STATE_NAMES = {
-    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
-    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
-    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
-    "maine", "maryland", "massachusetts", "michigan", "minnesota",
-    "mississippi", "missouri", "montana", "nebraska", "nevada",
-    "new hampshire", "new jersey", "new mexico", "new york",
-    "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
-    "pennsylvania", "rhode island", "south carolina", "south dakota",
-    "tennessee", "texas", "utah", "vermont", "virginia", "washington",
-    "west virginia", "wisconsin", "wyoming", "district of columbia",
-}
-
-NON_US_LOCATION_KEYWORDS = {
-    "germany",
-    "berlin",
-    "munich",
-    "jena",
-    "viersen",
-    "deutschland",
-    "canada",
-    "toronto",
-    "vancouver",
-    "united kingdom",
-    "uk",
-    "london",
-    "france",
-    "paris",
-    "spain",
-    "madrid",
-    "barcelona",
-    "netherlands",
-    "amsterdam",
-    "poland",
-    "warsaw",
-    "india",
-    "bangalore",
-    "bengaluru",
-    "mumbai",
-    "delhi",
-    "singapore",
-    "australia",
-    "sydney",
-    "melbourne",
-    "ireland",
-    "dublin",
-    "brazil",
-    "mexico",
-    "philippines",
-    "europe",
-    "emea",
-    "apac",
-    "latam",
-}
-
-US_REMOTE_MARKERS = {
-    "united states",
-    "u.s.",
-    "usa",
-    "us only",
-    "remote us",
-    "remote - us",
-    "remote, us",
-    "must be based in the us",
-    "must be authorized to work in the united states",
-    "authorized to work in the u.s.",
-}
-
 
 class JobIngestionService:
-    """Thin service wrapper around the existing function-based ingestion flow."""
+    """Thin service wrapper around the function-based ingestion flow."""
 
     def __init__(self, providers: dict[str, Any] | None = None) -> None:
+        """Initialize the ingestion service.
+
+        Args:
+            providers: Optional provider registry for future dependency injection.
+        """
         self.providers = providers or {}
 
     async def ingest_jobs(
         self,
         remote_only: bool = False,
     ) -> list[dict[str, Any]]:
-        """Return jobs in the API response shape."""
+        """Return jobs in the API response shape.
+
+        Args:
+            remote_only: Whether to keep only remote jobs after normalization.
+
+        Returns:
+            A list of normalized job dictionaries suitable for the API response.
+        """
         return get_jobs(remote_only=remote_only)
 
 
 def get_jobs(
     remote_only: bool = False,
 ) -> list[dict[str, Any]]:
-    """Public entry point for jobs ingestion."""
+    """Public entry point for jobs ingestion.
+
+    Args:
+        remote_only: Whether to keep only remote jobs after normalization.
+
+    Returns:
+        A list of job dictionaries matching the API response contract.
+    """
     settings = get_settings()
 
     if settings.JOB_DATA_MODE == "mock":
         return _get_mock_jobs()
 
-    cache_key = f"jobs:v2-us:{'remote' if remote_only else 'all'}"
+    cache_key = f"jobs:v2-usajobs-only:{'remote' if remote_only else 'all'}"
     cached = _get_cached(cache_key)
     if cached is not None:
         return cached
@@ -147,61 +89,50 @@ def get_jobs(
 def _get_live_jobs(
     remote_only: bool = False,
 ) -> list[dict[str, Any]]:
-    """Aggregate live jobs from enabled providers and enforce U.S.-only filtering."""
-    settings = get_settings()
+    """Aggregate live jobs from USAJOBS and normalize them.
+
+    For this phase of the project, USAJOBS is intentionally the only enabled
+    live source. This makes it easier to validate product usefulness, ranking,
+    and data presentation without noisy third-party sources overwhelming the
+    results.
+
+    Args:
+        remote_only: Whether to keep only remote jobs after normalization.
+
+    Returns:
+        A list of normalized job dictionaries matching the jobs API shape.
+    """
     aggregated: list[dict[str, Any]] = []
 
-    provider_calls: list[tuple[str, Any]] = []
-
-    # TODO(earlybloom-v3): Add overseas/international ingestion path.
-    # For V2, keep Arbeitnow disabled because it is overwhelmingly non-U.S.
-    # if settings.JOB_PROVIDER_ARBEITNOW_ENABLED:
-    #     provider_calls.append(
-    #         (
-    #             "arbeitnow",
-    #             lambda: get_arbeitnow_jobs(
-    #                 pages=settings.JOB_PROVIDER_ARBEITNOW_PAGES,
-    #                 remote_only=remote_only,
-    #             ),
-    #         )
-    #     )
-
-    if settings.JOB_PROVIDER_REMOTEOK_ENABLED:
-        provider_calls.append(("remoteok", get_remoteok_jobs))
-
-    if settings.JOB_PROVIDER_JOBICY_ENABLED:
-        provider_calls.append(
-            (
-                "jobicy",
-                lambda: get_jobicy_jobs(
-                    pages=settings.JOB_PROVIDER_JOBICY_PAGES,
-                    remote_only=remote_only,
-                ),
-            )
-        )
-
-    if settings.JOB_PROVIDER_USAJOBS_ENABLED:
-        provider_calls.append(("usajobs", get_usajobs_jobs))
+    provider_calls: list[tuple[str, Any]] = [
+        ("usajobs", get_usajobs_jobs),
+    ]
 
     for provider_name, provider_fn in provider_calls:
         try:
-            jobs = provider_fn()
-            if not jobs:
+            raw_jobs = provider_fn()
+            if not raw_jobs:
+                logger.info(
+                    "Provider returned no jobs. provider=%s",
+                    provider_name,
+                )
                 continue
 
-            us_jobs = [
-                job for job in jobs
-                if _is_us_focused_job(job=job, provider_name=provider_name)
-            ]
+            kept_count = 0
+            for raw_job in raw_jobs:
+                normalized = normalize_provider_job(raw_job=raw_job, source=provider_name)
+                if normalized is None:
+                    continue
 
-            if us_jobs:
-                aggregated.extend(us_jobs)
+                normalized_dict = normalized.model_dump(mode="json")
+                aggregated.append(normalized_dict)
+                kept_count += 1
 
             logger.info(
-                "Provider filtering complete. provider=%s raw=%s us_kept=%s",
+                "Provider normalization complete. provider=%s raw=%s kept=%s",
                 provider_name,
-                len(jobs),
-                len(us_jobs),
+                len(raw_jobs),
+                kept_count,
             )
         except Exception as exc:
             logger.exception(
@@ -214,14 +145,15 @@ def _get_live_jobs(
         aggregated = [job for job in aggregated if _is_remote_job(job)]
 
     deduped = _dedupe_jobs(aggregated)
-    preferred = _prefer_early_career_jobs(deduped)
-
-    final_internal_jobs = preferred or deduped
-    return [_map_internal_job_to_response(job) for job in final_internal_jobs]
+    return [_map_internal_job_to_response(job) for job in deduped]
 
 
 def _get_mock_jobs() -> list[dict[str, Any]]:
-    """Return minimal mock fallback jobs."""
+    """Return minimal mock fallback jobs.
+
+    Returns:
+        A fallback list used only when live ingestion is unavailable.
+    """
     return [
         {
             "id": "mock-junior-software-engineer",
@@ -248,7 +180,14 @@ def _get_mock_jobs() -> list[dict[str, Any]]:
 
 
 def _get_cached(cache_key: str) -> list[dict[str, Any]] | None:
-    """Return cached jobs if cache is still fresh."""
+    """Return cached jobs if the cache entry is still fresh.
+
+    Args:
+        cache_key: Cache key for the requested job set.
+
+    Returns:
+        Cached jobs if fresh, otherwise None.
+    """
     settings = get_settings()
     entry = _CACHE.get(cache_key)
 
@@ -264,83 +203,47 @@ def _get_cached(cache_key: str) -> list[dict[str, Any]] | None:
 
 
 def _set_cache(cache_key: str, jobs: list[dict[str, Any]]) -> None:
-    """Store jobs in the in-memory cache."""
+    """Store jobs in the in-memory cache.
+
+    Args:
+        cache_key: Cache key for this job set.
+        jobs: Jobs to cache.
+    """
     _CACHE[cache_key] = (time.time(), jobs)
 
 
-def _is_us_focused_job(job: dict[str, Any], provider_name: str) -> bool:
-    """Return True only for jobs that are clearly U.S.-based or U.S.-remote.
-
-    Rules for V2:
-    - Always allow USAJobs
-    - Reject clearly non-U.S. locations
-    - Keep explicit U.S. locations
-    - Keep remote roles only when they explicitly mention U.S. / USA / United States
-    """
-    if provider_name == "usajobs":
-        return True
-
-    title = _normalize_text(job.get("title"))
-    location = _normalize_text(job.get("location"))
-    description = _normalize_text(job.get("description"))
-    company = _normalize_text(job.get("company") or job.get("company_name"))
-    combined = f"{title} {location} {description} {company}"
-
-    if _looks_non_us(combined):
-        return False
-
-    if _looks_us_location(location):
-        return True
-
-    if _looks_us_remote(combined):
-        return True
-
-    return False
-
-
-def _looks_non_us(text: str) -> bool:
-    """Return True if the text clearly points to a non-U.S. role."""
-    return any(keyword in text for keyword in NON_US_LOCATION_KEYWORDS)
-
-
-def _looks_us_remote(text: str) -> bool:
-    """Return True if a role explicitly says U.S. / USA / United States."""
-    return any(marker in text for marker in US_REMOTE_MARKERS)
-
-
-def _looks_us_location(text: str) -> bool:
-    """Return True if the text clearly looks U.S.-based."""
-    if not text:
-        return False
-
-    if "united states" in text or "u.s." in text or "usa" in text:
-        return True
-
-    for state_name in US_STATE_NAMES:
-        if state_name in text:
-            return True
-
-    tokens = re.split(r"[\s,()/|-]+", text.upper())
-    return any(token in US_STATE_CODES for token in tokens if token)
-
-
 def _dedupe_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Deduplicate jobs across providers by canonical URL, then title plus company."""
+    """Deduplicate jobs by normalized ID, canonical URL, then title/company.
+
+    Args:
+        jobs: Normalized job dictionaries.
+
+    Returns:
+        A deduplicated list of jobs preserving original order.
+    """
+    seen_ids: set[str] = set()
     seen_urls: set[str] = set()
     seen_title_company: set[str] = set()
     deduped: list[dict[str, Any]] = []
 
     for job in jobs:
+        job_id = str(job.get("id") or "").strip()
         url = _canonical_url(job.get("url"))
         title = _normalize_text(job.get("title"))
-        company = _normalize_text(job.get("company") or job.get("company_name"))
+        company = _normalize_text(job.get("company"))
         title_company_key = f"{title}::{company}"
+
+        if job_id and job_id in seen_ids:
+            continue
 
         if url and url in seen_urls:
             continue
 
         if title_company_key in seen_title_company:
             continue
+
+        if job_id:
+            seen_ids.add(job_id)
 
         if url:
             seen_urls.add(url)
@@ -351,209 +254,84 @@ def _dedupe_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return deduped
 
 
-def _prefer_early_career_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Prefer early-career jobs and exclude obvious senior roles where possible."""
-    filtered: list[dict[str, Any]] = []
-
-    for job in jobs:
-        title = _normalize_text(job.get("title"))
-        description = _normalize_text(job.get("description"))
-        combined = f"{title} {description}"
-
-        if _looks_senior(combined):
-            continue
-
-        if _looks_early_career(combined) or _looks_tech_relevant(combined):
-            filtered.append(job)
-
-    return filtered
-
-
-def _looks_senior(text: str) -> bool:
-    signals = {
-        "senior",
-        "sr ",
-        "sr.",
-        "staff",
-        "principal",
-        "lead ",
-        "manager",
-        "director",
-        "head of",
-        "architect",
-        "vp",
-        "vice president",
-    }
-    return any(signal in text for signal in signals)
-
-
-def _looks_early_career(text: str) -> bool:
-    signals = {
-        "entry level",
-        "entry-level",
-        "junior",
-        "new grad",
-        "new graduate",
-        "graduate",
-        "associate",
-        "trainee",
-        "apprentice",
-        "engineer i",
-        "developer i",
-        "0-2 years",
-        "1-2 years",
-        "recent graduate",
-        "early career",
-    }
-    return any(signal in text for signal in signals)
-
-
-def _looks_tech_relevant(text: str) -> bool:
-    signals = {
-        "software",
-        "developer",
-        "engineer",
-        "frontend",
-        "front-end",
-        "backend",
-        "back-end",
-        "full stack",
-        "full-stack",
-        "web",
-        "mobile",
-        "data",
-        "qa",
-        "test",
-        "automation",
-        "cloud",
-        "security",
-        "it specialist",
-        "applications",
-        "product engineer",
-        "ui",
-        "ux",
-        "ai",
-        "ml",
-    }
-    return any(signal in text for signal in signals)
-
-
 def _is_remote_job(job: dict[str, Any]) -> bool:
-    """Determine whether a normalized internal job should be treated as remote."""
-    remote_type = str(job.get("remote_type") or "").lower()
-    location = _normalize_text(job.get("location"))
-    description = _normalize_text(job.get("description"))
+    """Determine whether a normalized job should be treated as remote.
 
+    Args:
+        job: Normalized internal job dictionary.
+
+    Returns:
+        True if the job appears remote, otherwise False.
+    """
+    remote_value = job.get("remote")
+    if isinstance(remote_value, bool) and remote_value:
+        return True
+
+    remote_type = str(job.get("remote_type") or "").lower()
     if remote_type == "remote":
         return True
 
-    if "remote" in location or "remote" in description or "telework" in description:
-        return True
+    location = _normalize_text(job.get("location"))
+    description = _normalize_text(job.get("description"))
 
-    return False
+    return "remote" in location or "remote" in description or "telework" in description
 
 
 def _map_internal_job_to_response(job: dict[str, Any]) -> dict[str, Any]:
-    """Map the internal normalized provider shape into the API response schema."""
-    description = _strip_html(job.get("description") or "")
-    qualifications = _extract_requirements(job)
-    required_skills = qualifications[:]
-    remote_type = _infer_remote_type(job)
-    remote = remote_type == "remote"
+    """Map normalized internal data into the jobs API response shape.
 
+    Args:
+        job: Normalized internal job dictionary.
+
+    Returns:
+        A dictionary matching the public jobs API response schema.
+    """
     return {
-        "id": _build_public_job_id(job),
+        "id": job.get("id") or _build_public_job_id(job),
         "title": job.get("title") or "Unknown title",
-        "company": job.get("company") or job.get("company_name") or "Unknown company",
+        "company": job.get("company") or "Unknown company",
         "location": job.get("location") or "",
-        "remote": remote,
-        "remote_type": remote_type,
+        "remote": bool(job.get("remote", False)),
+        "remote_type": job.get("remote_type") or "unknown",
         "url": job.get("url"),
         "source": job.get("source") or "unknown",
-        "summary": _build_summary(description),
-        "description": description,
-        "responsibilities": [],
-        "qualifications": qualifications,
-        "required_skills": required_skills,
-        "preferred_skills": [],
+        "summary": job.get("summary") or "",
+        "description": job.get("description") or "",
+        "responsibilities": job.get("responsibilities") or [],
+        "qualifications": job.get("qualifications") or [],
+        "required_skills": job.get("required_skills") or [],
+        "preferred_skills": job.get("preferred_skills") or [],
         "employment_type": job.get("employment_type"),
-        "experience_level": _infer_experience_level(job),
+        "experience_level": job.get("experience_level") or "unknown",
         "salary_min": job.get("salary_min"),
         "salary_max": job.get("salary_max"),
-        "salary_currency": job.get("salary_currency") or job.get("currency") or "USD",
+        "salary_currency": job.get("salary_currency") or "USD",
     }
 
 
 def _build_public_job_id(job: dict[str, Any]) -> str:
-    """Build a stable public job id from source and provider id or URL."""
+    """Build a stable public job ID from source and provider ID or URL.
+
+    Args:
+        job: Normalized internal job dictionary.
+
+    Returns:
+        A stable public job identifier.
+    """
     source = job.get("source") or "unknown"
     external_id = job.get("external_id") or _canonical_url(job.get("url")) or "no-id"
     return f"{source}:{external_id}"
 
 
-def _infer_experience_level(job: dict[str, Any]) -> str:
-    """Infer a coarse experience level from title and description."""
-    combined = _normalize_text(
-        f"{job.get('title', '')} {job.get('description', '')} {job.get('seniority_hint', '')}"
-    )
-
-    if _looks_senior(combined):
-        return "senior"
-
-    if any(term in combined for term in {"mid", "mid-level", "intermediate", "level ii", "level 2"}):
-        return "mid"
-
-    if any(term in combined for term in {"entry level", "entry-level", "new grad", "graduate", "associate"}):
-        return "entry-level"
-
-    if _looks_early_career(combined):
-        return "junior"
-
-    return "unknown"
-
-
-def _infer_remote_type(job: dict[str, Any]) -> str:
-    """Infer remote type from provider fields and text."""
-    remote_type = str(job.get("remote_type") or "").strip().lower()
-    if remote_type in {"remote", "hybrid", "onsite", "unknown"}:
-        return remote_type
-
-    combined = _normalize_text(
-        f"{job.get('location', '')} {job.get('description', '')} {job.get('title', '')}"
-    )
-
-    if "hybrid" in combined:
-        return "hybrid"
-    if "onsite" in combined or "on-site" in combined or "in office" in combined:
-        return "onsite"
-    if "remote" in combined or "telework" in combined:
-        return "remote"
-    return "unknown"
-
-
-def _extract_requirements(job: dict[str, Any]) -> list[str]:
-    """Produce a lightweight requirements list from tags."""
-    tags = job.get("tags") or []
-    if not isinstance(tags, list):
-        return []
-
-    return [str(tag).strip() for tag in tags if str(tag).strip()][:10]
-
-
-def _build_summary(description: str, max_length: int = 280) -> str:
-    """Build a short summary from the description."""
-    if not description:
-        return ""
-
-    text = description.strip()
-    if len(text) <= max_length:
-        return text
-
-    return text[: max_length - 3].rstrip() + "..."
-
-
 def _canonical_url(url: Any) -> str:
-    """Normalize a URL for deduplication."""
+    """Normalize a URL for deduplication.
+
+    Args:
+        url: Raw URL-like value.
+
+    Returns:
+        A canonical URL string or an empty string if invalid.
+    """
     raw = str(url or "").strip()
     if not raw:
         return ""
@@ -566,14 +344,12 @@ def _canonical_url(url: Any) -> str:
 
 
 def _normalize_text(value: Any) -> str:
-    """Normalize arbitrary text for matching."""
-    text = str(value or "").strip().lower()
-    text = re.sub(r"\s+", " ", text)
-    return text
+    """Normalize arbitrary text for matching.
 
+    Args:
+        value: Arbitrary value to normalize.
 
-def _strip_html(text: str) -> str:
-    """Remove basic HTML tags from descriptions."""
-    clean = re.sub(r"<[^>]+>", " ", text)
-    clean = re.sub(r"\s+", " ", clean)
-    return clean.strip()
+    Returns:
+        A lowercase whitespace-normalized string.
+    """
+    return " ".join(str(value or "").strip().lower().split())

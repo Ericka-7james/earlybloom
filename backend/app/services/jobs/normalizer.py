@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from app.schemas.jobs import NormalizedJob
-from app.services.jobs.cleaning import normalize_whitespace, remove_noise_lines, strip_html
+from app.services.jobs.cleaning import clean_description
 from app.services.jobs.parsing import (
     detect_employment_type,
     detect_experience_level,
@@ -18,7 +18,10 @@ from app.services.jobs.parsing import (
     extract_summary,
     split_required_and_preferred_skills,
 )
-from app.services.jobs.us_filters import should_keep_us_focused_job
+from app.services.jobs.us_filters import (
+    detect_spam_or_scam,
+    should_keep_us_focused_job,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +56,8 @@ def normalize_provider_job(raw_job: dict[str, Any], source: str) -> NormalizedJo
         if isinstance(remote_flag, str):
             remote_flag = remote_flag.lower() in {"true", "1", "yes"}
 
-        cleaned_description = strip_html(raw_description)
-        cleaned_description = remove_noise_lines(cleaned_description)
-        cleaned_description = normalize_whitespace(cleaned_description)
+        if remote_flag is None:
+            remote_flag = False
 
         if not title or not company or not url:
             logger.debug(
@@ -67,11 +69,36 @@ def normalize_provider_job(raw_job: dict[str, Any], source: str) -> NormalizedJo
             )
             return None
 
+        cleaned_description = clean_description(raw_description)
+
+        if detect_spam_or_scam(
+            title=title,
+            company=company,
+            location=location,
+            description=cleaned_description,
+            url=url,
+        ):
+            logger.debug(
+                "Dropping spam/scam job. source=%s title=%s company=%s",
+                source,
+                title,
+                company,
+            )
+            return None
+
         if not should_keep_us_focused_job(
+            title=title,
             location=location,
             description=cleaned_description,
             remote_flag=bool(remote_flag),
         ):
+            logger.debug(
+                "Dropping non-U.S. or unclear-scope job. source=%s title=%s company=%s location=%s",
+                source,
+                title,
+                company,
+                location,
+            )
             return None
 
         responsibilities = extract_responsibilities(cleaned_description)
@@ -87,7 +114,8 @@ def normalize_provider_job(raw_job: dict[str, Any], source: str) -> NormalizedJo
             location=location,
             description=cleaned_description,
         )
-        remote = remote_type == "remote" or bool(remote_flag)
+        remote = bool(remote_flag) or remote_type == "remote"
+
         experience_level = detect_experience_level(
             title=title,
             description=cleaned_description,
@@ -95,7 +123,7 @@ def normalize_provider_job(raw_job: dict[str, Any], source: str) -> NormalizedJo
         employment_type = detect_employment_type(cleaned_description)
         summary = extract_summary(cleaned_description)
 
-        normalized = NormalizedJob(
+        return NormalizedJob(
             id=_build_job_id(source=source, url=url, title=title, company=company),
             title=title,
             company=company,
@@ -116,8 +144,6 @@ def normalize_provider_job(raw_job: dict[str, Any], source: str) -> NormalizedJo
             salary_max=salary_max,
             salary_currency=salary_currency or "USD",
         )
-
-        return normalized
 
     except Exception:
         logger.exception("Failed to normalize provider job. source=%s raw_job=%s", source, raw_job)
