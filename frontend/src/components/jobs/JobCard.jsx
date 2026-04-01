@@ -35,6 +35,10 @@ function formatSourceLabel(source) {
       return "Lever";
     case "adzuna":
       return "Adzuna";
+    case "usajobs":
+      return "USAJobs";
+    case "remoteok":
+      return "RemoteOK";
     default:
       return source || null;
   }
@@ -74,34 +78,46 @@ function getSafeMatchScore(matchScore) {
 }
 
 /**
- * Returns non-empty tag values for rendering in the footer.
+ * Returns a short safe text preview.
  *
- * @param {Object} params Tag candidates.
- * @param {string | null | undefined} params.workplaceType Workplace type.
- * @param {string | null | undefined} params.roleType Role type.
- * @param {string | null | undefined} params.employmentType Employment type.
- * @param {string | null | undefined} params.compensation Compensation label.
- * @param {string | null | undefined} params.sourceLabel Source label.
- * @returns {string[]} Display-ready tag labels.
+ * @param {string | null | undefined} value Raw text.
+ * @param {number} maxLength Max allowed length.
+ * @returns {string} Safe preview string.
  */
-function getFooterTags({
-  workplaceType,
-  roleType,
-  employmentType,
-  compensation,
-  sourceLabel,
-}) {
-  return [
-    workplaceType,
-    roleType,
-    employmentType,
-    compensation,
-    sourceLabel ? `Source: ${sourceLabel}` : null,
-  ].filter((value) => typeof value === "string" && value.trim().length > 0);
+function getPreviewText(value, maxLength = 140) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmed = value.replace(/\s+/g, " ").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, maxLength).trimEnd()}...`;
 }
 
 /**
- * Renders a single job card.
+ * Builds compact metadata pills for the card.
+ *
+ * @param {Object} params Metadata candidates.
+ * @param {string | null | undefined} params.location
+ * @param {string | null | undefined} params.experienceLevel
+ * @param {string | null | undefined} params.sourceLabel
+ * @returns {string[]} Display-ready compact metadata.
+ */
+function getCompactMeta({ location, experienceLevel, sourceLabel }) {
+  return [location, experienceLevel, sourceLabel ? `Source: ${sourceLabel}` : null]
+    .filter((value) => typeof value === "string" && value.trim().length > 0)
+    .slice(0, 3);
+}
+
+/**
+ * Renders a single compact job card.
  *
  * @param {{
  *   job: {
@@ -109,15 +125,12 @@ function getFooterTags({
  *     title?: string,
  *     company?: string,
  *     location?: string,
- *     workplaceType?: string | null,
- *     employmentType?: string | null,
- *     roleType?: string | null,
- *     description?: string,
+ *     experienceLevel?: string | null,
+ *     summary?: string | null,
  *     fitTag?: "Real Junior" | "Stretch Role" | "Too Senior" | "Misleading Junior",
  *     matchScore?: number,
  *     reasons?: string[],
  *     warningFlags?: string[],
- *     compensation?: string | null,
  *     source?: string | null,
  *     sourceUrl?: string | null
  *   },
@@ -131,121 +144,104 @@ function JobCard({ job, onOpenReasonsModal }) {
     title = "Untitled role",
     company = "Unknown company",
     location = "Location not listed",
-    workplaceType = null,
-    employmentType = null,
-    roleType = null,
-    description = "",
+    experienceLevel = "unknown",
+    summary = "",
     fitTag,
     matchScore,
     reasons = [],
     warningFlags = [],
-    compensation = null,
     source = null,
-    sourceUrl = null,
   } = job;
 
   const safeFitTag = getSafeFitTag(fitTag);
   const safeMatchScore = getSafeMatchScore(matchScore);
   const sourceLabel = formatSourceLabel(source);
 
-  const footerTags = getFooterTags({
-    workplaceType,
-    roleType,
-    employmentType,
-    compensation,
+  const compactMeta = getCompactMeta({
+    location,
+    experienceLevel,
     sourceLabel,
   });
 
-  const hasReasons = Array.isArray(reasons) && reasons.length > 0;
+  const reasonPreview =
+    Array.isArray(reasons) && reasons.length > 0 ? getPreviewText(reasons[0], 120) : "";
+
+  const summaryPreview = getPreviewText(summary, 150);
   const hasWarningFlags = Array.isArray(warningFlags) && warningFlags.length > 0;
-  const hasDescription =
-    typeof description === "string" && description.trim().length > 0;
-  const canOpenWhyModal =
-    typeof onOpenReasonsModal === "function" && (hasReasons || hasWarningFlags);
+
+  const canOpenModal = typeof onOpenReasonsModal === "function";
+
+  const handleOpen = () => {
+    if (canOpenModal) {
+      onOpenReasonsModal(job);
+    }
+  };
 
   return (
     <article
-      className="job-card section-card"
+      className="job-card section-card job-card--compact"
       aria-labelledby={`job-card-title-${id}`}
     >
-      <div className="job-card__top">
-        <div className="job-card__heading">
-          <div className="job-card__meta-row">
-            <span
-              className={`job-card__fit-tag ${getFitTagClassName(safeFitTag)}`}
-            >
-              {safeFitTag}
-            </span>
-            <span
-              className="job-card__match-badge"
-              aria-label={`${safeMatchScore} percent match`}
-            >
-              {safeMatchScore}% match
-            </span>
+      <button
+        type="button"
+        className="job-card__surface"
+        onClick={handleOpen}
+        aria-label={`Open details for ${title} at ${company}`}
+      >
+        <div className="job-card__top">
+          <div className="job-card__heading">
+            <div className="job-card__meta-row">
+              <span
+                className={`job-card__fit-tag ${getFitTagClassName(safeFitTag)}`}
+              >
+                {safeFitTag}
+              </span>
+
+              <span
+                className="job-card__match-badge"
+                aria-label={`${safeMatchScore} percent match`}
+              >
+                {safeMatchScore}% match
+              </span>
+            </div>
+
+            <h3 id={`job-card-title-${id}`} className="job-card__title">
+              {title}
+            </h3>
+
+            <p className="job-card__company">{company}</p>
           </div>
 
-          <h3 id={`job-card-title-${id}`} className="job-card__title">
-            {title}
-          </h3>
-
-          <p className="job-card__company">
-            <span>{company}</span>
-            <span className="job-card__separator" aria-hidden="true">
-              •
-            </span>
-            <span>{location}</span>
-          </p>
+          <span className="job-card__chevron" aria-hidden="true">
+            →
+          </span>
         </div>
 
-        {canOpenWhyModal ? (
-          <button
-            type="button"
-            className="job-card__why-pill"
-            onClick={() => onOpenReasonsModal(job)}
-            aria-label={`Open why EarlyBloom surfaced ${title}`}
-          >
-            Why?
-          </button>
-        ) : null}
-      </div>
-
-      {hasDescription ? (
-        <p className="job-card__description">{description}</p>
-      ) : null}
-
-      <div className="job-card__footer">
-        {footerTags.length > 0 ? (
-          <div className="job-card__tags" aria-label="Job details">
-            {footerTags.map((tag, index) => (
-              <span key={`${id}-tag-${index}`} className="job-card__tag">
-                {tag}
+        {compactMeta.length > 0 ? (
+          <div className="job-card__compact-meta" aria-label="Job metadata">
+            {compactMeta.map((item, index) => (
+              <span key={`${id}-meta-${index}`} className="job-card__tag">
+                {item}
               </span>
             ))}
           </div>
-        ) : (
-          <div className="job-card__tags" aria-hidden="true" />
-        )}
+        ) : null}
 
-        {sourceUrl ? (
-          <a
-            href={sourceUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="job-card__action"
-            aria-label={`View listing for ${title} at ${company}`}
-          >
-            View listing
-          </a>
-        ) : (
-          <button
-            type="button"
-            className="job-card__action"
-            aria-label={`View details for ${title} at ${company}`}
-          >
-            View details
-          </button>
-        )}
-      </div>
+        {reasonPreview ? (
+          <div className="job-card__preview-block">
+            <p className="job-card__preview-label">Why</p>
+            <p className="job-card__preview-text">{reasonPreview}</p>
+          </div>
+        ) : null}
+
+        {summaryPreview ? (
+          <p className="job-card__summary">{summaryPreview}</p>
+        ) : null}
+
+        {hasWarningFlags ? (
+          <p className="job-card__watchout">Includes watchouts</p>
+        ) : null}
+      </button>
     </article>
   );
 }

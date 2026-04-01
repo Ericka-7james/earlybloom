@@ -13,11 +13,6 @@ import { useJobs } from "../hooks/useJobs";
 
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
 
-const FILTER_GROUPS = {
-  workplace: ["Remote", "Onsite", "Hybrid"],
-  roleType: ["Frontend", "Backend", "Full Stack", "Data", "Product"],
-};
-
 const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
 const WELCOME_MODAL_PENDING_KEY = "earlybloom_welcome_modal_pending";
 
@@ -103,9 +98,9 @@ function Jobs() {
                 Find roles that actually fit where you are.
               </h1>
               <p className="jobs-hero__text">
-                We highlight realistic entry-level and junior opportunities so
-                you can spend less time decoding vague listings and more time
-                applying where it makes sense.
+                We highlight realistic opportunities so you can spend less time
+                decoding cluttered listings and more time applying where it
+                makes sense.
               </p>
 
               {isMockMode ? (
@@ -134,51 +129,9 @@ function Jobs() {
       </section>
 
       <section className="section-pad jobs-section">
-        <div className="container jobs-layout">
-          <aside className="jobs-filters section-card" aria-label="Job filters">
-            <div className="jobs-filters__header">
-              <h2 className="jobs-results__title">Filters</h2>
-              <p className="jobs-filters__text">
-                UI only for now. Wiring can be added later without reshaping the
-                page.
-              </p>
-            </div>
-
-            <div className="jobs-filter-group">
-              <h3 className="jobs-filter-group__title">Workplace</h3>
-              <div className="jobs-chip-list">
-                {FILTER_GROUPS.workplace.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className="jobs-chip"
-                    aria-pressed="false"
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="jobs-filter-group">
-              <h3 className="jobs-filter-group__title">Role Type</h3>
-              <div className="jobs-chip-list">
-                {FILTER_GROUPS.roleType.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className="jobs-chip"
-                    aria-pressed="false"
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </aside>
-
-          <div className="jobs-results">
-            <div className="jobs-results__header">
+        <div className="container">
+          <div className="jobs-results jobs-results--single-column">
+            <div className="jobs-results__header jobs-results__header--compact">
               <div>
                 <h2 className="jobs-results__title">Open roles</h2>
                 <p className="jobs-results__text">
@@ -201,6 +154,12 @@ function Jobs() {
                 </button>
               ) : null}
             </div>
+
+            {!isLoading && !error ? (
+              <p className="jobs-results__helper">
+                Tap a role to see more details in the modal.
+              </p>
+            ) : null}
 
             {isLoading ? (
               <div className="section-card" role="status" aria-live="polite">
@@ -243,7 +202,7 @@ function Jobs() {
             ) : null}
 
             {!isLoading && !error && jobs.length > 0 ? (
-              <div className="jobs-list">
+              <div className="jobs-list jobs-list--compact">
                 {jobs.map((job) => (
                   <JobCard
                     key={job.id}
@@ -368,6 +327,26 @@ function Jobs() {
                     </li>
                   ))}
                 </ul>
+              </div>
+            ) : null}
+
+            {activeReasonsJob.summary ? (
+              <div className="jobs-reasons-modal__section">
+                <p className="jobs-reasons-modal__label">Summary</p>
+                <p className="jobs-results__text">{activeReasonsJob.summary}</p>
+              </div>
+            ) : null}
+
+            {activeReasonsJob.url ? (
+              <div style={{ marginTop: "1rem" }}>
+                <a
+                  href={activeReasonsJob.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="button button--primary"
+                >
+                  View listing
+                </a>
               </div>
             ) : null}
           </div>
