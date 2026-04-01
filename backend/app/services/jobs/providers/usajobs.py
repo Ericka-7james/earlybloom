@@ -8,6 +8,7 @@ Current strategy:
 - Support pagination so the feed is not limited to a single page
 - Preserve a focused first-round search configuration
 - Produce a clean provider-specific shape for the shared normalizer
+- Build sectioned descriptions so downstream parsing can extract structure more reliably
 
 USAJOBS requires Host, User-Agent, and Authorization-Key headers.
 """
@@ -15,7 +16,8 @@ USAJOBS requires Host, User-Agent, and Authorization-Key headers.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict, Iterable, List
 
 import requests
 
@@ -52,8 +54,6 @@ def fetch_usajobs_jobs() -> List[Dict[str, Any]]:
     requested_results_per_page = getattr(settings, "USAJOBS_RESULTS_PER_PAGE", 50) or 50
     results_per_page = max(1, min(int(requested_results_per_page), 500))
 
-    # Small and safe pagination strategy for this phase.
-    # If your config exposes a dedicated page count later, swap this out for that.
     max_total_jobs = settings.JOB_PROVIDER_MAX_JOBS_PER_SOURCE
     if max_total_jobs <= 0:
         return []
@@ -96,7 +96,6 @@ def fetch_usajobs_jobs() -> List[Dict[str, Any]]:
         collected_items.extend(item for item in items if isinstance(item, dict))
 
         if len(items) < results_per_page:
-            # Last page reached naturally.
             break
 
         if len(collected_items) >= max_total_jobs:
@@ -181,37 +180,152 @@ def _extract_location(descriptor: Dict[str, Any]) -> str:
 
 
 def _build_description(descriptor: Dict[str, Any]) -> str | None:
-    """Build a richer description from available USAJOBS fields.
+    """Build a structured description from available USAJOBS fields.
+
+    The goal is to preserve useful provider structure so downstream parsing can
+    identify summaries, responsibilities, qualifications, and related sections
+    more reliably.
 
     Args:
         descriptor: USAJOBS matched object descriptor.
 
     Returns:
-        A combined description string, or None if nothing useful exists.
+        A sectioned description string, or None if nothing useful exists.
     """
     details = descriptor.get("UserArea", {}).get("Details", {})
 
-    description_parts = [
+    sections: list[str] = []
+
+    _append_section(
+        sections,
+        "Job Summary",
         details.get("JobSummary"),
+    )
+    _append_section(
+        sections,
+        "Qualifications",
         descriptor.get("QualificationSummary"),
+    )
+    _append_section(
+        sections,
+        "Responsibilities",
         details.get("MajorDuties"),
+    )
+    _append_section(
+        sections,
+        "Education",
         details.get("Education"),
+    )
+    _append_section(
+        sections,
+        "How You Will Be Evaluated",
         details.get("Evaluations"),
+    )
+    _append_section(
+        sections,
+        "How To Apply",
         details.get("HowToApply"),
-    ]
+    )
 
-    cleaned_parts: List[str] = []
-    for part in description_parts:
-        if not part:
-            continue
-        normalized_part = str(part).strip()
-        if normalized_part:
-            cleaned_parts.append(normalized_part)
-
-    if not cleaned_parts:
+    if not sections:
         return None
 
-    return "\n\n".join(dict.fromkeys(cleaned_parts))
+    return "\n\n".join(sections).strip()
+
+
+def _append_section(sections: list[str], heading: str, content: Any) -> None:
+    """Append a formatted section if content is present.
+
+    Args:
+        sections: Mutable list of rendered section strings.
+        heading: Section heading.
+        content: Raw content from USAJOBS.
+    """
+    rendered_body = _render_section_body(content)
+    if not rendered_body:
+        return
+
+    section_text = f"{heading}:\n{rendered_body}".strip()
+    if section_text not in sections:
+        sections.append(section_text)
+
+
+def _render_section_body(content: Any) -> str:
+    """Render arbitrary USAJOBS content into readable section text.
+
+    Args:
+        content: Raw field content from USAJOBS.
+
+    Returns:
+        Rendered section body text.
+    """
+    if content is None:
+        return ""
+
+    if isinstance(content, str):
+        return _normalize_paragraph_text(content)
+
+    if isinstance(content, list):
+        return _render_list_content(content)
+
+    if isinstance(content, dict):
+        values = []
+        for value in content.values():
+            rendered = _render_section_body(value)
+            if rendered:
+                values.append(rendered)
+        return "\n".join(values).strip()
+
+    return _normalize_paragraph_text(str(content))
+
+
+def _render_list_content(items: Iterable[Any]) -> str:
+    """Render list-like content as bullet points or paragraphs.
+
+    Args:
+        items: Sequence of list items.
+
+    Returns:
+        A bullet-formatted or paragraph-formatted string.
+    """
+    rendered_items: list[str] = []
+
+    for item in items:
+        rendered = _render_section_body(item)
+        if not rendered:
+            continue
+
+        if "\n" in rendered:
+            rendered = rendered.strip()
+
+        rendered_items.append(rendered)
+
+    if not rendered_items:
+        return ""
+
+    # If the items are short-ish and separate, use bullets. Otherwise preserve paragraphs.
+    if all("\n" not in item and len(item) <= 500 for item in rendered_items):
+        return "\n".join(f"- {item}" for item in rendered_items)
+
+    return "\n\n".join(rendered_items)
+
+
+def _normalize_paragraph_text(text: str) -> str:
+    """Normalize paragraph-style provider text.
+
+    Args:
+        text: Raw text.
+
+    Returns:
+        Cleaned paragraph text with readable spacing preserved.
+    """
+    normalized = text.replace("\r", "\n")
+    normalized = normalized.replace("\u00a0", " ")
+    normalized = re.sub(r"[ \t]+", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    normalized = re.sub(r"[ \t]+\n", "\n", normalized)
+    normalized = re.sub(r"\n[ \t]+", "\n", normalized)
+    return normalized.strip()
 
 
 def _infer_remote_flag(
@@ -382,7 +496,6 @@ def _extract_tags(descriptor: Dict[str, Any]) -> List[str]:
             if isinstance(item, dict) and item.get("Name"):
                 tags.append(str(item["Name"]).strip())
 
-    # Deduplicate while preserving order.
     deduped: List[str] = []
     seen: set[str] = set()
     for tag in tags:
