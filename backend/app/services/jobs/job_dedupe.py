@@ -1,50 +1,91 @@
+"""Cross-source deduplication helpers for normalized jobs."""
+
 from __future__ import annotations
 
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.schemas.jobs import NormalizedJob
+from app.services.jobs.constants import (
+    PROVIDER_SOURCE_PRIORITY,
+    URL_IGNORED_QUERY_PARAMS,
+)
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
+_EXPERIENCE_LEVEL_RANK = {
+    "unknown": 0,
+    "entry-level": 1,
+    "junior": 2,
+    "mid-level": 3,
+    "senior": 4,
+}
+
+_REMOTE_TYPE_RANK = {
+    "unknown": 0,
+    "onsite": 1,
+    "hybrid": 2,
+    "remote": 3,
+}
+
 
 def dedupe_jobs(jobs: list[NormalizedJob]) -> list[NormalizedJob]:
-    """
-    Dedupe across providers using layered fingerprints.
+    """Dedupe normalized jobs across providers using layered aliases.
 
-    Priority:
-    1. canonical URL
-    2. normalized source + title/company/location
-    3. normalized title/company/location
+    The dedupe strategy uses multiple aliases for each job:
+    1. Canonical URL
+    2. Source + title + company + location
+    3. Title + company + location
 
-    When duplicates are found, we merge them and keep the richer record.
+    When duplicates are detected, the richer record is kept and merged.
+
+    Args:
+        jobs: Normalized jobs to deduplicate.
+
+    Returns:
+        Deduplicated jobs in stable input order.
     """
-    seen: dict[str, NormalizedJob] = {}
-    ordered: list[NormalizedJob] = []
+    merged_jobs: list[NormalizedJob] = []
+    alias_to_index: dict[str, int] = {}
 
     for job in jobs:
-        key = _best_key(job)
+        candidate_aliases = _candidate_aliases(job)
+        existing_index = _find_existing_index(candidate_aliases, alias_to_index)
 
-        if key not in seen:
-            seen[key] = job
-            ordered.append(job)
+        if existing_index is None:
+            merged_jobs.append(job)
+            new_index = len(merged_jobs) - 1
+            for alias in candidate_aliases:
+                alias_to_index[alias] = new_index
             continue
 
-        merged = _merge_jobs(seen[key], job)
-        seen[key] = merged
+        merged = _merge_jobs(merged_jobs[existing_index], job)
+        merged_jobs[existing_index] = merged
 
-        for idx, existing in enumerate(ordered):
-            if existing.id == merged.id or _best_key(existing) == key:
-                ordered[idx] = merged
-                break
+        for alias in _candidate_aliases(merged):
+            alias_to_index[alias] = existing_index
 
-    return ordered
+    return merged_jobs
 
 
-def _best_key(job: NormalizedJob) -> str:
-    url_key = _canonicalize_url(str(job.url or ""))
-    if url_key:
-        return f"url::{url_key}"
+def _find_existing_index(
+    aliases: set[str],
+    alias_to_index: dict[str, int],
+) -> int | None:
+    """Return the first matching dedupe index for any candidate alias."""
+    for alias in aliases:
+        if alias in alias_to_index:
+            return alias_to_index[alias]
+    return None
+
+
+def _candidate_aliases(job: NormalizedJob) -> set[str]:
+    """Build the layered dedupe aliases for a normalized job."""
+    aliases: set[str] = set()
+
+    canonical_url = _canonicalize_url(str(job.url or ""))
+    if canonical_url:
+        aliases.add(f"url::{canonical_url}")
 
     source_title_company_location = "::".join(
         [
@@ -55,7 +96,7 @@ def _best_key(job: NormalizedJob) -> str:
         ]
     )
     if source_title_company_location.replace("::", ""):
-        return f"stcl::{source_title_company_location}"
+        aliases.add(f"stcl::{source_title_company_location}")
 
     title_company_location = "::".join(
         [
@@ -64,50 +105,105 @@ def _best_key(job: NormalizedJob) -> str:
             _norm(job.location),
         ]
     )
-    return f"tcl::{title_company_location}"
+    if title_company_location.replace("::", ""):
+        aliases.add(f"tcl::{title_company_location}")
+
+    return aliases
 
 
 def _merge_jobs(left: NormalizedJob, right: NormalizedJob) -> NormalizedJob:
-    """
-    Prefer the richer record while preserving compatibility with the existing schema.
-    """
-    description = _prefer_longer(left.description, right.description)
-    summary = _prefer_longer(left.summary, right.summary)
-    responsibilities = _merge_list(left.responsibilities, right.responsibilities)
-    qualifications = _merge_list(left.qualifications, right.qualifications)
-    required_skills = _merge_list(left.required_skills, right.required_skills)
-    preferred_skills = _merge_list(left.preferred_skills, right.preferred_skills)
+    """Merge two duplicate jobs into a single richer record."""
+    primary, secondary = _choose_primary(left, right)
 
-    remote_type = left.remote_type
-    if remote_type == "unknown" and right.remote_type != "unknown":
-        remote_type = right.remote_type
+    merged_summary = _prefer_longer(primary.summary, secondary.summary)
+    merged_description = _prefer_longer(primary.description, secondary.description)
+    merged_responsibilities = _merge_list(primary.responsibilities, secondary.responsibilities)
+    merged_qualifications = _merge_list(primary.qualifications, secondary.qualifications)
+    merged_required_skills = _merge_list(primary.required_skills, secondary.required_skills)
+    merged_preferred_skills = _merge_list(primary.preferred_skills, secondary.preferred_skills)
 
-    experience_level = left.experience_level
-    if experience_level == "unknown" and right.experience_level != "unknown":
-        experience_level = right.experience_level
+    merged_remote_type = _prefer_ranked_value(
+        primary.remote_type,
+        secondary.remote_type,
+        _REMOTE_TYPE_RANK,
+    )
+    merged_experience_level = _prefer_ranked_value(
+        primary.experience_level,
+        secondary.experience_level,
+        _EXPERIENCE_LEVEL_RANK,
+    )
 
-    employment_type = left.employment_type or right.employment_type
+    salary_min = primary.salary_min if primary.salary_min is not None else secondary.salary_min
+    salary_max = primary.salary_max if primary.salary_max is not None else secondary.salary_max
+    salary_currency = primary.salary_currency or secondary.salary_currency
+    employment_type = primary.employment_type or secondary.employment_type
+    location = primary.location or secondary.location or "Unknown"
+    url = str(primary.url or secondary.url or "")
 
-    return left.model_copy(
+    return primary.model_copy(
         update={
-            "summary": summary,
-            "description": description,
-            "responsibilities": responsibilities,
-            "qualifications": qualifications,
-            "required_skills": required_skills,
-            "preferred_skills": preferred_skills,
-            "remote": left.remote or right.remote,
-            "remote_type": remote_type,
-            "experience_level": experience_level,
+            "summary": merged_summary,
+            "description": merged_description,
+            "responsibilities": merged_responsibilities,
+            "qualifications": merged_qualifications,
+            "required_skills": merged_required_skills,
+            "preferred_skills": merged_preferred_skills,
+            "remote": bool(primary.remote or secondary.remote),
+            "remote_type": merged_remote_type,
+            "experience_level": merged_experience_level,
             "employment_type": employment_type,
-            "url": str(left.url or right.url),
+            "salary_min": salary_min,
+            "salary_max": salary_max,
+            "salary_currency": salary_currency,
+            "location": location,
+            "url": url,
         }
     )
 
 
+def _choose_primary(left: NormalizedJob, right: NormalizedJob) -> tuple[NormalizedJob, NormalizedJob]:
+    """Choose the stronger base record before merging."""
+    left_score = _richness_score(left)
+    right_score = _richness_score(right)
+
+    if right_score > left_score:
+        return right, left
+    return left, right
+
+
+def _richness_score(job: NormalizedJob) -> int:
+    """Score a job by source trust and field richness."""
+    score = PROVIDER_SOURCE_PRIORITY.get(str(job.source or "").lower(), 0)
+
+    if job.summary:
+        score += 5
+    if job.description:
+        score += min(len(job.description) // 200, 20)
+    if job.responsibilities:
+        score += min(len(job.responsibilities), 8)
+    if job.qualifications:
+        score += min(len(job.qualifications), 8)
+    if job.required_skills:
+        score += min(len(job.required_skills), 8)
+    if job.preferred_skills:
+        score += min(len(job.preferred_skills), 6)
+    if job.salary_min is not None or job.salary_max is not None:
+        score += 5
+    if job.remote_type != "unknown":
+        score += 2
+    if job.experience_level != "unknown":
+        score += 2
+    if str(job.url or "").strip():
+        score += 4
+
+    return score
+
+
 def _merge_list(left: list[str], right: list[str], max_items: int = 12) -> list[str]:
+    """Merge two string lists while preserving order and uniqueness."""
     seen: set[str] = set()
     merged: list[str] = []
+
     for item in [*left, *right]:
         normalized = _norm(item)
         if not normalized or normalized in seen:
@@ -116,30 +212,50 @@ def _merge_list(left: list[str], right: list[str], max_items: int = 12) -> list[
         merged.append(item.strip())
         if len(merged) >= max_items:
             break
+
     return merged
 
 
 def _prefer_longer(left: str, right: str) -> str:
+    """Prefer the longer non-empty text value."""
     return right if len((right or "").strip()) > len((left or "").strip()) else left
 
 
+def _prefer_ranked_value(
+    left: str | None,
+    right: str | None,
+    ranking: dict[str, int],
+) -> str:
+    """Prefer the higher-ranked normalized categorical value."""
+    left_value = (left or "unknown").strip().lower()
+    right_value = (right or "unknown").strip().lower()
+
+    if ranking.get(right_value, 0) > ranking.get(left_value, 0):
+        return right_value
+    return left_value
+
+
 def _norm(value: str | None) -> str:
+    """Normalize a string for matching."""
     if not value:
         return ""
     return _WHITESPACE_RE.sub(" ", value).strip().casefold()
 
 
 def _canonicalize_url(url: str) -> str:
+    """Canonicalize a URL for cross-source dedupe."""
     if not url:
         return ""
 
     parts = urlsplit(url)
-    query_items = [
-        (key, value)
-        for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if not key.lower().startswith("utm_")
-    ]
-    cleaned_query = urlencode(query_items)
+
+    query_items = []
+    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+        if key.strip().lower() in URL_IGNORED_QUERY_PARAMS:
+            continue
+        query_items.append((key, value))
+
+    cleaned_query = urlencode(query_items, doseq=True)
 
     return urlunsplit(
         (
