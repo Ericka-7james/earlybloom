@@ -2,14 +2,12 @@
 
 This module orchestrates provider ingestion for the jobs API.
 
-Current V2 strategy:
-- Use USAJOBS as the primary and only live source for now
+Current strategy:
+- Load enabled providers from the Layer 1 registry
+- Fetch provider-normalized raw jobs asynchronously
 - Normalize all provider data through the shared normalization pipeline
-- Keep the ingestion layer focused on trust, structure, and U.S. relevance
-- Preserve the response schema expected by the jobs API
-
-This intentionally narrows scope so the team can validate one provider end to end
-before reintroducing noisier providers.
+- Apply shared filtering, dedupe, and response mapping
+- Keep provider trust separate from normalization policy
 """
 
 from __future__ import annotations
@@ -25,7 +23,7 @@ from app.services.jobs.job_filters import (
     should_include_job,
 )
 from app.services.jobs.normalizer import normalize_provider_job
-from app.services.jobs.providers.usajobs import get_usajobs_jobs
+from app.services.jobs.providers import get_configured_providers
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +31,13 @@ _CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 
 class JobIngestionService:
-    """Thin service wrapper around the function-based ingestion flow."""
+    """Service wrapper around the async ingestion flow."""
 
     def __init__(self, providers: dict[str, Any] | None = None) -> None:
         """Initialize the ingestion service.
 
         Args:
-            providers: Optional provider registry for future dependency injection.
+            providers: Optional provider registry override for testing.
         """
         self.providers = providers or {}
 
@@ -55,16 +53,18 @@ class JobIngestionService:
         Returns:
             A list of normalized job dictionaries suitable for the API response.
         """
-        return get_jobs(remote_only=remote_only)
+        return await get_jobs(remote_only=remote_only, providers=self.providers or None)
 
 
-def get_jobs(
+async def get_jobs(
     remote_only: bool = False,
+    providers: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Public entry point for jobs ingestion.
 
     Args:
         remote_only: Whether to keep only remote jobs after normalization.
+        providers: Optional provider registry override for testing.
 
     Returns:
         A list of job dictionaries matching the API response contract.
@@ -74,31 +74,29 @@ def get_jobs(
     if settings.JOB_DATA_MODE == "mock":
         return _get_mock_jobs()
 
-    cache_key = f"jobs:v2-usajobs-only:{'remote' if remote_only else 'all'}"
+    cache_key = f"jobs:v3-layer1:{'remote' if remote_only else 'all'}"
     cached = _get_cached(cache_key)
     if cached is not None:
         return cached
 
-    live_jobs = _get_live_jobs(remote_only=remote_only)
+    live_jobs = await _get_live_jobs(
+        remote_only=remote_only,
+        providers=providers,
+    )
 
-    # In live mode, do not silently fall back to mock jobs.
-    # Returning an empty list makes it obvious when filters are too strict.
     _set_cache(cache_key, live_jobs)
     return live_jobs
 
 
-def _get_live_jobs(
+async def _get_live_jobs(
     remote_only: bool = False,
+    providers: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Aggregate live jobs from USAJOBS and normalize them.
-
-    For this phase of the project, USAJOBS is intentionally the only enabled
-    live source. This makes it easier to validate product usefulness, ranking,
-    and data presentation without noisy third-party sources overwhelming the
-    results.
+    """Aggregate live jobs from configured providers and normalize them.
 
     Args:
         remote_only: Whether to keep only remote jobs after normalization.
+        providers: Optional provider registry override for testing.
 
     Returns:
         A list of normalized job dictionaries matching the jobs API shape.
@@ -109,13 +107,14 @@ def _get_live_jobs(
         role_types=None,
     )
 
-    provider_calls: list[tuple[str, Any]] = [
-        ("usajobs", get_usajobs_jobs),
-    ]
+    provider_registry = providers or get_configured_providers()
+    if not provider_registry:
+        logger.warning("No job providers are configured.")
+        return []
 
-    for provider_name, provider_fn in provider_calls:
+    for provider_name, provider in provider_registry.items():
         try:
-            raw_jobs = provider_fn()
+            raw_jobs = await provider.fetch_jobs()
             if not raw_jobs:
                 logger.warning(
                     "Provider returned no jobs. provider=%s",
@@ -128,7 +127,10 @@ def _get_live_jobs(
             kept_count = 0
 
             for raw_job in raw_jobs:
-                normalized = normalize_provider_job(raw_job=raw_job, source=provider_name)
+                normalized = normalize_provider_job(
+                    raw_job=raw_job,
+                    source=provider_name,
+                )
                 if normalized is None:
                     continue
 
