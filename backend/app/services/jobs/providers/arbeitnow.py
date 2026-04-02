@@ -7,22 +7,13 @@ from typing import Any
 import httpx
 
 from app.core.config import get_settings
-from app.schemas.jobs import NormalizedJob
 from app.services.jobs.providers.base import BaseJobProvider
 
 logger = logging.getLogger(__name__)
 
 
 class ArbeitNowProvider(BaseJobProvider):
-    """Fetch jobs from the ArbeitNow public API.
-
-    This provider is useful for volume and breadth. It is not a trust anchor and
-    should be paired with downstream filtering because its listings are often
-    international and span a wide range of seniority.
-
-    Docs:
-        https://www.arbeitnow.com/blog/job-board-api
-    """
+    """Fetch jobs from the ArbeitNow public API."""
 
     source_name = "arbeitnow"
     base_url = os.getenv("ARBEITNOW_BASE_URL", "https://www.arbeitnow.com/api/job-board-api")
@@ -42,7 +33,6 @@ class ArbeitNowProvider(BaseJobProvider):
 
     @classmethod
     def from_env(cls) -> "ArbeitNowProvider | None":
-        """Build an ArbeitNow provider from application settings."""
         settings = get_settings()
         enabled = str(
             getattr(settings, "JOB_PROVIDER_ARBEITNOW_ENABLED", True)
@@ -58,9 +48,8 @@ class ArbeitNowProvider(BaseJobProvider):
             remote_only=bool(getattr(settings, "JOB_PROVIDER_ARBEITNOW_REMOTE_ONLY", False)),
         )
 
-    async def fetch_jobs(self) -> list[NormalizedJob]:
-        """Fetch and normalize jobs from ArbeitNow across configured pages."""
-        normalized_jobs: list[NormalizedJob] = []
+    async def fetch_jobs(self) -> list[dict[str, Any]]:
+        jobs: list[dict[str, Any]] = []
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             for page in range(1, self.pages + 1):
@@ -86,15 +75,14 @@ class ArbeitNowProvider(BaseJobProvider):
 
                     normalized = self._normalize_job(item)
                     if normalized is not None:
-                        normalized_jobs.append(normalized)
+                        jobs.append(normalized)
 
-                    if len(normalized_jobs) >= self.max_jobs:
-                        return normalized_jobs[: self.max_jobs]
+                    if len(jobs) >= self.max_jobs:
+                        return jobs[: self.max_jobs]
 
-        return normalized_jobs[: self.max_jobs]
+        return jobs[: self.max_jobs]
 
-    def _normalize_job(self, item: dict[str, Any]) -> NormalizedJob | None:
-        """Normalize a single ArbeitNow job."""
+    def _normalize_job(self, item: dict[str, Any]) -> dict[str, Any] | None:
         title = self._safe_str(item.get("title"))
         company = self._safe_str(item.get("company_name")) or "Unknown Company"
         location = self._safe_str(item.get("location")) or "Unknown"
@@ -102,106 +90,40 @@ class ArbeitNowProvider(BaseJobProvider):
         external_id = self._safe_str(item.get("slug") or item.get("id"))
         description_html = self._safe_str(item.get("description"))
 
-        if not title or not url:
+        if not title or not company or not url:
             return None
 
         description = self.strip_html(description_html)
         tags = self._coerce_string_list(item.get("tags"))
         remote, remote_type = self.infer_remote_type(title, location, description, " ".join(tags))
 
-        responsibilities = self._extract_section_bullets(
-            description_html,
-            section_names=("responsibilities", "your tasks", "what you will do"),
-        )
-        qualifications = self._extract_section_bullets(
-            description_html,
-            section_names=("requirements", "qualifications", "your profile"),
-        )
-        preferred_skills = self._extract_section_bullets(
-            description_html,
-            section_names=("nice to have", "preferred", "bonus"),
-            max_items=6,
-        )
-
-        job_id = self.build_stable_job_id(
-            external_id=external_id,
-            url=url,
-            title=title,
-            company=company,
-            location=location,
-        )
-
-        return NormalizedJob(
-            id=job_id,
-            title=title,
-            company=company,
-            location=location,
-            remote=remote,
-            remote_type=remote_type,
-            url=url,
-            source=self.source_name,
-            summary=self.summarize(description or title),
-            description=description,
-            responsibilities=responsibilities,
-            qualifications=qualifications,
-            required_skills=self._extract_skill_hints(description, tags),
-            preferred_skills=preferred_skills,
-            employment_type=None,
-            experience_level=self.infer_experience_level(title, description, " ".join(tags)),
-        )
-
-    def _extract_section_bullets(
-        self,
-        text: str,
-        *,
-        section_names: tuple[str, ...],
-        max_items: int = 8,
-    ) -> list[str]:
-        """Extract bullet-like items from common HTML sections."""
-        lowered = text.lower()
-        for section_name in section_names:
-            marker = section_name.lower()
-            index = lowered.find(marker)
-            if index == -1:
-                continue
-            snippet = text[index : index + 1800]
-            bullets = self.split_bullets(snippet, max_items=max_items)
-            if bullets:
-                return bullets
-        return []
-
-    def _extract_skill_hints(self, description: str, tags: list[str]) -> list[str]:
-        """Extract coarse skill hints from provider text and tags."""
-        skill_bank = [
-            "python",
-            "java",
-            "javascript",
-            "typescript",
-            "react",
-            "node",
-            "aws",
-            "docker",
-            "kubernetes",
-            "sql",
-            "postgres",
-            "graphql",
-            "rest",
-            "fastapi",
-            "django",
-            "flask",
-            "go",
-            "rust",
-            "c++",
-            "php",
-            "laravel",
-            "ruby",
-            "rails",
-        ]
-        combined = f"{description} {' '.join(tags)}".casefold()
-        return [skill for skill in skill_bank if skill in combined][:10]
+        return {
+            "source": self.source_name,
+            "external_id": external_id or self.build_stable_job_id(
+                external_id=external_id,
+                url=url,
+                title=title,
+                company=company,
+                location=location,
+            ),
+            "title": title,
+            "company": company,
+            "location": location,
+            "remote": remote,
+            "remote_type": remote_type,
+            "url": url,
+            "salary_min": None,
+            "salary_max": None,
+            "currency": None,
+            "description": description_html or description,
+            "summary": self.summarize(description or title),
+            "posted_at": self._safe_str(item.get("created_at")) or None,
+            "employment_type": None,
+            "seniority_hint": self.infer_experience_level(title, description, " ".join(tags)),
+            "tags": tags,
+        }
 
     def _coerce_string_list(self, value: Any) -> list[str]:
-        """Coerce an arbitrary value into a clean list of strings."""
         if not isinstance(value, list):
             return []
 
@@ -221,7 +143,6 @@ class ArbeitNowProvider(BaseJobProvider):
         return cleaned
 
     def _safe_str(self, value: Any) -> str:
-        """Return a stripped string representation for arbitrary values."""
         if value is None:
             return ""
         return str(value).strip()

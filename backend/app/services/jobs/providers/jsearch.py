@@ -7,22 +7,13 @@ from typing import Any
 import httpx
 
 from app.core.config import get_settings
-from app.schemas.jobs import NormalizedJob
 from app.services.jobs.providers.base import BaseJobProvider
 
 logger = logging.getLogger(__name__)
 
 
 class JSearchProvider(BaseJobProvider):
-    """Fetch jobs from the JSearch API on RapidAPI.
-
-    This provider is a breadth source. It is useful for broader market coverage
-    but should not be treated as the single source of truth because it aggregates
-    listings from multiple origins.
-
-    Docs:
-        https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
-    """
+    """Fetch jobs from the JSearch API on RapidAPI."""
 
     source_name = "jsearch"
     base_url = os.getenv("JSEARCH_BASE_URL", "https://jsearch.p.rapidapi.com/search")
@@ -50,7 +41,6 @@ class JSearchProvider(BaseJobProvider):
 
     @classmethod
     def from_env(cls) -> "JSearchProvider | None":
-        """Build a JSearch provider from application settings."""
         settings = get_settings()
 
         enabled = str(
@@ -84,14 +74,13 @@ class JSearchProvider(BaseJobProvider):
             date_posted=getattr(settings, "JOB_PROVIDER_JSEARCH_DATE_POSTED", None),
         )
 
-    async def fetch_jobs(self) -> list[NormalizedJob]:
-        """Fetch and normalize jobs from JSearch."""
+    async def fetch_jobs(self) -> list[dict[str, Any]]:
         headers = {
             "X-RapidAPI-Key": self.api_key,
             "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
         }
 
-        normalized_jobs: list[NormalizedJob] = []
+        jobs: list[dict[str, Any]] = []
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             for page_offset in range(self.num_pages):
@@ -126,27 +115,22 @@ class JSearchProvider(BaseJobProvider):
 
                     normalized = self._normalize_job(item)
                     if normalized is not None:
-                        normalized_jobs.append(normalized)
+                        jobs.append(normalized)
 
-                    if len(normalized_jobs) >= self.max_jobs:
-                        return normalized_jobs[: self.max_jobs]
+                    if len(jobs) >= self.max_jobs:
+                        return jobs[: self.max_jobs]
 
-        return normalized_jobs[: self.max_jobs]
+        return jobs[: self.max_jobs]
 
-    def _normalize_job(self, item: dict[str, Any]) -> NormalizedJob | None:
-        """Normalize a single JSearch job."""
+    def _normalize_job(self, item: dict[str, Any]) -> dict[str, Any] | None:
         title = self._safe_str(item.get("job_title"))
         company = self._safe_str(item.get("employer_name")) or "Unknown Company"
         location = self._build_location(item) or "Unknown"
-        url = self._safe_str(
-            item.get("job_apply_link")
-            or item.get("job_google_link")
-            or item.get("job_offer_expiration_datetime_utc")
-        )
+        url = self._safe_str(item.get("job_apply_link") or item.get("job_google_link"))
         external_id = self._safe_str(item.get("job_id"))
         description = self._safe_str(item.get("job_description"))
 
-        if not title or not url:
+        if not title or not company or not url:
             return None
 
         remote, remote_type = self.infer_remote_type(
@@ -157,49 +141,43 @@ class JSearchProvider(BaseJobProvider):
             self._safe_str(item.get("job_employment_type")),
         )
 
-        responsibilities = self._extract_section_bullets(
-            description,
-            section_names=("responsibilities", "what you will do", "what you'll do"),
-        )
-        qualifications = self._extract_section_bullets(
-            description,
-            section_names=("requirements", "qualifications", "minimum qualifications"),
-        )
-        preferred_skills = self._extract_section_bullets(
-            description,
-            section_names=("preferred qualifications", "nice to have", "bonus"),
-            max_items=6,
+        tags = self._coerce_string_list(
+            [
+                item.get("job_employment_type"),
+                item.get("job_publisher"),
+                item.get("job_city"),
+                item.get("job_state"),
+                item.get("job_country"),
+            ]
         )
 
-        job_id = self.build_stable_job_id(
-            external_id=external_id,
-            url=url,
-            title=title,
-            company=company,
-            location=location,
-        )
-
-        return NormalizedJob(
-            id=job_id,
-            title=title,
-            company=company,
-            location=location,
-            remote=remote,
-            remote_type=remote_type,
-            url=url,
-            source=self.source_name,
-            summary=self.summarize(description or title),
-            description=description,
-            responsibilities=responsibilities,
-            qualifications=qualifications,
-            required_skills=self._extract_skill_hints(description),
-            preferred_skills=preferred_skills,
-            employment_type=self._safe_str(item.get("job_employment_type")) or None,
-            experience_level=self.infer_experience_level(title, description),
-        )
+        return {
+            "source": self.source_name,
+            "external_id": external_id or self.build_stable_job_id(
+                external_id=external_id,
+                url=url,
+                title=title,
+                company=company,
+                location=location,
+            ),
+            "title": title,
+            "company": company,
+            "location": location,
+            "remote": remote,
+            "remote_type": remote_type,
+            "url": url,
+            "salary_min": None,
+            "salary_max": None,
+            "currency": None,
+            "description": description,
+            "summary": self.summarize(description or title),
+            "posted_at": self._safe_str(item.get("job_posted_at_datetime_utc")) or None,
+            "employment_type": self._safe_str(item.get("job_employment_type")) or None,
+            "seniority_hint": self.infer_experience_level(title, description),
+            "tags": tags,
+        }
 
     def _build_location(self, item: dict[str, Any]) -> str:
-        """Build a readable location string from JSearch location fields."""
         city = self._safe_str(item.get("job_city"))
         state = self._safe_str(item.get("job_state"))
         country = self._safe_str(item.get("job_country"))
@@ -217,57 +195,23 @@ class JSearchProvider(BaseJobProvider):
 
         return ""
 
-    def _extract_section_bullets(
-        self,
-        text: str,
-        *,
-        section_names: tuple[str, ...],
-        max_items: int = 8,
-    ) -> list[str]:
-        """Extract bullet-like items from common plain-text sections."""
-        lowered = text.lower()
-        for section_name in section_names:
-            marker = section_name.lower()
-            index = lowered.find(marker)
-            if index == -1:
-                continue
-            snippet = text[index : index + 1800]
-            bullets = self.split_bullets(snippet, max_items=max_items)
-            if bullets:
-                return bullets
-        return []
+    def _coerce_string_list(self, values: list[Any]) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
 
-    def _extract_skill_hints(self, description: str) -> list[str]:
-        """Extract coarse skill hints from plain-text descriptions."""
-        skill_bank = [
-            "python",
-            "java",
-            "javascript",
-            "typescript",
-            "react",
-            "node",
-            "aws",
-            "docker",
-            "kubernetes",
-            "sql",
-            "postgres",
-            "graphql",
-            "rest",
-            "fastapi",
-            "django",
-            "flask",
-            "go",
-            "rust",
-            "c++",
-            "linux",
-            "azure",
-            "gcp",
-        ]
-        lowered = description.casefold()
-        return [skill for skill in skill_bank if skill in lowered][:10]
+        for value in values:
+            text = self._safe_str(value)
+            if not text:
+                continue
+            key = text.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(text)
+
+        return cleaned
 
     def _safe_str(self, value: Any) -> str:
-        """Return a stripped string representation for arbitrary values."""
         if value is None:
             return ""
         return str(value).strip()
