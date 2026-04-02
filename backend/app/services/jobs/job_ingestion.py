@@ -12,12 +12,19 @@ Current strategy:
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import time
 from typing import Any
 from urllib.parse import urlparse
 
 from app.core.config import get_settings
+from app.schemas.jobs import NormalizedJob
+from app.services.jobs.job_cache import (
+    build_jobs_cache_key,
+    get_cached_value,
+    set_cached_value,
+)
+from app.services.jobs.job_dedupe import dedupe_jobs
 from app.services.jobs.job_filters import (
     build_filter_options,
     should_include_job,
@@ -26,8 +33,6 @@ from app.services.jobs.normalizer import normalize_provider_job
 from app.services.jobs.providers import get_configured_providers
 
 logger = logging.getLogger(__name__)
-
-_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 
 class JobIngestionService:
@@ -74,17 +79,21 @@ async def get_jobs(
     if settings.JOB_DATA_MODE == "mock":
         return _get_mock_jobs()
 
-    cache_key = f"jobs:v3-layer1:{'remote' if remote_only else 'all'}"
-    cached = _get_cached(cache_key)
+    provider_registry = providers or get_configured_providers()
+    cache_key = build_jobs_cache_key(
+        remote_only=remote_only,
+        provider_names=list(provider_registry.keys()),
+    )
+
+    cached = get_cached_value(cache_key)
     if cached is not None:
         return cached
 
     live_jobs = await _get_live_jobs(
         remote_only=remote_only,
-        providers=providers,
+        providers=provider_registry,
     )
-
-    _set_cache(cache_key, live_jobs)
+    set_cached_value(cache_key, live_jobs)
     return live_jobs
 
 
@@ -96,90 +105,125 @@ async def _get_live_jobs(
 
     Args:
         remote_only: Whether to keep only remote jobs after normalization.
-        providers: Optional provider registry override for testing.
+        providers: Optional provider registry override.
 
     Returns:
         A list of normalized job dictionaries matching the jobs API shape.
     """
-    aggregated: list[dict[str, Any]] = []
     options = build_filter_options(
         levels=None,
         role_types=None,
     )
-
     provider_registry = providers or get_configured_providers()
+
     if not provider_registry:
         logger.warning("No job providers are configured.")
         return []
 
-    for provider_name, provider in provider_registry.items():
-        try:
-            raw_jobs = await provider.fetch_jobs()
-            if not raw_jobs:
-                logger.warning(
-                    "Provider returned no jobs. provider=%s",
-                    provider_name,
-                )
-                continue
+    provider_results = await asyncio.gather(
+        *[
+            _fetch_provider_jobs(provider_name, provider)
+            for provider_name, provider in provider_registry.items()
+        ],
+        return_exceptions=True,
+    )
 
-            normalized_count = 0
-            filtered_out_count = 0
-            kept_count = 0
+    normalized_jobs: list[NormalizedJob] = []
 
-            for raw_job in raw_jobs:
-                normalized = normalize_provider_job(
-                    raw_job=raw_job,
-                    source=provider_name,
-                )
-                if normalized is None:
-                    continue
-
-                normalized_count += 1
-                normalized_dict = normalized.model_dump(mode="json")
-
-                if not should_include_job(
-                    title=normalized_dict.get("title"),
-                    normalized_level=normalized_dict.get("experience_level"),
-                    normalized_role_type=normalized_dict.get("role_type"),
-                    options=options,
-                ):
-                    filtered_out_count += 1
-                    continue
-
-                aggregated.append(normalized_dict)
-                kept_count += 1
-
-            logger.warning(
-                "Provider normalization complete. provider=%s raw=%s normalized=%s filtered_out=%s kept=%s",
-                provider_name,
-                len(raw_jobs),
-                normalized_count,
-                filtered_out_count,
-                kept_count,
-            )
-        except Exception as exc:
+    for provider_name, provider_result in zip(provider_registry.keys(), provider_results):
+        if isinstance(provider_result, Exception):
             logger.exception(
                 "Job provider failed. provider=%s error=%s",
                 provider_name,
-                exc,
+                provider_result,
             )
+            continue
+
+        raw_jobs = provider_result
+        if not raw_jobs:
+            logger.warning("Provider returned no jobs. provider=%s", provider_name)
+            continue
+
+        normalized_count = 0
+        filtered_out_count = 0
+        kept_count = 0
+
+        for raw_job in raw_jobs:
+            normalized = normalize_provider_job(
+                raw_job=raw_job,
+                source=provider_name,
+            )
+            if normalized is None:
+                continue
+
+            normalized_count += 1
+
+            if not should_include_job(
+                title=normalized.title,
+                normalized_level=normalized.experience_level,
+                normalized_role_type=getattr(normalized, "role_type", None),
+                options=options,
+            ):
+                filtered_out_count += 1
+                continue
+
+            normalized_jobs.append(normalized)
+            kept_count += 1
+
+        logger.warning(
+            "Provider normalization complete. provider=%s raw=%s normalized=%s filtered_out=%s kept=%s",
+            provider_name,
+            len(raw_jobs),
+            normalized_count,
+            filtered_out_count,
+            kept_count,
+        )
 
     if remote_only:
-        before_remote_filter = len(aggregated)
-        aggregated = [job for job in aggregated if _is_remote_job(job)]
+        before_remote_filter = len(normalized_jobs)
+        normalized_jobs = [job for job in normalized_jobs if _is_remote_job(job)]
         logger.warning(
             "Remote-only filter applied. before=%s after=%s",
             before_remote_filter,
-            len(aggregated),
+            len(normalized_jobs),
         )
 
-    deduped = _dedupe_jobs(aggregated)
+    deduped_jobs = dedupe_jobs(normalized_jobs)
     logger.warning(
         "Live ingestion complete. aggregated=%s deduped=%s",
-        len(aggregated),
-        len(deduped),
+        len(normalized_jobs),
+        len(deduped_jobs),
     )
-    return [_map_internal_job_to_response(job) for job in deduped]
+
+    return [_map_internal_job_to_response(job) for job in deduped_jobs]
+
+
+async def _fetch_provider_jobs(
+    provider_name: str,
+    provider: Any,
+) -> list[dict[str, Any]]:
+    """Fetch raw jobs from a single provider instance.
+
+    Args:
+        provider_name: Provider source name.
+        provider: Provider instance implementing fetch_jobs().
+
+    Returns:
+        Provider-normalized raw jobs.
+
+    Raises:
+        Propagates provider exceptions to be handled by the caller.
+    """
+    raw_jobs = await provider.fetch_jobs()
+    if not isinstance(raw_jobs, list):
+        logger.warning(
+            "Provider returned non-list payload. provider=%s type=%s",
+            provider_name,
+            type(raw_jobs).__name__,
+        )
+        return []
+
+    return [job for job in raw_jobs if isinstance(job, dict)]
 
 
 def _get_mock_jobs() -> list[dict[str, Any]]:
@@ -204,7 +248,7 @@ def _get_mock_jobs() -> list[dict[str, Any]]:
             "experience_level": "junior",
             "salary_min": None,
             "salary_max": None,
-            "salary_currency": "USD",
+            "salary_currency": None,
             "responsibilities": [],
             "qualifications": [],
             "required_skills": [],
@@ -213,159 +257,78 @@ def _get_mock_jobs() -> list[dict[str, Any]]:
     ]
 
 
-def _get_cached(cache_key: str) -> list[dict[str, Any]] | None:
-    """Return cached jobs if the cache entry is still fresh.
-
-    Args:
-        cache_key: Cache key for the requested job set.
-
-    Returns:
-        Cached jobs if fresh, otherwise None.
-    """
-    settings = get_settings()
-    entry = _CACHE.get(cache_key)
-
-    if not entry:
-        return None
-
-    stored_at, jobs = entry
-    if (time.time() - stored_at) > settings.JOB_CACHE_TTL_SECONDS:
-        _CACHE.pop(cache_key, None)
-        return None
-
-    return jobs
-
-
-def _set_cache(cache_key: str, jobs: list[dict[str, Any]]) -> None:
-    """Store jobs in the in-memory cache.
-
-    Args:
-        cache_key: Cache key for this job set.
-        jobs: Jobs to cache.
-    """
-    _CACHE[cache_key] = (time.time(), jobs)
-
-
-def _dedupe_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Deduplicate jobs by normalized ID, canonical URL, then title/company.
-
-    Args:
-        jobs: Normalized job dictionaries.
-
-    Returns:
-        A deduplicated list of jobs preserving original order.
-    """
-    seen_ids: set[str] = set()
-    seen_urls: set[str] = set()
-    seen_title_company: set[str] = set()
-    deduped: list[dict[str, Any]] = []
-
-    for job in jobs:
-        job_id = str(job.get("id") or "").strip()
-        url = _canonical_url(job.get("url"))
-        title = _normalize_text(job.get("title"))
-        company = _normalize_text(job.get("company"))
-        title_company_key = f"{title}::{company}"
-
-        if job_id and job_id in seen_ids:
-            continue
-
-        if url and url in seen_urls:
-            continue
-
-        if title_company_key in seen_title_company:
-            continue
-
-        if job_id:
-            seen_ids.add(job_id)
-
-        if url:
-            seen_urls.add(url)
-
-        seen_title_company.add(title_company_key)
-        deduped.append(job)
-
-    return deduped
-
-
-def _is_remote_job(job: dict[str, Any]) -> bool:
+def _is_remote_job(job: NormalizedJob) -> bool:
     """Determine whether a normalized job should be treated as remote.
 
     Args:
-        job: Normalized internal job dictionary.
+        job: Normalized job instance.
 
     Returns:
         True if the job appears remote, otherwise False.
     """
-    remote_value = job.get("remote")
-    if isinstance(remote_value, bool) and remote_value:
+    if bool(job.remote):
         return True
 
-    remote_type = str(job.get("remote_type") or "").lower()
+    remote_type = str(job.remote_type or "").lower()
     if remote_type == "remote":
         return True
 
-    location = _normalize_text(job.get("location"))
-    description = _normalize_text(job.get("description"))
+    location = _normalize_text(job.location)
+    description = _normalize_text(job.description)
 
     return "remote" in location or "remote" in description or "telework" in description
 
 
-def _map_internal_job_to_response(job: dict[str, Any]) -> dict[str, Any]:
-    """Map normalized internal data into the jobs API response shape.
+def _map_internal_job_to_response(job: NormalizedJob) -> dict[str, Any]:
+    """Map normalized data into the public jobs API response shape.
 
     Args:
-        job: Normalized internal job dictionary.
+        job: Normalized job instance.
 
     Returns:
         A dictionary matching the public jobs API response schema.
     """
     return {
-        "id": job.get("id") or _build_public_job_id(job),
-        "title": job.get("title") or "Unknown title",
-        "company": job.get("company") or "Unknown company",
-        "location": job.get("location") or "",
-        "remote": bool(job.get("remote", False)),
-        "remote_type": job.get("remote_type") or "unknown",
-        "url": job.get("url"),
-        "source": job.get("source") or "unknown",
-        "summary": job.get("summary") or "",
-        "description": job.get("description") or "",
-        "responsibilities": job.get("responsibilities") or [],
-        "qualifications": job.get("qualifications") or [],
-        "required_skills": job.get("required_skills") or [],
-        "preferred_skills": job.get("preferred_skills") or [],
-        "employment_type": job.get("employment_type"),
-        "experience_level": job.get("experience_level") or "unknown",
-        "salary_min": job.get("salary_min"),
-        "salary_max": job.get("salary_max"),
-        "salary_currency": job.get("salary_currency") or "USD",
+        "id": job.id or _build_public_job_id(job),
+        "title": job.title or "Unknown title",
+        "company": job.company or "Unknown company",
+        "location": job.location or "",
+        "remote": bool(job.remote),
+        "remote_type": job.remote_type or "unknown",
+        "url": str(job.url or ""),
+        "source": job.source or "unknown",
+        "summary": job.summary or "",
+        "description": job.description or "",
+        "responsibilities": job.responsibilities or [],
+        "qualifications": job.qualifications or [],
+        "required_skills": job.required_skills or [],
+        "preferred_skills": job.preferred_skills or [],
+        "employment_type": job.employment_type,
+        "experience_level": job.experience_level or "unknown",
+        "salary_min": job.salary_min,
+        "salary_max": job.salary_max,
+        "salary_currency": job.salary_currency,
     }
 
 
-def _build_public_job_id(job: dict[str, Any]) -> str:
-    """Build a stable public job ID from source and provider ID or URL.
+def _build_public_job_id(job: NormalizedJob) -> str:
+    """Build a stable public job ID from source and URL.
 
     Args:
-        job: Normalized internal job dictionary.
+        job: Normalized job instance.
 
     Returns:
         A stable public job identifier.
     """
-    source = job.get("source") or "unknown"
-    external_id = job.get("external_id") or _canonical_url(job.get("url")) or "no-id"
-    return f"{source}:{external_id}"
+    source = job.source or "unknown"
+    canonical_url = _canonical_url(str(job.url or ""))
+    if canonical_url:
+        return f"{source}:{canonical_url}"
+    return f"{source}:{job.id or 'no-id'}"
 
 
-def _canonical_url(url: Any) -> str:
-    """Normalize a URL for deduplication.
-
-    Args:
-        url: Raw URL-like value.
-
-    Returns:
-        A canonical URL string or an empty string if invalid.
-    """
+def _canonical_url(url: str) -> str:
+    """Normalize a URL for public ID generation."""
     raw = str(url or "").strip()
     if not raw:
         return ""
@@ -378,12 +341,5 @@ def _canonical_url(url: Any) -> str:
 
 
 def _normalize_text(value: Any) -> str:
-    """Normalize arbitrary text for matching.
-
-    Args:
-        value: Arbitrary value to normalize.
-
-    Returns:
-        A lowercase whitespace-normalized string.
-    """
+    """Normalize arbitrary text for matching."""
     return " ".join(str(value or "").strip().lower().split())

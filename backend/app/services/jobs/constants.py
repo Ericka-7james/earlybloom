@@ -1,4 +1,4 @@
-"""Constants used by job normalization and parsing."""
+"""Constants used by job normalization, parsing, and Layer 1 ingestion."""
 
 from __future__ import annotations
 
@@ -92,6 +92,8 @@ REMOTE_KEYWORDS = {
     "remote",
     "work from home",
     "wfh",
+    "telework",
+    "distributed",
 }
 
 HYBRID_KEYWORDS = {
@@ -157,4 +159,31 @@ NON_US_LOCATION_KEYWORDS = {
     "mexico",
     "brazil",
     "philippines",
+}
+
+PROVIDER_SOURCE_PRIORITY = {
+    "usajobs": 100,
+    "remotive": 90,
+    "jsearch": 70,
+    "arbeitnow": 60,
+    "jobicy": 50,
+    "remoteok": 20,
+    "greenhouse": 10,
+    "mock": 0,
+}
+
+URL_IGNORED_QUERY_PARAMS = {
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "gh_jid",
+    "gh_src",
+    "ref",
+    "refs",
+    "source",
+    "src",
+    "trk",
+    "tracking",
 }
