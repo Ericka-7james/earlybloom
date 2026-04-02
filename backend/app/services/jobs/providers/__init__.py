@@ -1,37 +1,60 @@
-"""Provider registry for job ingestion."""
-
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+import logging
+
+from app.services.jobs.providers.arbeitnow import ArbeitNowProvider
+from app.services.jobs.providers.base import BaseJobProvider
+from app.services.jobs.providers.jobicy import JobicyProvider
+from app.services.jobs.providers.jsearch import JSearchProvider
+from app.services.jobs.providers.remotive import RemotiveProvider
+from app.services.jobs.providers.usajobs import USAJOBSProvider
+
+logger = logging.getLogger(__name__)
 
 
-ProviderFetcher = Callable[[], Awaitable[list[dict[str, Any]]]]
+def get_configured_providers() -> dict[str, BaseJobProvider]:
+    """Return configured Layer 1 job providers.
 
+    This registry is intentionally limited to trusted or relatively stable
+    free-tier sources. Providers are instantiated behind env/settings toggles
+    and omitted when they are disabled or not configured.
 
-def get_configured_providers() -> dict[str, ProviderFetcher]:
-    """Return configured provider fetchers.
-
-    Replace these imports with the actual provider modules/functions in your project.
-    Keeping registration here makes future providers easy to add.
+    Returns:
+        Mapping of provider source names to provider instances.
     """
-    providers: dict[str, ProviderFetcher] = {}
+    providers: dict[str, BaseJobProvider] = {}
 
-    try:
-        from app.services.providers.remotive import fetch_jobs as remotive_fetch_jobs
-        providers["remotive"] = remotive_fetch_jobs
-    except Exception:
-        pass
+    for provider_cls in (
+        USAJOBSProvider,
+        RemotiveProvider,
+        ArbeitNowProvider,
+        JSearchProvider,
+        JobicyProvider,
+    ):
+        try:
+            provider = provider_cls.from_env()
+        except Exception as exc:
+            logger.exception(
+                "Provider initialization failed for provider=%s",
+                provider_cls.__name__,
+                exc_info=exc,
+            )
+            continue
 
-    try:
-        from app.services.providers.adzuna import fetch_jobs as adzuna_fetch_jobs
-        providers["adzuna"] = adzuna_fetch_jobs
-    except Exception:
-        pass
+        if provider is None:
+            continue
 
-    try:
-        from app.services.providers.jsearch import fetch_jobs as jsearch_fetch_jobs
-        providers["jsearch"] = jsearch_fetch_jobs
-    except Exception:
-        pass
+        providers[provider.source_name] = provider
 
     return providers
+
+
+__all__ = [
+    "ArbeitNowProvider",
+    "BaseJobProvider",
+    "JSearchProvider",
+    "JobicyProvider",
+    "RemotiveProvider",
+    "USAJOBSProvider",
+    "get_configured_providers",
+]

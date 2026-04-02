@@ -3,6 +3,11 @@ RemoteOK job provider.
 
 Fetches and normalizes job listings from the RemoteOK public API.
 Docs: https://remoteok.com/api
+
+RemoteOk has been put on hold from production ingestion due to:
+- Inconsistent data quality (e.g. missing salary info, messy descriptions).
+- Frequent API changes that break our ingestion.
+- Country-specific job listings that don't fit our US focus.
 """
 
 from __future__ import annotations

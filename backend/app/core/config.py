@@ -1,8 +1,11 @@
 """
-Central application settings for EarlyBloom job ingestion.
+Central application settings for EarlyBloom.
 
-This config is designed for lightweight, serverless-friendly ingestion on Vercel.
+This config keeps environment-driven settings in one place and provides a
+cached settings object for the rest of the application.
 """
+
+from __future__ import annotations
 
 from functools import lru_cache
 
@@ -87,5 +90,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return cached settings instance."""
+    """Return a cached settings instance."""
     return Settings()
