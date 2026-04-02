@@ -1,169 +1,252 @@
 from __future__ import annotations
 
-import hashlib
-import html
-import re
-from abc import ABC, abstractmethod
-from typing import Iterable
+import logging
+import os
+from typing import Any
 
+import httpx
+
+from app.core.config import get_settings
 from app.schemas.jobs import NormalizedJob
+from app.services.jobs.providers.base import BaseJobProvider
+
+logger = logging.getLogger(__name__)
 
 
-_TAG_RE = re.compile(r"<[^>]+>")
-_WHITESPACE_RE = re.compile(r"\s+")
-_BULLET_SPLIT_RE = re.compile(r"(?:\n|•|\u2022|- )+")
+class JobicyProvider(BaseJobProvider):
+    """Fetch jobs from the Jobicy remote jobs API.
 
+    This provider is optional. It is useful as a supplemental remote source but
+    should sit behind a toggle so it does not complicate the core Layer 1 path.
 
-class BaseJobProvider(ABC):
-    """
-    Base interface for all job providers.
-
-    Providers should:
-    - fetch raw source data
-    - map it into NormalizedJob
-    - avoid provider-specific filtering beyond obvious source sanity checks
-
-    Shared policy decisions (global filtering, dedupe, ranking) live outside providers.
+    Docs:
+        https://jobicy.com/api/v2/remote-jobs
     """
 
-    source_name: str = "unknown"
+    source_name = "jobicy"
+    base_url = os.getenv("JOBICY_BASE_URL", "https://jobicy.com/api/v2/remote-jobs")
 
-    @abstractmethod
-    async def fetch_jobs(self) -> list[NormalizedJob]:
-        """Fetch and normalize jobs from a provider."""
-        raise NotImplementedError
-
-    def build_stable_job_id(
+    def __init__(
         self,
         *,
-        external_id: str | None = None,
-        url: str | None = None,
-        title: str,
-        company: str,
-        location: str | None = None,
-    ) -> str:
-        """
-        Build a stable ID for a normalized job.
+        timeout_seconds: float = 6.0,
+        max_jobs: int = 100,
+        pages: int = 1,
+    ) -> None:
+        self.timeout_seconds = timeout_seconds
+        self.max_jobs = max_jobs
+        self.pages = max(1, pages)
 
-        Priority:
-        1. external_id if present
-        2. URL if present
-        3. title/company/location fingerprint
-        """
-        if external_id:
-            raw = f"{self.source_name}|external|{external_id.strip()}"
-        elif url:
-            raw = f"{self.source_name}|url|{self._canonicalize_url(url)}"
-        else:
-            raw = (
-                f"{self.source_name}|fallback|"
-                f"{self._normalize_text(title)}|"
-                f"{self._normalize_text(company)}|"
-                f"{self._normalize_text(location or '')}"
-            )
+    @classmethod
+    def from_env(cls) -> "JobicyProvider | None":
+        """Build a Jobicy provider from application settings."""
+        settings = get_settings()
+        enabled = str(
+            getattr(settings, "JOB_PROVIDER_JOBICY_ENABLED", False)
+        ).strip().lower()
 
-        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
-        return f"{self.source_name}_{digest}"
+        if enabled not in {"1", "true", "yes", "on"}:
+            return None
 
-    def strip_html(self, value: str | None) -> str:
-        if not value:
-            return ""
-        text = html.unescape(value)
-        text = _TAG_RE.sub(" ", text)
-        text = _WHITESPACE_RE.sub(" ", text).strip()
-        return text
+        return cls(
+            timeout_seconds=float(getattr(settings, "JOB_PROVIDER_TIMEOUT_SECONDS", 6.0)),
+            max_jobs=int(getattr(settings, "JOB_PROVIDER_MAX_JOBS_PER_SOURCE", 100)),
+            pages=int(getattr(settings, "JOB_PROVIDER_JOBICY_PAGES", 1)),
+        )
 
-    def summarize(self, text: str, max_length: int = 280) -> str:
-        cleaned = self._normalize_text(text)
-        if len(cleaned) <= max_length:
-            return cleaned
-        return cleaned[: max_length - 1].rstrip() + "…"
+    async def fetch_jobs(self) -> list[NormalizedJob]:
+        """Fetch and normalize jobs from Jobicy."""
+        normalized_jobs: list[NormalizedJob] = []
 
-    def split_bullets(self, text: str | None, max_items: int = 8) -> list[str]:
-        if not text:
-            return []
-        cleaned = self.strip_html(text)
-        parts = [
-            self._normalize_text(part)
-            for part in _BULLET_SPLIT_RE.split(cleaned)
-            if self._normalize_text(part)
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            for page in range(1, self.pages + 1):
+                try:
+                    response = await client.get(self.base_url, params={"page": page})
+                    response.raise_for_status()
+                    payload = response.json()
+                except httpx.HTTPError as exc:
+                    logger.exception("Jobicy fetch failed on page=%s", page, exc_info=exc)
+                    break
+
+                items = self._extract_items(payload)
+                if not items:
+                    break
+
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+
+                    normalized = self._normalize_job(item)
+                    if normalized is not None:
+                        normalized_jobs.append(normalized)
+
+                    if len(normalized_jobs) >= self.max_jobs:
+                        return normalized_jobs[: self.max_jobs]
+
+        return normalized_jobs[: self.max_jobs]
+
+    def _extract_items(self, payload: Any) -> list[dict[str, Any]]:
+        """Extract job items from varying Jobicy response shapes."""
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+
+        if isinstance(payload, dict):
+            jobs = payload.get("jobs") or payload.get("posts") or payload.get("data") or []
+            if isinstance(jobs, list):
+                return [item for item in jobs if isinstance(item, dict)]
+
+        return []
+
+    def _normalize_job(self, item: dict[str, Any]) -> NormalizedJob | None:
+        """Normalize a single Jobicy job."""
+        title = self._safe_str(item.get("jobTitle") or item.get("title") or item.get("name"))
+        company = self._extract_company(item) or "Unknown Company"
+        location = self._safe_str(
+            item.get("jobGeo")
+            or item.get("location")
+            or item.get("candidate_required_location")
+            or "Remote"
+        )
+        url = self._safe_str(item.get("url") or item.get("jobUrl") or item.get("link"))
+        external_id = self._safe_str(item.get("id") or item.get("slug"))
+        description_html = self._safe_str(
+            item.get("jobDescription")
+            or item.get("description")
+            or item.get("content")
+        )
+
+        if not title or not url:
+            return None
+
+        description = self.strip_html(description_html)
+        tags = self._coerce_string_list(item.get("jobTags") or item.get("tags"))
+        remote, remote_type = self.infer_remote_type(title, location, description, "remote")
+
+        responsibilities = self._extract_section_bullets(
+            description_html,
+            section_names=("responsibilities", "what you will do", "what you'll do"),
+        )
+        qualifications = self._extract_section_bullets(
+            description_html,
+            section_names=("requirements", "qualifications"),
+        )
+        preferred_skills = self._extract_section_bullets(
+            description_html,
+            section_names=("nice to have", "preferred qualifications", "bonus"),
+            max_items=6,
+        )
+
+        job_id = self.build_stable_job_id(
+            external_id=external_id,
+            url=url,
+            title=title,
+            company=company,
+            location=location,
+        )
+
+        return NormalizedJob(
+            id=job_id,
+            title=title,
+            company=company,
+            location=location,
+            remote=remote,
+            remote_type=remote_type,
+            url=url,
+            source=self.source_name,
+            summary=self.summarize(description or title),
+            description=description,
+            responsibilities=responsibilities,
+            qualifications=qualifications,
+            required_skills=self._extract_skill_hints(description, tags),
+            preferred_skills=preferred_skills,
+            employment_type=self._safe_str(item.get("jobType")) or None,
+            experience_level=self.infer_experience_level(title, description, " ".join(tags)),
+        )
+
+    def _extract_company(self, item: dict[str, Any]) -> str:
+        """Extract a company name from varying Jobicy fields."""
+        company = self._safe_str(item.get("companyName"))
+        if company:
+            return company
+
+        company_obj = item.get("company")
+        if isinstance(company_obj, dict):
+            return self._safe_str(company_obj.get("name"))
+        if isinstance(company_obj, str):
+            return company_obj.strip()
+
+        return ""
+
+    def _extract_section_bullets(
+        self,
+        text: str,
+        *,
+        section_names: tuple[str, ...],
+        max_items: int = 8,
+    ) -> list[str]:
+        """Extract bullet-like items from common HTML sections."""
+        lowered = text.lower()
+        for section_name in section_names:
+            marker = section_name.lower()
+            index = lowered.find(marker)
+            if index == -1:
+                continue
+            snippet = text[index : index + 1800]
+            bullets = self.split_bullets(snippet, max_items=max_items)
+            if bullets:
+                return bullets
+        return []
+
+    def _extract_skill_hints(self, description: str, tags: list[str]) -> list[str]:
+        """Extract coarse skill hints from provider text and tags."""
+        skill_bank = [
+            "python",
+            "java",
+            "javascript",
+            "typescript",
+            "react",
+            "node",
+            "aws",
+            "docker",
+            "kubernetes",
+            "sql",
+            "postgres",
+            "graphql",
+            "rest",
+            "fastapi",
+            "django",
+            "flask",
+            "go",
+            "rust",
+            "c++",
+            "next.js",
+            "vue",
         ]
+        combined = f"{description} {' '.join(tags)}".casefold()
+        return [skill for skill in skill_bank if skill in combined][:10]
+
+    def _coerce_string_list(self, value: Any) -> list[str]:
+        """Coerce an arbitrary value into a clean list of strings."""
+        if not isinstance(value, list):
+            return []
+
+        cleaned: list[str] = []
         seen: set[str] = set()
-        result: list[str] = []
-        for part in parts:
-            key = part.casefold()
+
+        for item in value:
+            text = self._safe_str(item)
+            if not text:
+                continue
+            key = text.casefold()
             if key in seen:
                 continue
             seen.add(key)
-            result.append(part)
-            if len(result) >= max_items:
-                break
-        return result
+            cleaned.append(text)
 
-    def infer_remote_type(self, *candidates: str | None) -> tuple[bool, str]:
-        joined = " ".join(filter(None, candidates)).casefold()
+        return cleaned
 
-        if "hybrid" in joined:
-            return True, "hybrid"
-        if "remote" in joined or "work from home" in joined:
-            return True, "remote"
-        if "on-site" in joined or "onsite" in joined or "in office" in joined:
-            return False, "onsite"
-        return False, "unknown"
-
-    def infer_experience_level(self, *candidates: str | None) -> str:
-        text = " ".join(filter(None, candidates)).casefold()
-
-        senior_patterns = [
-            r"\bstaff\b",
-            r"\bprincipal\b",
-            r"\bsr\.?\b",
-            r"\bsenior\b",
-            r"\blead\b",
-            r"\bmanager\b",
-            r"\bdirector\b",
-            r"\barchitect\b",
-            r"\b[5-9]\+?\s+years\b",
-            r"\b1[0-9]\+?\s+years\b",
-        ]
-        mid_patterns = [
-            r"\bmid\b",
-            r"\bintermediate\b",
-            r"\b[3-4]\+?\s+years\b",
-        ]
-        junior_patterns = [
-            r"\bentry\b",
-            r"\bentry[- ]level\b",
-            r"\bjunior\b",
-            r"\bassociate\b",
-            r"\bnew grad\b",
-            r"\brecent grad\b",
-            r"\bgraduate\b",
-            r"\b0-?2\s+years\b",
-            r"\b1-?2\s+years\b",
-        ]
-
-        if any(re.search(pattern, text) for pattern in senior_patterns):
-            return "senior"
-        if any(re.search(pattern, text) for pattern in mid_patterns):
-            return "mid"
-        if any(re.search(pattern, text) for pattern in junior_patterns):
-            return "junior"
-        return "unknown"
-
-    def first_non_empty(self, values: Iterable[str | None], default: str = "") -> str:
-        for value in values:
-            if value and value.strip():
-                return value.strip()
-        return default
-
-    def _canonicalize_url(self, url: str) -> str:
-        value = url.strip()
-        value = re.sub(r"#.*$", "", value)
-        value = re.sub(r"\?.*$", "", value)
-        return value.rstrip("/")
-
-    def _normalize_text(self, value: str | None) -> str:
-        if not value:
+    def _safe_str(self, value: Any) -> str:
+        """Return a stripped string representation for arbitrary values."""
+        if value is None:
             return ""
-        return _WHITESPACE_RE.sub(" ", value).strip()
+        return str(value).strip()
