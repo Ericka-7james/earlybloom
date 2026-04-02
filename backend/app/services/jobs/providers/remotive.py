@@ -13,39 +13,39 @@ from app.services.jobs.providers.base import BaseJobProvider
 logger = logging.getLogger(__name__)
 
 
-class ArbeitNowProvider(BaseJobProvider):
-    """Fetch jobs from the ArbeitNow public API.
+class RemotiveProvider(BaseJobProvider):
+    """Fetch jobs from the Remotive public API.
 
-    This provider is useful for volume and breadth. It is not a trust anchor and
-    should be paired with downstream filtering because its listings are often
-    international and span a wide range of seniority.
+    This source is useful as a relatively clean remote-focused provider. It
+    should be treated as a trusted Layer 1 source, but not as authoritative as
+    USAJOBS for title or seniority truth.
 
     Docs:
-        https://www.arbeitnow.com/blog/job-board-api
+        https://remotive.com/remote-jobs/api
     """
 
-    source_name = "arbeitnow"
-    base_url = os.getenv("ARBEITNOW_BASE_URL", "https://www.arbeitnow.com/api/job-board-api")
+    source_name = "remotive"
+    base_url = os.getenv("REMOTIVE_BASE_URL", "https://remotive.com/api/remote-jobs")
 
     def __init__(
         self,
         *,
         timeout_seconds: float = 6.0,
         max_jobs: int = 100,
-        pages: int = 2,
-        remote_only: bool = False,
+        category: str | None = None,
+        search: str | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.max_jobs = max_jobs
-        self.pages = max(1, pages)
-        self.remote_only = remote_only
+        self.category = (category or "").strip() or None
+        self.search = (search or "").strip() or None
 
     @classmethod
-    def from_env(cls) -> "ArbeitNowProvider | None":
-        """Build an ArbeitNow provider from application settings."""
+    def from_env(cls) -> "RemotiveProvider | None":
+        """Build a Remotive provider from application settings."""
         settings = get_settings()
         enabled = str(
-            getattr(settings, "JOB_PROVIDER_ARBEITNOW_ENABLED", True)
+            getattr(settings, "JOB_PROVIDER_REMOTIVE_ENABLED", True)
         ).strip().lower()
 
         if enabled not in {"1", "true", "yes", "on"}:
@@ -54,72 +54,81 @@ class ArbeitNowProvider(BaseJobProvider):
         return cls(
             timeout_seconds=float(getattr(settings, "JOB_PROVIDER_TIMEOUT_SECONDS", 6.0)),
             max_jobs=int(getattr(settings, "JOB_PROVIDER_MAX_JOBS_PER_SOURCE", 100)),
-            pages=int(getattr(settings, "JOB_PROVIDER_ARBEITNOW_PAGES", 2)),
-            remote_only=bool(getattr(settings, "JOB_PROVIDER_ARBEITNOW_REMOTE_ONLY", False)),
+            category=getattr(settings, "JOB_PROVIDER_REMOTIVE_CATEGORY", None),
+            search=getattr(settings, "JOB_PROVIDER_REMOTIVE_SEARCH", None),
         )
 
     async def fetch_jobs(self) -> list[NormalizedJob]:
-        """Fetch and normalize jobs from ArbeitNow across configured pages."""
-        normalized_jobs: list[NormalizedJob] = []
+        """Fetch and normalize jobs from Remotive."""
+        params: dict[str, str] = {}
+        if self.category:
+            params["category"] = self.category
+        if self.search:
+            params["search"] = self.search
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            for page in range(1, self.pages + 1):
-                params: dict[str, Any] = {"page": page}
-                if self.remote_only:
-                    params["remote"] = "true"
+            try:
+                response = await client.get(self.base_url, params=params)
+                response.raise_for_status()
+                payload = response.json()
+            except httpx.HTTPError as exc:
+                logger.exception("Remotive fetch failed", exc_info=exc)
+                return []
 
-                try:
-                    response = await client.get(self.base_url, params=params)
-                    response.raise_for_status()
-                    payload = response.json()
-                except httpx.HTTPError as exc:
-                    logger.exception("ArbeitNow fetch failed on page=%s", page, exc_info=exc)
-                    break
+        jobs = payload.get("jobs", [])
+        if not isinstance(jobs, list):
+            return []
 
-                items = payload.get("data", [])
-                if not isinstance(items, list) or not items:
-                    break
+        normalized_jobs: list[NormalizedJob] = []
+        for item in jobs[: self.max_jobs]:
+            if not isinstance(item, dict):
+                continue
 
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
+            normalized = self._normalize_job(item)
+            if normalized is not None:
+                normalized_jobs.append(normalized)
 
-                    normalized = self._normalize_job(item)
-                    if normalized is not None:
-                        normalized_jobs.append(normalized)
-
-                    if len(normalized_jobs) >= self.max_jobs:
-                        return normalized_jobs[: self.max_jobs]
-
-        return normalized_jobs[: self.max_jobs]
+        return normalized_jobs
 
     def _normalize_job(self, item: dict[str, Any]) -> NormalizedJob | None:
-        """Normalize a single ArbeitNow job."""
+        """Normalize a single Remotive job."""
         title = self._safe_str(item.get("title"))
         company = self._safe_str(item.get("company_name")) or "Unknown Company"
-        location = self._safe_str(item.get("location")) or "Unknown"
+        location = self._safe_str(
+            item.get("candidate_required_location")
+            or item.get("location")
+            or "Remote"
+        )
         url = self._safe_str(item.get("url"))
-        external_id = self._safe_str(item.get("slug") or item.get("id"))
+        external_id = self._safe_str(item.get("id"))
         description_html = self._safe_str(item.get("description"))
 
         if not title or not url:
             return None
 
         description = self.strip_html(description_html)
+        remote, remote_type = self.infer_remote_type(
+            title,
+            location,
+            description,
+            "remote",
+        )
+
+        category = self._safe_str(item.get("category"))
+        job_type = self._safe_str(item.get("job_type"))
         tags = self._coerce_string_list(item.get("tags"))
-        remote, remote_type = self.infer_remote_type(title, location, description, " ".join(tags))
 
         responsibilities = self._extract_section_bullets(
             description_html,
-            section_names=("responsibilities", "your tasks", "what you will do"),
+            section_names=("responsibilities", "what you will do", "what you'll do"),
         )
         qualifications = self._extract_section_bullets(
             description_html,
-            section_names=("requirements", "qualifications", "your profile"),
+            section_names=("requirements", "qualifications", "what we’re looking for", "what we're looking for"),
         )
         preferred_skills = self._extract_section_bullets(
             description_html,
-            section_names=("nice to have", "preferred", "bonus"),
+            section_names=("nice to have", "preferred qualifications", "bonus"),
             max_items=6,
         )
 
@@ -146,8 +155,8 @@ class ArbeitNowProvider(BaseJobProvider):
             qualifications=qualifications,
             required_skills=self._extract_skill_hints(description, tags),
             preferred_skills=preferred_skills,
-            employment_type=None,
-            experience_level=self.infer_experience_level(title, description, " ".join(tags)),
+            employment_type=job_type or None,
+            experience_level=self.infer_experience_level(title, description, category, " ".join(tags)),
         )
 
     def _extract_section_bullets(
@@ -171,7 +180,7 @@ class ArbeitNowProvider(BaseJobProvider):
         return []
 
     def _extract_skill_hints(self, description: str, tags: list[str]) -> list[str]:
-        """Extract coarse skill hints from provider text and tags."""
+        """Extract coarse skill hints from description and source tags."""
         skill_bank = [
             "python",
             "java",
@@ -192,10 +201,9 @@ class ArbeitNowProvider(BaseJobProvider):
             "go",
             "rust",
             "c++",
-            "php",
-            "laravel",
-            "ruby",
-            "rails",
+            "next.js",
+            "vue",
+            "angular",
         ]
         combined = f"{description} {' '.join(tags)}".casefold()
         return [skill for skill in skill_bank if skill in combined][:10]

@@ -1,524 +1,433 @@
-"""USAJOBS job provider.
-
-This module fetches and lightly normalizes job listings from the USAJOBS Search
-API before they enter the shared EarlyBloom normalization pipeline.
-
-Current strategy:
-- Use USAJOBS as the primary and only live source
-- Support pagination so the feed is not limited to a single page
-- Preserve a focused first-round search configuration
-- Produce a clean provider-specific shape for the shared normalizer
-- Build sectioned descriptions so downstream parsing can extract structure more reliably
-
-USAJOBS requires Host, User-Agent, and Authorization-Key headers.
-"""
-
 from __future__ import annotations
 
+import logging
 import os
 import re
-from typing import Any, Dict, Iterable, List
+from typing import Any, Iterable
 
-import requests
+import httpx
 
 from app.core.config import get_settings
+from app.schemas.jobs import NormalizedJob
+from app.services.jobs.providers.base import BaseJobProvider
+
+logger = logging.getLogger(__name__)
 
 
-USAJOBS_BASE_URL = os.getenv(
-    "USAJOBS_BASE_URL",
-    "https://data.usajobs.gov/api/search",
-)
+class USAJOBSProvider(BaseJobProvider):
+    """Fetch jobs from the USAJOBS Search API.
 
-
-def fetch_usajobs_jobs() -> List[Dict[str, Any]]:
-    """Fetch raw jobs from the USAJOBS Search API.
-
-    This implementation supports paging so the provider can collect more than
-    one page of job announcements when desired.
-
-    Returns:
-        A list of raw USAJOBS SearchResultItems.
-    """
-    settings = get_settings()
-
-    if not settings.USAJOBS_API_KEY or not settings.USAJOBS_USER_AGENT:
-        print("[USAJOBS] missing API key or user agent")
-        return []
-
-    headers = {
-        "Host": "data.usajobs.gov",
-        "User-Agent": settings.USAJOBS_USER_AGENT,
-        "Authorization-Key": settings.USAJOBS_API_KEY,
-    }
-
-    requested_results_per_page = getattr(settings, "USAJOBS_RESULTS_PER_PAGE", 50) or 50
-    results_per_page = max(1, min(int(requested_results_per_page), 500))
-
-    max_total_jobs = settings.JOB_PROVIDER_MAX_JOBS_PER_SOURCE
-    if max_total_jobs <= 0:
-        return []
-
-    pages_to_fetch = max(1, (max_total_jobs + results_per_page - 1) // results_per_page)
-
-    collected_items: List[Dict[str, Any]] = []
-
-    for page in range(1, pages_to_fetch + 1):
-        params: dict[str, Any] = {
-            "ResultsPerPage": results_per_page,
-            "Page": page,
-        }
-
-        if settings.USAJOBS_JOB_CATEGORY_CODE:
-            params["JobCategoryCode"] = settings.USAJOBS_JOB_CATEGORY_CODE
-
-        if settings.USAJOBS_POSITION_OFFER_TYPE_CODE:
-            params["PositionOfferTypeCode"] = settings.USAJOBS_POSITION_OFFER_TYPE_CODE
-
-        try:
-            response = requests.get(
-                USAJOBS_BASE_URL,
-                headers=headers,
-                params=params,
-                timeout=settings.JOB_PROVIDER_TIMEOUT_SECONDS,
-            )
-            response.raise_for_status()
-            data = response.json()
-        except requests.RequestException as exc:
-            print(f"[USAJOBS] fetch failed on page {page}: {exc}")
-            break
-
-        search_result = data.get("SearchResult", {})
-        items = search_result.get("SearchResultItems", [])
-
-        if not isinstance(items, list) or not items:
-            break
-
-        collected_items.extend(item for item in items if isinstance(item, dict))
-
-        if len(items) < results_per_page:
-            break
-
-        if len(collected_items) >= max_total_jobs:
-            break
-
-    collected_items = collected_items[:max_total_jobs]
-    print(f"[USAJOBS] raw jobs fetched: {len(collected_items)}")
-    return collected_items
-
-
-def normalize_usajobs_job(job: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize a single USAJOBS item into the internal provider schema.
-
-    The returned structure is intentionally lightweight. The shared normalizer
-    performs the deeper cleaning, extraction, and filtering steps.
-
-    Args:
-        job: A USAJOBS SearchResultItem.
-
-    Returns:
-        A dictionary in the internal provider schema expected by the shared
-        normalizer.
-    """
-    descriptor = job.get("MatchedObjectDescriptor", {})
-
-    organization = (descriptor.get("OrganizationName") or "USAJOBS").strip()
-    title = (descriptor.get("PositionTitle") or "").strip()
-    url = (descriptor.get("PositionURI") or "").strip()
-
-    location = _extract_location(descriptor)
-    description = _build_description(descriptor)
-
-    return {
-        "source": "usajobs",
-        "external_id": str(descriptor.get("PositionID") or url or ""),
-        "title": title,
-        "company": organization,
-        "location": location,
-        "remote": _infer_remote_flag(descriptor, location, description),
-        "remote_type": _infer_remote_type(descriptor, location, description),
-        "url": url,
-        "salary_min": _extract_salary_min(descriptor),
-        "salary_max": _extract_salary_max(descriptor),
-        "currency": _extract_currency(descriptor),
-        "description": description,
-        "posted_at": descriptor.get("PublicationStartDate"),
-        "employment_type": _extract_employment_type(descriptor),
-        "seniority_hint": None,
-        "tags": _extract_tags(descriptor),
-    }
-
-
-def _extract_location(descriptor: Dict[str, Any]) -> str:
-    """Build a readable location string from USAJOBS location objects.
-
-    Args:
-        descriptor: USAJOBS matched object descriptor.
-
-    Returns:
-        A comma-separated location string.
-    """
-    locations = descriptor.get("PositionLocation", [])
-    location_chunks: List[str] = []
-
-    if isinstance(locations, list):
-        for loc in locations:
-            if not isinstance(loc, dict):
-                continue
-
-            city = loc.get("CityName")
-            region = loc.get("CountrySubDivision") or loc.get("CountryCode")
-            chunk = ", ".join(part for part in [city, region] if part)
-            if chunk:
-                location_chunks.append(chunk)
-
-    if not location_chunks:
-        position_location_display = descriptor.get("PositionLocationDisplay")
-        if position_location_display:
-            return str(position_location_display).strip()
-
-    return ", ".join(dict.fromkeys(location_chunks))
-
-
-def _build_description(descriptor: Dict[str, Any]) -> str | None:
-    """Build a structured description from available USAJOBS fields.
-
-    The goal is to preserve useful provider structure so downstream parsing can
-    identify summaries, responsibilities, qualifications, and related sections
+    This provider is intended to be the most trusted Layer 1 source. It performs
+    light provider-specific normalization and preserves useful text structure so
+    downstream parsing can extract responsibilities, qualifications, and skills
     more reliably.
 
-    Args:
-        descriptor: USAJOBS matched object descriptor.
-
-    Returns:
-        A sectioned description string, or None if nothing useful exists.
+    Docs:
+        https://developer.usajobs.gov/api-reference/
     """
-    details = descriptor.get("UserArea", {}).get("Details", {})
 
-    sections: list[str] = []
+    source_name = "usajobs"
+    base_url = os.getenv("USAJOBS_BASE_URL", "https://data.usajobs.gov/api/search")
 
-    _append_section(
-        sections,
-        "Job Summary",
-        details.get("JobSummary"),
-    )
-    _append_section(
-        sections,
-        "Qualifications",
-        descriptor.get("QualificationSummary"),
-    )
-    _append_section(
-        sections,
-        "Responsibilities",
-        details.get("MajorDuties"),
-    )
-    _append_section(
-        sections,
-        "Education",
-        details.get("Education"),
-    )
-    _append_section(
-        sections,
-        "How You Will Be Evaluated",
-        details.get("Evaluations"),
-    )
-    _append_section(
-        sections,
-        "How To Apply",
-        details.get("HowToApply"),
-    )
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        user_agent: str,
+        timeout_seconds: float = 6.0,
+        max_jobs: int = 100,
+        results_per_page: int = 50,
+        job_category_code: str | None = None,
+        position_offer_type_code: str | None = None,
+    ) -> None:
+        self.api_key = api_key.strip()
+        self.user_agent = user_agent.strip()
+        self.timeout_seconds = timeout_seconds
+        self.max_jobs = max_jobs
+        self.results_per_page = max(1, min(results_per_page, 500))
+        self.job_category_code = (job_category_code or "").strip() or None
+        self.position_offer_type_code = (position_offer_type_code or "").strip() or None
 
-    if not sections:
-        return None
+    @classmethod
+    def from_env(cls) -> "USAJOBSProvider | None":
+        """Build a USAJOBS provider from application settings."""
+        settings = get_settings()
 
-    return "\n\n".join(sections).strip()
+        api_key = getattr(settings, "USAJOBS_API_KEY", "") or ""
+        user_agent = getattr(settings, "USAJOBS_USER_AGENT", "") or ""
+        enabled = str(
+            getattr(settings, "JOB_PROVIDER_USAJOBS_ENABLED", True)
+        ).strip().lower()
 
+        if enabled not in {"1", "true", "yes", "on"}:
+            return None
 
-def _append_section(sections: list[str], heading: str, content: Any) -> None:
-    """Append a formatted section if content is present.
+        if not api_key or not user_agent:
+            logger.warning(
+                "USAJOBS provider enabled but USAJOBS_API_KEY or USAJOBS_USER_AGENT is missing."
+            )
+            return None
 
-    Args:
-        sections: Mutable list of rendered section strings.
-        heading: Section heading.
-        content: Raw content from USAJOBS.
-    """
-    rendered_body = _render_section_body(content)
-    if not rendered_body:
-        return
+        return cls(
+            api_key=api_key,
+            user_agent=user_agent,
+            timeout_seconds=float(getattr(settings, "JOB_PROVIDER_TIMEOUT_SECONDS", 6.0)),
+            max_jobs=int(getattr(settings, "JOB_PROVIDER_MAX_JOBS_PER_SOURCE", 100)),
+            results_per_page=int(getattr(settings, "USAJOBS_RESULTS_PER_PAGE", 50)),
+            job_category_code=getattr(settings, "USAJOBS_JOB_CATEGORY_CODE", None),
+            position_offer_type_code=getattr(
+                settings, "USAJOBS_POSITION_OFFER_TYPE_CODE", None
+            ),
+        )
 
-    section_text = f"{heading}:\n{rendered_body}".strip()
-    if section_text not in sections:
-        sections.append(section_text)
+    async def fetch_jobs(self) -> list[NormalizedJob]:
+        """Fetch and normalize jobs from USAJOBS."""
+        headers = {
+            "Host": "data.usajobs.gov",
+            "User-Agent": self.user_agent,
+            "Authorization-Key": self.api_key,
+        }
 
+        pages_to_fetch = max(1, (self.max_jobs + self.results_per_page - 1) // self.results_per_page)
+        normalized_jobs: list[NormalizedJob] = []
 
-def _render_section_body(content: Any) -> str:
-    """Render arbitrary USAJOBS content into readable section text.
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            for page in range(1, pages_to_fetch + 1):
+                params: dict[str, Any] = {
+                    "ResultsPerPage": self.results_per_page,
+                    "Page": page,
+                }
 
-    Args:
-        content: Raw field content from USAJOBS.
+                if self.job_category_code:
+                    params["JobCategoryCode"] = self.job_category_code
 
-    Returns:
-        Rendered section body text.
-    """
-    if content is None:
-        return ""
+                if self.position_offer_type_code:
+                    params["PositionOfferTypeCode"] = self.position_offer_type_code
 
-    if isinstance(content, str):
-        return _normalize_paragraph_text(content)
+                try:
+                    response = await client.get(self.base_url, headers=headers, params=params)
+                    response.raise_for_status()
+                    payload = response.json()
+                except httpx.HTTPError as exc:
+                    logger.exception("USAJOBS fetch failed on page=%s", page, exc_info=exc)
+                    break
 
-    if isinstance(content, list):
-        return _render_list_content(content)
+                items = (
+                    payload.get("SearchResult", {})
+                    .get("SearchResultItems", [])
+                )
+                if not isinstance(items, list) or not items:
+                    break
 
-    if isinstance(content, dict):
-        values = []
-        for value in content.values():
-            rendered = _render_section_body(value)
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+
+                    normalized = self._normalize_job(item)
+                    if normalized is not None:
+                        normalized_jobs.append(normalized)
+
+                    if len(normalized_jobs) >= self.max_jobs:
+                        return normalized_jobs[: self.max_jobs]
+
+                if len(items) < self.results_per_page:
+                    break
+
+        return normalized_jobs[: self.max_jobs]
+
+    def _normalize_job(self, item: dict[str, Any]) -> NormalizedJob | None:
+        """Normalize a single USAJOBS search result item."""
+        descriptor = item.get("MatchedObjectDescriptor") or {}
+        if not isinstance(descriptor, dict):
+            return None
+
+        title = self._safe_str(descriptor.get("PositionTitle"))
+        url = self._safe_str(descriptor.get("PositionURI"))
+        external_id = self._safe_str(descriptor.get("PositionID"))
+        company = self._safe_str(descriptor.get("OrganizationName")) or "USAJOBS"
+        location = self._extract_location(descriptor) or "Unknown"
+        description = self._build_description(descriptor)
+
+        if not title or not url:
+            return None
+
+        remote, remote_type = self.infer_remote_type(
+            title,
+            location,
+            description,
+            self._safe_str(descriptor.get("PositionLocationDisplay")),
+            self._safe_str(descriptor.get("QualificationSummary")),
+            self._safe_str(
+                (descriptor.get("UserArea", {}) or {}).get("Details", {}).get("JobSummary")
+            ),
+            " ".join(self._extract_tags(descriptor)),
+        )
+
+        job_id = self.build_stable_job_id(
+            external_id=external_id,
+            url=url,
+            title=title,
+            company=company,
+            location=location,
+        )
+
+        plain_description = self.strip_html(description)
+        summary = self.summarize(plain_description or title)
+
+        responsibilities = self._extract_section_bullets(
+            description,
+            section_names=("responsibilities", "major duties"),
+        )
+        qualifications = self._extract_section_bullets(
+            description,
+            section_names=("qualifications",),
+        )
+        preferred_skills = self._extract_section_bullets(
+            description,
+            section_names=("how you will be evaluated", "education"),
+            max_items=6,
+        )
+
+        return NormalizedJob(
+            id=job_id,
+            title=title,
+            company=company,
+            location=location,
+            remote=remote,
+            remote_type=remote_type,
+            url=url,
+            source=self.source_name,
+            summary=summary,
+            description=plain_description,
+            responsibilities=responsibilities,
+            qualifications=qualifications,
+            required_skills=self._extract_skill_hints(plain_description),
+            preferred_skills=preferred_skills,
+            employment_type=self._extract_employment_type(descriptor),
+            experience_level=self.infer_experience_level(title, plain_description),
+        )
+
+    def _extract_location(self, descriptor: dict[str, Any]) -> str:
+        """Build a readable location string from USAJOBS location objects."""
+        locations = descriptor.get("PositionLocation", [])
+        chunks: list[str] = []
+
+        if isinstance(locations, list):
+            for location in locations:
+                if not isinstance(location, dict):
+                    continue
+                city = self._safe_str(location.get("CityName"))
+                region = self._safe_str(
+                    location.get("CountrySubDivision") or location.get("CountryCode")
+                )
+                chunk = ", ".join(part for part in [city, region] if part)
+                if chunk:
+                    chunks.append(chunk)
+
+        if chunks:
+            return ", ".join(dict.fromkeys(chunks))
+
+        return self._safe_str(descriptor.get("PositionLocationDisplay"))
+
+    def _build_description(self, descriptor: dict[str, Any]) -> str:
+        """Build a structured description from USAJOBS fields."""
+        details = (descriptor.get("UserArea", {}) or {}).get("Details", {}) or {}
+
+        sections: list[str] = []
+        self._append_section(sections, "Job Summary", details.get("JobSummary"))
+        self._append_section(sections, "Qualifications", descriptor.get("QualificationSummary"))
+        self._append_section(sections, "Responsibilities", details.get("MajorDuties"))
+        self._append_section(sections, "Education", details.get("Education"))
+        self._append_section(sections, "How You Will Be Evaluated", details.get("Evaluations"))
+        self._append_section(sections, "How To Apply", details.get("HowToApply"))
+
+        return "\n\n".join(sections).strip()
+
+    def _append_section(self, sections: list[str], heading: str, content: Any) -> None:
+        """Append a rendered section if content exists."""
+        body = self._render_section_body(content)
+        if not body:
+            return
+        section = f"{heading}:\n{body}".strip()
+        if section not in sections:
+            sections.append(section)
+
+    def _render_section_body(self, content: Any) -> str:
+        """Render USAJOBS field content into readable text."""
+        if content is None:
+            return ""
+
+        if isinstance(content, str):
+            return self._normalize_paragraph_text(content)
+
+        if isinstance(content, list):
+            return self._render_list_content(content)
+
+        if isinstance(content, dict):
+            values: list[str] = []
+            for value in content.values():
+                rendered = self._render_section_body(value)
+                if rendered:
+                    values.append(rendered)
+            return "\n".join(values).strip()
+
+        return self._normalize_paragraph_text(str(content))
+
+    def _render_list_content(self, items: Iterable[Any]) -> str:
+        """Render a list of values into bullets or paragraphs."""
+        rendered_items: list[str] = []
+        for item in items:
+            rendered = self._render_section_body(item)
             if rendered:
-                values.append(rendered)
-        return "\n".join(values).strip()
+                rendered_items.append(rendered.strip())
 
-    return _normalize_paragraph_text(str(content))
+        if not rendered_items:
+            return ""
 
+        if all("\n" not in item and len(item) <= 500 for item in rendered_items):
+            return "\n".join(f"- {item}" for item in rendered_items)
 
-def _render_list_content(items: Iterable[Any]) -> str:
-    """Render list-like content as bullet points or paragraphs.
+        return "\n\n".join(rendered_items)
 
-    Args:
-        items: Sequence of list items.
+    def _normalize_paragraph_text(self, text: str) -> str:
+        """Normalize paragraph-style provider text while preserving structure."""
+        normalized = text.replace("\r", "\n").replace("\u00a0", " ")
+        normalized = re.sub(r"[ \t]+", " ", normalized)
+        normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+        normalized = re.sub(r"[ \t]+\n", "\n", normalized)
+        normalized = re.sub(r"\n[ \t]+", "\n", normalized)
+        return normalized.strip()
 
-    Returns:
-        A bullet-formatted or paragraph-formatted string.
-    """
-    rendered_items: list[str] = []
+    def _extract_employment_type(self, descriptor: dict[str, Any]) -> str | None:
+        """Extract employment type from position schedule."""
+        schedules = descriptor.get("PositionSchedule", [])
+        if isinstance(schedules, list) and schedules:
+            first = schedules[0]
+            if isinstance(first, dict):
+                return self._safe_str(first.get("Name")) or None
+            return self._safe_str(first) or None
+        return None
 
-    for item in items:
-        rendered = _render_section_body(item)
-        if not rendered:
-            continue
+    def _extract_tags(self, descriptor: dict[str, Any]) -> list[str]:
+        """Extract useful category tags from USAJOBS fields."""
+        tags: list[str] = []
 
-        if "\n" in rendered:
-            rendered = rendered.strip()
+        categories = descriptor.get("JobCategory", [])
+        if isinstance(categories, list):
+            for item in categories:
+                if isinstance(item, dict):
+                    value = self._safe_str(item.get("Name"))
+                    if value:
+                        tags.append(value)
 
-        rendered_items.append(rendered)
+        hiring_paths = (
+            (descriptor.get("UserArea", {}) or {})
+            .get("Details", {})
+            .get("HiringPath", [])
+        )
+        if isinstance(hiring_paths, list):
+            for item in hiring_paths:
+                if isinstance(item, dict):
+                    value = self._safe_str(item.get("Name"))
+                    if value:
+                        tags.append(value)
 
-    if not rendered_items:
-        return ""
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for tag in tags:
+            key = tag.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(tag)
 
-    # If the items are short-ish and separate, use bullets. Otherwise preserve paragraphs.
-    if all("\n" not in item and len(item) <= 500 for item in rendered_items):
-        return "\n".join(f"- {item}" for item in rendered_items)
+        return deduped
 
-    return "\n\n".join(rendered_items)
+    def _extract_salary_min(self, descriptor: dict[str, Any]) -> int | None:
+        """Extract minimum salary from remuneration data."""
+        remuneration = descriptor.get("PositionRemuneration", [])
+        if not isinstance(remuneration, list) or not remuneration:
+            return None
+        value = remuneration[0].get("MinimumRange")
+        try:
+            return int(float(value)) if value is not None else None
+        except (TypeError, ValueError):
+            return None
 
+    def _extract_salary_max(self, descriptor: dict[str, Any]) -> int | None:
+        """Extract maximum salary from remuneration data."""
+        remuneration = descriptor.get("PositionRemuneration", [])
+        if not isinstance(remuneration, list) or not remuneration:
+            return None
+        value = remuneration[0].get("MaximumRange")
+        try:
+            return int(float(value)) if value is not None else None
+        except (TypeError, ValueError):
+            return None
 
-def _normalize_paragraph_text(text: str) -> str:
-    """Normalize paragraph-style provider text.
+    def _extract_section_bullets(
+        self,
+        text: str,
+        *,
+        section_names: tuple[str, ...],
+        max_items: int = 8,
+    ) -> list[str]:
+        """Extract bullets from a named section in the rendered provider text."""
+        if not text:
+            return []
 
-    Args:
-        text: Raw text.
+        lowered = text.lower()
+        matched_index = -1
+        matched_name = ""
 
-    Returns:
-        Cleaned paragraph text with readable spacing preserved.
-    """
-    normalized = text.replace("\r", "\n")
-    normalized = normalized.replace("\u00a0", " ")
-    normalized = re.sub(r"[ \t]+", " ", normalized)
-    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
-    normalized = re.sub(r"[ \t]+\n", "\n", normalized)
-    normalized = re.sub(r"\n[ \t]+", "\n", normalized)
-    return normalized.strip()
+        for name in section_names:
+            index = lowered.find(f"{name.lower()}:")
+            if index != -1:
+                matched_index = index
+                matched_name = name
+                break
 
+        if matched_index == -1:
+            return []
 
-def _infer_remote_flag(
-    descriptor: Dict[str, Any],
-    location: str,
-    description: str | None,
-) -> bool:
-    """Infer whether a USAJOBS role should be treated as remote.
+        remainder = text[matched_index + len(matched_name) + 1 :]
+        next_header = re.search(r"\n[A-Z][A-Za-z /]+:\n", remainder)
+        if next_header:
+            remainder = remainder[: next_header.start()]
 
-    Args:
-        descriptor: USAJOBS matched object descriptor.
-        location: Normalized location string.
-        description: Combined description text.
+        return self.split_bullets(remainder[:1500], max_items=max_items)
 
-    Returns:
-        True if the role appears remote or telework-based, otherwise False.
-    """
-    combined = " ".join(
-        str(value or "")
-        for value in [
-            location,
-            descriptor.get("PositionTitle"),
-            descriptor.get("QualificationSummary"),
-            description,
-            descriptor.get("PositionSchedule"),
-            descriptor.get("UserArea", {}).get("Details", {}).get("JobSummary"),
+    def _extract_skill_hints(self, description: str) -> list[str]:
+        """Extract coarse skill hints from provider text."""
+        skill_bank = [
+            "python",
+            "java",
+            "javascript",
+            "typescript",
+            "react",
+            "node",
+            "aws",
+            "docker",
+            "kubernetes",
+            "sql",
+            "postgres",
+            "graphql",
+            "rest",
+            "fastapi",
+            "django",
+            "flask",
+            "go",
+            "rust",
+            "c++",
+            "security",
+            "linux",
+            "cloud",
         ]
-    ).lower()
+        lowered = description.casefold()
+        return [skill for skill in skill_bank if skill in lowered][:10]
 
-    return "remote" in combined or "telework" in combined
-
-
-def _infer_remote_type(
-    descriptor: Dict[str, Any],
-    location: str,
-    description: str | None,
-) -> str:
-    """Infer remote classification from USAJOBS fields.
-
-    Args:
-        descriptor: USAJOBS matched object descriptor.
-        location: Normalized location string.
-        description: Combined description text.
-
-    Returns:
-        One of the coarse remote type labels used by the shared schema.
-    """
-    combined = " ".join(
-        str(value or "")
-        for value in [
-            location,
-            descriptor.get("PositionTitle"),
-            descriptor.get("QualificationSummary"),
-            description,
-            descriptor.get("PositionSchedule"),
-            descriptor.get("UserArea", {}).get("Details", {}).get("JobSummary"),
-        ]
-    ).lower()
-
-    if "hybrid" in combined:
-        return "hybrid"
-
-    if "remote" in combined or "telework" in combined:
-        return "remote"
-
-    return "unknown"
-
-
-def _extract_salary_min(descriptor: Dict[str, Any]) -> int | None:
-    """Extract minimum salary from USAJOBS remuneration data.
-
-    Args:
-        descriptor: USAJOBS matched object descriptor.
-
-    Returns:
-        The minimum salary if parseable, otherwise None.
-    """
-    remuneration = descriptor.get("PositionRemuneration", [])
-    if not remuneration or not isinstance(remuneration, list):
-        return None
-
-    value = remuneration[0].get("MinimumRange")
-    try:
-        return int(float(value)) if value is not None else None
-    except (ValueError, TypeError):
-        return None
-
-
-def _extract_salary_max(descriptor: Dict[str, Any]) -> int | None:
-    """Extract maximum salary from USAJOBS remuneration data.
-
-    Args:
-        descriptor: USAJOBS matched object descriptor.
-
-    Returns:
-        The maximum salary if parseable, otherwise None.
-    """
-    remuneration = descriptor.get("PositionRemuneration", [])
-    if not remuneration or not isinstance(remuneration, list):
-        return None
-
-    value = remuneration[0].get("MaximumRange")
-    try:
-        return int(float(value)) if value is not None else None
-    except (ValueError, TypeError):
-        return None
-
-
-def _extract_currency(descriptor: Dict[str, Any]) -> str | None:
-    """Extract compensation currency code.
-
-    USAJOBS often exposes rate interval codes rather than a pure currency code.
-    For now, keep compatibility with the existing internal shape and default
-    to USD when remuneration exists.
-
-    Args:
-        descriptor: USAJOBS matched object descriptor.
-
-    Returns:
-        A currency string or None.
-    """
-    remuneration = descriptor.get("PositionRemuneration", [])
-    if not remuneration or not isinstance(remuneration, list):
-        return None
-
-    return "USD"
-
-
-def _extract_employment_type(descriptor: Dict[str, Any]) -> str | None:
-    """Extract employment type from the position schedule.
-
-    Args:
-        descriptor: USAJOBS matched object descriptor.
-
-    Returns:
-        A human-readable schedule label if available.
-    """
-    schedules = descriptor.get("PositionSchedule", [])
-    if isinstance(schedules, list) and schedules:
-        first = schedules[0]
-        if isinstance(first, dict):
-            return first.get("Name")
-        return str(first)
-
-    return None
-
-
-def _extract_tags(descriptor: Dict[str, Any]) -> List[str]:
-    """Extract useful category tags from USAJOBS fields.
-
-    Args:
-        descriptor: USAJOBS matched object descriptor.
-
-    Returns:
-        A list of category labels for downstream display or parsing.
-    """
-    tags: List[str] = []
-
-    series = descriptor.get("JobCategory", [])
-    if isinstance(series, list):
-        for item in series:
-            if isinstance(item, dict) and item.get("Name"):
-                tags.append(str(item["Name"]).strip())
-
-    hiring_paths = descriptor.get("UserArea", {}).get("Details", {}).get("HiringPath", [])
-    if isinstance(hiring_paths, list):
-        for item in hiring_paths:
-            if isinstance(item, dict) and item.get("Name"):
-                tags.append(str(item["Name"]).strip())
-
-    deduped: List[str] = []
-    seen: set[str] = set()
-    for tag in tags:
-        lowered = tag.casefold()
-        if lowered in seen:
-            continue
-        seen.add(lowered)
-        deduped.append(tag)
-
-    return deduped
-
-
-def get_usajobs_jobs() -> List[Dict[str, Any]]:
-    """Fetch and normalize USAJOBS jobs.
-
-    Returns:
-        A list of provider-normalized USAJOBS jobs.
-    """
-    raw_jobs = fetch_usajobs_jobs()
-    normalized_jobs: List[Dict[str, Any]] = []
-
-    for job in raw_jobs:
-        normalized_jobs.append(normalize_usajobs_job(job))
-
-    print(f"[USAJOBS] normalized jobs: {len(normalized_jobs)}")
-    return normalized_jobs
+    def _safe_str(self, value: Any) -> str:
+        """Return a stripped string representation for arbitrary values."""
+        if value is None:
+            return ""
+        return str(value).strip()

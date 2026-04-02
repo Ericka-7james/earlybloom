@@ -307,4 +307,4 @@ def should_include_job(
             normalized_role_type=normalized_role_type,
             selected_role_types=options.selected_role_types,
         )
-    )jobs
+    )
