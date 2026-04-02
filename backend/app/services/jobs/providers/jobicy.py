@@ -7,21 +7,13 @@ from typing import Any
 import httpx
 
 from app.core.config import get_settings
-from app.schemas.jobs import NormalizedJob
 from app.services.jobs.providers.base import BaseJobProvider
 
 logger = logging.getLogger(__name__)
 
 
 class JobicyProvider(BaseJobProvider):
-    """Fetch jobs from the Jobicy remote jobs API.
-
-    This provider is optional. It is useful as a supplemental remote source but
-    should sit behind a toggle so it does not complicate the core Layer 1 path.
-
-    Docs:
-        https://jobicy.com/api/v2/remote-jobs
-    """
+    """Fetch jobs from the Jobicy remote jobs API."""
 
     source_name = "jobicy"
     base_url = os.getenv("JOBICY_BASE_URL", "https://jobicy.com/api/v2/remote-jobs")
@@ -39,7 +31,6 @@ class JobicyProvider(BaseJobProvider):
 
     @classmethod
     def from_env(cls) -> "JobicyProvider | None":
-        """Build a Jobicy provider from application settings."""
         settings = get_settings()
         enabled = str(
             getattr(settings, "JOB_PROVIDER_JOBICY_ENABLED", False)
@@ -54,9 +45,8 @@ class JobicyProvider(BaseJobProvider):
             pages=int(getattr(settings, "JOB_PROVIDER_JOBICY_PAGES", 1)),
         )
 
-    async def fetch_jobs(self) -> list[NormalizedJob]:
-        """Fetch and normalize jobs from Jobicy."""
-        normalized_jobs: list[NormalizedJob] = []
+    async def fetch_jobs(self) -> list[dict[str, Any]]:
+        jobs: list[dict[str, Any]] = []
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             for page in range(1, self.pages + 1):
@@ -78,15 +68,14 @@ class JobicyProvider(BaseJobProvider):
 
                     normalized = self._normalize_job(item)
                     if normalized is not None:
-                        normalized_jobs.append(normalized)
+                        jobs.append(normalized)
 
-                    if len(normalized_jobs) >= self.max_jobs:
-                        return normalized_jobs[: self.max_jobs]
+                    if len(jobs) >= self.max_jobs:
+                        return jobs[: self.max_jobs]
 
-        return normalized_jobs[: self.max_jobs]
+        return jobs[: self.max_jobs]
 
     def _extract_items(self, payload: Any) -> list[dict[str, Any]]:
-        """Extract job items from varying Jobicy response shapes."""
         if isinstance(payload, list):
             return [item for item in payload if isinstance(item, dict)]
 
@@ -97,8 +86,7 @@ class JobicyProvider(BaseJobProvider):
 
         return []
 
-    def _normalize_job(self, item: dict[str, Any]) -> NormalizedJob | None:
-        """Normalize a single Jobicy job."""
+    def _normalize_job(self, item: dict[str, Any]) -> dict[str, Any] | None:
         title = self._safe_str(item.get("jobTitle") or item.get("title") or item.get("name"))
         company = self._extract_company(item) or "Unknown Company"
         location = self._safe_str(
@@ -115,56 +103,42 @@ class JobicyProvider(BaseJobProvider):
             or item.get("content")
         )
 
-        if not title or not url:
+        if not title or not company or not url:
             return None
 
         description = self.strip_html(description_html)
         tags = self._coerce_string_list(item.get("jobTags") or item.get("tags"))
         remote, remote_type = self.infer_remote_type(title, location, description, "remote")
 
-        responsibilities = self._extract_section_bullets(
-            description_html,
-            section_names=("responsibilities", "what you will do", "what you'll do"),
-        )
-        qualifications = self._extract_section_bullets(
-            description_html,
-            section_names=("requirements", "qualifications"),
-        )
-        preferred_skills = self._extract_section_bullets(
-            description_html,
-            section_names=("nice to have", "preferred qualifications", "bonus"),
-            max_items=6,
-        )
-
-        job_id = self.build_stable_job_id(
-            external_id=external_id,
-            url=url,
-            title=title,
-            company=company,
-            location=location,
-        )
-
-        return NormalizedJob(
-            id=job_id,
-            title=title,
-            company=company,
-            location=location,
-            remote=remote,
-            remote_type=remote_type,
-            url=url,
-            source=self.source_name,
-            summary=self.summarize(description or title),
-            description=description,
-            responsibilities=responsibilities,
-            qualifications=qualifications,
-            required_skills=self._extract_skill_hints(description, tags),
-            preferred_skills=preferred_skills,
-            employment_type=self._safe_str(item.get("jobType")) or None,
-            experience_level=self.infer_experience_level(title, description, " ".join(tags)),
-        )
+        return {
+            "source": self.source_name,
+            "external_id": external_id or self.build_stable_job_id(
+                external_id=external_id,
+                url=url,
+                title=title,
+                company=company,
+                location=location,
+            ),
+            "title": title,
+            "company": company,
+            "location": location,
+            "remote": remote,
+            "remote_type": remote_type,
+            "url": url,
+            "salary_min": None,
+            "salary_max": None,
+            "currency": None,
+            "description": description_html or description,
+            "summary": self.summarize(description or title),
+            "posted_at": self._safe_str(
+                item.get("pubDate") or item.get("published") or item.get("date")
+            ) or None,
+            "employment_type": self._safe_str(item.get("jobType")) or None,
+            "seniority_hint": self.infer_experience_level(title, description, " ".join(tags)),
+            "tags": tags,
+        }
 
     def _extract_company(self, item: dict[str, Any]) -> str:
-        """Extract a company name from varying Jobicy fields."""
         company = self._safe_str(item.get("companyName"))
         if company:
             return company
@@ -177,56 +151,7 @@ class JobicyProvider(BaseJobProvider):
 
         return ""
 
-    def _extract_section_bullets(
-        self,
-        text: str,
-        *,
-        section_names: tuple[str, ...],
-        max_items: int = 8,
-    ) -> list[str]:
-        """Extract bullet-like items from common HTML sections."""
-        lowered = text.lower()
-        for section_name in section_names:
-            marker = section_name.lower()
-            index = lowered.find(marker)
-            if index == -1:
-                continue
-            snippet = text[index : index + 1800]
-            bullets = self.split_bullets(snippet, max_items=max_items)
-            if bullets:
-                return bullets
-        return []
-
-    def _extract_skill_hints(self, description: str, tags: list[str]) -> list[str]:
-        """Extract coarse skill hints from provider text and tags."""
-        skill_bank = [
-            "python",
-            "java",
-            "javascript",
-            "typescript",
-            "react",
-            "node",
-            "aws",
-            "docker",
-            "kubernetes",
-            "sql",
-            "postgres",
-            "graphql",
-            "rest",
-            "fastapi",
-            "django",
-            "flask",
-            "go",
-            "rust",
-            "c++",
-            "next.js",
-            "vue",
-        ]
-        combined = f"{description} {' '.join(tags)}".casefold()
-        return [skill for skill in skill_bank if skill in combined][:10]
-
     def _coerce_string_list(self, value: Any) -> list[str]:
-        """Coerce an arbitrary value into a clean list of strings."""
         if not isinstance(value, list):
             return []
 
@@ -246,7 +171,6 @@ class JobicyProvider(BaseJobProvider):
         return cleaned
 
     def _safe_str(self, value: Any) -> str:
-        """Return a stripped string representation for arbitrary values."""
         if value is None:
             return ""
         return str(value).strip()
