@@ -18,6 +18,10 @@ from app.services.jobs.parsing import (
     extract_summary,
     split_required_and_preferred_skills,
 )
+from app.services.jobs.providers.common.title_rules import (
+    is_early_career_title,
+    is_obviously_senior_title,
+)
 from app.services.jobs.us_filters import (
     detect_spam_or_scam,
     should_keep_us_focused_job,
@@ -42,17 +46,28 @@ _EXPERIENCE_LEVEL_ALIASES = {
 }
 
 
-def normalize_provider_job(raw_job: dict[str, Any], source: str) -> NormalizedJob | None:
-    """Normalize a provider-normalized raw job payload into the shared schema.
+def normalize_provider_job(raw_job: dict[str, Any] | NormalizedJob, source: str) -> NormalizedJob | None:
+    """Normalize a provider payload into the shared schema.
 
-    Args:
-        raw_job: Provider-normalized raw job payload.
-        source: Provider source name.
+    Accepts either:
+    - a legacy provider-normalized dict
+    - an already-built NormalizedJob
 
     Returns:
         A fully normalized job or None when the record should be dropped.
     """
     try:
+        if isinstance(raw_job, NormalizedJob):
+            return _normalize_existing_job(raw_job)
+
+        if not isinstance(raw_job, dict):
+            logger.debug(
+                "Skipping unsupported job payload type. source=%s type=%s",
+                source,
+                type(raw_job).__name__,
+            )
+            return None
+
         title = _safe_str(raw_job.get("title") or raw_job.get("job_title"))
         company = _safe_str(raw_job.get("company") or raw_job.get("company_name"))
         location = _safe_str(
@@ -85,7 +100,14 @@ def normalize_provider_job(raw_job: dict[str, Any], source: str) -> NormalizedJo
         provider_summary = _safe_str(raw_job.get("summary"))
         provider_salary_min = _coerce_int(raw_job.get("salary_min"))
         provider_salary_max = _coerce_int(raw_job.get("salary_max"))
-        provider_salary_currency = _safe_str(raw_job.get("currency") or raw_job.get("salary_currency")) or None
+        provider_salary_currency = (
+            _safe_str(raw_job.get("currency") or raw_job.get("salary_currency")) or None
+        )
+
+        provider_responsibilities = _coerce_string_list(raw_job.get("responsibilities"))
+        provider_qualifications = _coerce_string_list(raw_job.get("qualifications"))
+        provider_required_skills = _coerce_string_list(raw_job.get("required_skills"))
+        provider_preferred_skills = _coerce_string_list(raw_job.get("preferred_skills"))
 
         cleaned_description = clean_description(raw_description)
 
@@ -119,12 +141,16 @@ def normalize_provider_job(raw_job: dict[str, Any], source: str) -> NormalizedJo
             )
             return None
 
-        responsibilities = extract_responsibilities(cleaned_description)
-        qualifications = extract_qualifications(cleaned_description)
-        required_skills, preferred_skills = split_required_and_preferred_skills(
+        responsibilities = provider_responsibilities or extract_responsibilities(cleaned_description)
+        qualifications = provider_qualifications or extract_qualifications(cleaned_description)
+
+        parsed_required_skills, parsed_preferred_skills = split_required_and_preferred_skills(
             qualifications=qualifications,
             description=cleaned_description,
         )
+
+        required_skills = provider_required_skills or parsed_required_skills
+        preferred_skills = provider_preferred_skills or parsed_preferred_skills
 
         parsed_salary_min, parsed_salary_max, parsed_salary_currency = extract_salary(
             cleaned_description
@@ -138,7 +164,9 @@ def normalize_provider_job(raw_job: dict[str, Any], source: str) -> NormalizedJo
             location=location,
             description=cleaned_description,
         )
-        remote_type = provider_remote_type if provider_remote_type != "unknown" else parsed_remote_type
+        remote_type = (
+            provider_remote_type if provider_remote_type != "unknown" else parsed_remote_type
+        )
         remote = bool(provider_remote_flag) or remote_type == "remote"
 
         parsed_experience_level = detect_experience_level(
@@ -183,6 +211,99 @@ def normalize_provider_job(raw_job: dict[str, Any], source: str) -> NormalizedJo
     except Exception:
         logger.exception("Failed to normalize provider job. source=%s raw_job=%s", source, raw_job)
         return None
+
+
+def _normalize_existing_job(job: NormalizedJob) -> NormalizedJob | None:
+    """Validate and lightly enrich an already-normalized job."""
+    title = _safe_str(job.title)
+    company = _safe_str(job.company)
+    location = _safe_str(job.location)
+    url = _safe_str(job.url)
+    description = clean_description(job.description or "")
+
+    if not title or not company or not url:
+        return None
+
+    if detect_spam_or_scam(
+        title=title,
+        company=company,
+        location=location,
+        description=description,
+        url=url,
+    ):
+        return None
+
+    if not should_keep_us_focused_job(
+        title=title,
+        location=location,
+        description=description,
+        remote_flag=bool(job.remote),
+    ):
+        return None
+
+    experience_level = _normalize_experience_hint(job.experience_level) or detect_experience_level(
+        title=title,
+        description=description,
+    )
+    experience_level = _apply_title_override(title=title, experience_level=experience_level)
+
+    responsibilities = job.responsibilities or extract_responsibilities(description)
+    qualifications = job.qualifications or extract_qualifications(description)
+
+    parsed_required_skills, parsed_preferred_skills = split_required_and_preferred_skills(
+        qualifications=qualifications,
+        description=description,
+    )
+
+    required_skills = job.required_skills or parsed_required_skills
+    preferred_skills = job.preferred_skills or parsed_preferred_skills
+
+    salary_min = job.salary_min
+    salary_max = job.salary_max
+    salary_currency = job.salary_currency
+
+    if salary_min is None and salary_max is None:
+        parsed_salary_min, parsed_salary_max, parsed_salary_currency = extract_salary(description)
+        salary_min = parsed_salary_min
+        salary_max = parsed_salary_max
+        salary_currency = salary_currency or parsed_salary_currency
+
+    remote_type = job.remote_type
+    if remote_type == "unknown":
+        remote_type = detect_remote_type(
+            title=title,
+            location=location,
+            description=description,
+        )
+
+    return NormalizedJob(
+        id=job.id or _build_job_id(
+            source=job.source,
+            external_id="",
+            url=url,
+            title=title,
+            company=company,
+            location=location,
+        ),
+        title=title,
+        company=company,
+        location=location or "Unknown",
+        remote=bool(job.remote) or remote_type == "remote",
+        remote_type=remote_type,
+        url=url,
+        source=job.source,
+        summary=job.summary or extract_summary(description),
+        description=description,
+        responsibilities=responsibilities,
+        qualifications=qualifications,
+        required_skills=required_skills,
+        preferred_skills=preferred_skills,
+        employment_type=job.employment_type or detect_employment_type(description),
+        experience_level=experience_level,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+    )
 
 
 def _build_job_id(
@@ -242,6 +363,27 @@ def _coerce_int(value: Any) -> int | None:
         return None
 
 
+def _coerce_string_list(value: Any) -> list[str]:
+    """Coerce string-ish lists while preserving order."""
+    if not isinstance(value, list):
+        return []
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+
+    for item in value:
+        text = _safe_str(item)
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(text)
+
+    return cleaned
+
+
 def _normalize_remote_type(value: Any) -> str:
     """Normalize remote type values from provider payloads."""
     normalized = _safe_str(value).lower()
@@ -260,38 +402,15 @@ def _normalize_experience_hint(value: Any) -> str | None:
 
 def _apply_title_override(title: str, experience_level: str) -> str:
     """Apply strong title-based overrides for obvious level wording."""
-    normalized_title = f" {title.lower()} "
+    normalized_title = _safe_str(title).lower()
 
-    if any(
-        keyword in normalized_title
-        for keyword in [
-            " chief ",
-            " ciso ",
-            " cto ",
-            " cio ",
-            " director ",
-            " head ",
-            " principal ",
-            " staff ",
-            " senior ",
-            " sr ",
-            " lead ",
-            " manager ",
-            " architect ",
-        ]
-    ):
+    if is_obviously_senior_title(normalized_title):
         return "senior"
 
-    if any(
-        keyword in normalized_title
-        for keyword in [
-            " junior ",
-            " entry ",
-            " associate ",
-            " new grad ",
-            " graduate ",
-        ]
-    ):
-        return "junior"
+    if is_early_career_title(normalized_title):
+        # Do not crush entry-level into junior.
+        if experience_level in {"senior", "mid-level"}:
+            return "junior"
+        return "entry-level"
 
-    return experience_level
+    return experience_level or "unknown"

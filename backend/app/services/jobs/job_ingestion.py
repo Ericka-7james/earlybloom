@@ -2,12 +2,12 @@
 
 This module orchestrates provider ingestion for the jobs API.
 
-Current strategy:
-- Load enabled providers from the Layer 1 registry
-- Fetch provider-normalized raw jobs asynchronously
-- Normalize all provider data through the shared normalization pipeline
-- Apply shared filtering, dedupe, and response mapping
-- Keep provider trust separate from normalization policy
+Layer 1 strategy:
+- Load enabled providers from the registry
+- Fetch provider-normalized jobs asynchronously
+- Keep only U.S.-based / U.S.-eligible jobs
+- Keep entry-level, junior, mid-level, and plausible unknown jobs
+- Deduplicate and map into the public response shape
 """
 
 from __future__ import annotations
@@ -39,41 +39,29 @@ class JobIngestionService:
     """Service wrapper around the async ingestion flow."""
 
     def __init__(self, providers: dict[str, Any] | None = None) -> None:
-        """Initialize the ingestion service.
-
-        Args:
-            providers: Optional provider registry override for testing.
-        """
         self.providers = providers or {}
 
     async def ingest_jobs(
         self,
         remote_only: bool = False,
+        levels: list[str] | None = None,
+        role_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Return jobs in the API response shape.
-
-        Args:
-            remote_only: Whether to keep only remote jobs after normalization.
-
-        Returns:
-            A list of normalized job dictionaries suitable for the API response.
-        """
-        return await get_jobs(remote_only=remote_only, providers=self.providers or None)
+        return await get_jobs(
+            remote_only=remote_only,
+            levels=levels,
+            role_types=role_types,
+            providers=self.providers or None,
+        )
 
 
 async def get_jobs(
     remote_only: bool = False,
+    levels: list[str] | None = None,
+    role_types: list[str] | None = None,
     providers: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Public entry point for jobs ingestion.
-
-    Args:
-        remote_only: Whether to keep only remote jobs after normalization.
-        providers: Optional provider registry override for testing.
-
-    Returns:
-        A list of job dictionaries matching the API response contract.
-    """
+    """Public entry point for jobs ingestion."""
     settings = get_settings()
 
     if settings.JOB_DATA_MODE == "mock":
@@ -86,33 +74,32 @@ async def get_jobs(
     )
 
     cached = get_cached_value(cache_key)
-    if cached is not None:
+    if cached is not None and levels is None and role_types is None:
         return cached
 
     live_jobs = await _get_live_jobs(
         remote_only=remote_only,
+        levels=levels,
+        role_types=role_types,
         providers=provider_registry,
     )
-    set_cached_value(cache_key, live_jobs)
+
+    if levels is None and role_types is None:
+        set_cached_value(cache_key, live_jobs)
+
     return live_jobs
 
 
 async def _get_live_jobs(
     remote_only: bool = False,
+    levels: list[str] | None = None,
+    role_types: list[str] | None = None,
     providers: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Aggregate live jobs from configured providers and normalize them.
-
-    Args:
-        remote_only: Whether to keep only remote jobs after normalization.
-        providers: Optional provider registry override.
-
-    Returns:
-        A list of normalized job dictionaries matching the jobs API shape.
-    """
+    """Aggregate live jobs from configured providers."""
     options = build_filter_options(
-        levels=None,
-        role_types=None,
+        levels=levels,
+        role_types=role_types,
     )
     provider_registry = providers or get_configured_providers()
 
@@ -139,18 +126,20 @@ async def _get_live_jobs(
             )
             continue
 
-        raw_jobs = provider_result
-        if not raw_jobs:
+        provider_jobs = provider_result
+        if not provider_jobs:
             logger.warning("Provider returned no jobs. provider=%s", provider_name)
             continue
 
+        received_count = len(provider_jobs)
         normalized_count = 0
+        non_us_filtered_count = 0
         filtered_out_count = 0
         kept_count = 0
 
-        for raw_job in raw_jobs:
-            normalized = normalize_provider_job(
-                raw_job=raw_job,
+        for provider_job in provider_jobs:
+            normalized = _coerce_to_normalized_job(
+                provider_job=provider_job,
                 source=provider_name,
             )
             if normalized is None:
@@ -158,10 +147,14 @@ async def _get_live_jobs(
 
             normalized_count += 1
 
+            if not _is_us_eligible_job(normalized):
+                non_us_filtered_count += 1
+                continue
+
             if not should_include_job(
                 title=normalized.title,
                 normalized_level=normalized.experience_level,
-                normalized_role_type=getattr(normalized, "role_type", None),
+                normalized_role_type=None,
                 options=options,
             ):
                 filtered_out_count += 1
@@ -171,10 +164,14 @@ async def _get_live_jobs(
             kept_count += 1
 
         logger.warning(
-            "Provider normalization complete. provider=%s raw=%s normalized=%s filtered_out=%s kept=%s",
+            (
+                "Provider ingestion complete. provider=%s received=%s normalized=%s "
+                "filtered_non_us=%s filtered_by_options=%s kept=%s"
+            ),
             provider_name,
-            len(raw_jobs),
+            received_count,
             normalized_count,
+            non_us_filtered_count,
             filtered_out_count,
             kept_count,
         )
@@ -201,37 +198,47 @@ async def _get_live_jobs(
 async def _fetch_provider_jobs(
     provider_name: str,
     provider: Any,
-) -> list[dict[str, Any]]:
-    """Fetch raw jobs from a single provider instance.
+) -> list[Any]:
+    """Fetch jobs from a single provider instance."""
+    jobs = await provider.fetch_jobs()
 
-    Args:
-        provider_name: Provider source name.
-        provider: Provider instance implementing fetch_jobs().
-
-    Returns:
-        Provider-normalized raw jobs.
-
-    Raises:
-        Propagates provider exceptions to be handled by the caller.
-    """
-    raw_jobs = await provider.fetch_jobs()
-    if not isinstance(raw_jobs, list):
+    if not isinstance(jobs, list):
         logger.warning(
             "Provider returned non-list payload. provider=%s type=%s",
             provider_name,
-            type(raw_jobs).__name__,
+            type(jobs).__name__,
         )
         return []
 
-    return [job for job in raw_jobs if isinstance(job, dict)]
+    return jobs
+
+
+def _coerce_to_normalized_job(
+    provider_job: Any,
+    source: str,
+) -> NormalizedJob | None:
+    """Accept both already-normalized jobs and legacy dict payloads."""
+    if isinstance(provider_job, NormalizedJob):
+        return provider_job
+
+    if isinstance(provider_job, dict):
+        normalized = normalize_provider_job(
+            raw_job=provider_job,
+            source=source,
+        )
+        if normalized is not None:
+            return normalized
+
+        try:
+            return NormalizedJob.model_validate(provider_job)
+        except Exception:
+            return None
+
+    return None
 
 
 def _get_mock_jobs() -> list[dict[str, Any]]:
-    """Return minimal mock fallback jobs.
-
-    Returns:
-        A fallback list used only when live ingestion is unavailable.
-    """
+    """Return minimal mock fallback jobs."""
     return [
         {
             "id": "mock-junior-software-engineer",
@@ -257,15 +264,110 @@ def _get_mock_jobs() -> list[dict[str, Any]]:
     ]
 
 
+def _is_us_eligible_job(job: NormalizedJob) -> bool:
+    """Keep only U.S.-based / U.S.-eligible roles for EarlyBloom Layer 1."""
+    text = " ".join(
+        [
+            _normalize_text(job.title),
+            _normalize_text(job.location),
+            _normalize_text(job.description),
+            _normalize_text(job.summary),
+        ]
+    )
+
+    positive_markers = [
+        "united states",
+        "united states only",
+        "us only",
+        "u.s. only",
+        "usa",
+        "u.s.a.",
+        "us-based",
+        "u.s.-based",
+        "based in the united states",
+        "must be authorized to work in the us",
+        "must be authorized to work in the u.s.",
+        "eligible to work in the us",
+        "eligible to work in the united states",
+        "work authorization in the us",
+        "citizenship required",
+        "u.s. citizenship",
+        "federal government",
+        "telework eligible",
+    ]
+
+    negative_markers = [
+        "anywhere in the world",
+        "worldwide",
+        "europe only",
+        "europe",
+        "uk only",
+        "united kingdom",
+        "canada only",
+        "canada",
+        "germany",
+        "france",
+        "spain",
+        "poland",
+        "netherlands",
+        "portugal",
+        "latam",
+        "latin america",
+        "apac",
+        "emea",
+        "asia pacific",
+        "berlin",
+        "london",
+        "amsterdam",
+        "barcelona",
+        "lisbon",
+        "warsaw",
+    ]
+
+    if any(marker in text for marker in positive_markers):
+        return True
+
+    if any(marker in text for marker in negative_markers):
+        return False
+
+    location = _normalize_text(job.location)
+    if location in {"remote", "unknown", ""}:
+        return False
+
+    us_state_tokens = {
+        "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "ia",
+        "id", "il", "in", "ks", "ky", "la", "ma", "md", "me", "mi", "mn", "mo",
+        "ms", "mt", "nc", "nd", "ne", "nh", "nj", "nm", "nv", "ny", "oh", "ok",
+        "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "va", "vt", "wa", "wi",
+        "wv", "wy", "dc",
+    }
+    us_state_names = {
+        "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+        "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+        "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+        "maine", "maryland", "massachusetts", "michigan", "minnesota",
+        "mississippi", "missouri", "montana", "nebraska", "nevada",
+        "new hampshire", "new jersey", "new mexico", "new york",
+        "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+        "pennsylvania", "rhode island", "south carolina", "south dakota",
+        "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+        "west virginia", "wisconsin", "wyoming", "district of columbia",
+    }
+
+    location_parts = {
+        part.strip(" ,")
+        for part in location.replace("/", ",").split(",")
+        if part.strip(" ,")
+    }
+
+    if any(part in us_state_tokens or part in us_state_names for part in location_parts):
+        return True
+
+    return False
+
+
 def _is_remote_job(job: NormalizedJob) -> bool:
-    """Determine whether a normalized job should be treated as remote.
-
-    Args:
-        job: Normalized job instance.
-
-    Returns:
-        True if the job appears remote, otherwise False.
-    """
+    """Determine whether a normalized job should be treated as remote."""
     if bool(job.remote):
         return True
 
@@ -280,14 +382,7 @@ def _is_remote_job(job: NormalizedJob) -> bool:
 
 
 def _map_internal_job_to_response(job: NormalizedJob) -> dict[str, Any]:
-    """Map normalized data into the public jobs API response shape.
-
-    Args:
-        job: Normalized job instance.
-
-    Returns:
-        A dictionary matching the public jobs API response schema.
-    """
+    """Map normalized data into the public jobs API response shape."""
     return {
         "id": job.id or _build_public_job_id(job),
         "title": job.title or "Unknown title",
@@ -312,14 +407,7 @@ def _map_internal_job_to_response(job: NormalizedJob) -> dict[str, Any]:
 
 
 def _build_public_job_id(job: NormalizedJob) -> str:
-    """Build a stable public job ID from source and URL.
-
-    Args:
-        job: Normalized job instance.
-
-    Returns:
-        A stable public job identifier.
-    """
+    """Build a stable public job ID from source and URL."""
     source = job.source or "unknown"
     canonical_url = _canonical_url(str(job.url or ""))
     if canonical_url:
