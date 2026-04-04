@@ -10,21 +10,30 @@ import httpx
 from app.core.config import get_settings
 from app.schemas.jobs import NormalizedJob
 from app.services.jobs.providers.base import BaseJobProvider
+from app.services.jobs.providers.common.experience_rules import (
+    infer_experience_level_from_text,
+)
+from app.services.jobs.providers.common.role_taxonomy import (
+    infer_role_type_from_text,
+)
+from app.services.jobs.providers.common.skill_hints import (
+    extract_skill_hints,
+)
+from app.services.jobs.providers.common.text_cleaning import (
+    normalize_paragraph_text,
+    split_bullets,
+    strip_html,
+)
+from app.services.jobs.providers.common.title_rules import (
+    is_obviously_senior_title,
+    should_keep_title_for_earlybloom,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class USAJOBSProvider(BaseJobProvider):
-    """Fetch jobs from the USAJOBS Search API.
-
-    This provider is intended to be the most trusted Layer 1 source. It performs
-    light provider-specific normalization and preserves useful text structure so
-    downstream parsing can extract responsibilities, qualifications, and skills
-    more reliably.
-
-    Docs:
-        https://developer.usajobs.gov/api-reference/
-    """
+    """Fetch jobs from the USAJOBS Search API."""
 
     source_name = "usajobs"
     base_url = os.getenv("USAJOBS_BASE_URL", "https://data.usajobs.gov/api/search")
@@ -88,7 +97,10 @@ class USAJOBSProvider(BaseJobProvider):
             "Authorization-Key": self.api_key,
         }
 
-        pages_to_fetch = max(1, (self.max_jobs + self.results_per_page - 1) // self.results_per_page)
+        pages_to_fetch = max(
+            1,
+            (self.max_jobs + self.results_per_page - 1) // self.results_per_page,
+        )
         normalized_jobs: list[NormalizedJob] = []
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
@@ -105,17 +117,18 @@ class USAJOBSProvider(BaseJobProvider):
                     params["PositionOfferTypeCode"] = self.position_offer_type_code
 
                 try:
-                    response = await client.get(self.base_url, headers=headers, params=params)
+                    response = await client.get(
+                        self.base_url,
+                        headers=headers,
+                        params=params,
+                    )
                     response.raise_for_status()
                     payload = response.json()
                 except httpx.HTTPError as exc:
                     logger.exception("USAJOBS fetch failed on page=%s", page, exc_info=exc)
                     break
 
-                items = (
-                    payload.get("SearchResult", {})
-                    .get("SearchResultItems", [])
-                )
+                items = payload.get("SearchResult", {}).get("SearchResultItems", [])
                 if not isinstance(items, list) or not items:
                     break
 
@@ -124,8 +137,10 @@ class USAJOBSProvider(BaseJobProvider):
                         continue
 
                     normalized = self._normalize_job(item)
-                    if normalized is not None:
-                        normalized_jobs.append(normalized)
+                    if normalized is None:
+                        continue
+
+                    normalized_jobs.append(normalized)
 
                     if len(normalized_jobs) >= self.max_jobs:
                         return normalized_jobs[: self.max_jobs]
@@ -146,21 +161,31 @@ class USAJOBSProvider(BaseJobProvider):
         external_id = self._safe_str(descriptor.get("PositionID"))
         company = self._safe_str(descriptor.get("OrganizationName")) or "USAJOBS"
         location = self._extract_location(descriptor) or "Unknown"
-        description = self._build_description(descriptor)
+        raw_description = self._build_description(descriptor)
+        tags = self._extract_tags(descriptor)
 
         if not title or not url:
             return None
 
+        if is_obviously_senior_title(title):
+            return None
+
+        if not should_keep_title_for_earlybloom(title):
+            return None
+
+        plain_description = strip_html(raw_description)
+        summary = self.summarize(plain_description or title)
+
         remote, remote_type = self.infer_remote_type(
             title,
             location,
-            description,
+            plain_description,
             self._safe_str(descriptor.get("PositionLocationDisplay")),
             self._safe_str(descriptor.get("QualificationSummary")),
             self._safe_str(
                 (descriptor.get("UserArea", {}) or {}).get("Details", {}).get("JobSummary")
             ),
-            " ".join(self._extract_tags(descriptor)),
+            " ".join(tags),
         )
 
         job_id = self.build_stable_job_id(
@@ -171,21 +196,44 @@ class USAJOBSProvider(BaseJobProvider):
             location=location,
         )
 
-        plain_description = self.strip_html(description)
-        summary = self.summarize(plain_description or title)
-
         responsibilities = self._extract_section_bullets(
-            description,
+            raw_description,
             section_names=("responsibilities", "major duties"),
         )
         qualifications = self._extract_section_bullets(
-            description,
+            raw_description,
             section_names=("qualifications",),
         )
         preferred_skills = self._extract_section_bullets(
-            description,
+            raw_description,
             section_names=("how you will be evaluated", "education"),
             max_items=6,
+        )
+
+        role_type = infer_role_type_from_text(
+            title=title,
+            description=plain_description,
+            tags=tags,
+        )
+
+        experience_level = self._normalize_experience_level(
+            infer_experience_level_from_text(
+                title=title,
+                description=plain_description,
+                tags=tags,
+            )
+        )
+
+        combined_skill_text = "\n".join(
+            part
+            for part in [
+                title,
+                plain_description,
+                "\n".join(responsibilities),
+                "\n".join(qualifications),
+                " ".join(tags),
+            ]
+            if part
         )
 
         return NormalizedJob(
@@ -201,11 +249,32 @@ class USAJOBSProvider(BaseJobProvider):
             description=plain_description,
             responsibilities=responsibilities,
             qualifications=qualifications,
-            required_skills=self._extract_skill_hints(plain_description),
+            required_skills=extract_skill_hints(
+                combined_skill_text,
+                role_type=role_type,
+                limit=12,
+            ),
             preferred_skills=preferred_skills,
             employment_type=self._extract_employment_type(descriptor),
-            experience_level=self.infer_experience_level(title, plain_description),
+            experience_level=experience_level,
+            salary_min=self._extract_salary_min(descriptor),
+            salary_max=self._extract_salary_max(descriptor),
+            salary_currency="USD",
         )
+
+    def _normalize_experience_level(self, level: str | None) -> str:
+        """Map shared helper output into the schema's allowed enum values."""
+        normalized = str(level or "").strip().lower()
+
+        if normalized in {"entry", "entry-level"}:
+            return "entry-level"
+        if normalized == "junior":
+            return "junior"
+        if normalized in {"mid", "mid-level", "midlevel"}:
+            return "mid-level"
+        if normalized == "senior":
+            return "senior"
+        return "unknown"
 
     def _extract_location(self, descriptor: dict[str, Any]) -> str:
         """Build a readable location string from USAJOBS location objects."""
@@ -248,6 +317,7 @@ class USAJOBSProvider(BaseJobProvider):
         body = self._render_section_body(content)
         if not body:
             return
+
         section = f"{heading}:\n{body}".strip()
         if section not in sections:
             sections.append(section)
@@ -258,7 +328,7 @@ class USAJOBSProvider(BaseJobProvider):
             return ""
 
         if isinstance(content, str):
-            return self._normalize_paragraph_text(content)
+            return normalize_paragraph_text(content)
 
         if isinstance(content, list):
             return self._render_list_content(content)
@@ -271,7 +341,7 @@ class USAJOBSProvider(BaseJobProvider):
                     values.append(rendered)
             return "\n".join(values).strip()
 
-        return self._normalize_paragraph_text(str(content))
+        return normalize_paragraph_text(str(content))
 
     def _render_list_content(self, items: Iterable[Any]) -> str:
         """Render a list of values into bullets or paragraphs."""
@@ -288,15 +358,6 @@ class USAJOBSProvider(BaseJobProvider):
             return "\n".join(f"- {item}" for item in rendered_items)
 
         return "\n\n".join(rendered_items)
-
-    def _normalize_paragraph_text(self, text: str) -> str:
-        """Normalize paragraph-style provider text while preserving structure."""
-        normalized = text.replace("\r", "\n").replace("\u00a0", " ")
-        normalized = re.sub(r"[ \t]+", " ", normalized)
-        normalized = re.sub(r"\n{3,}", "\n\n", normalized)
-        normalized = re.sub(r"[ \t]+\n", "\n", normalized)
-        normalized = re.sub(r"\n[ \t]+", "\n", normalized)
-        return normalized.strip()
 
     def _extract_employment_type(self, descriptor: dict[str, Any]) -> str | None:
         """Extract employment type from position schedule."""
@@ -348,6 +409,7 @@ class USAJOBSProvider(BaseJobProvider):
         remuneration = descriptor.get("PositionRemuneration", [])
         if not isinstance(remuneration, list) or not remuneration:
             return None
+
         value = remuneration[0].get("MinimumRange")
         try:
             return int(float(value)) if value is not None else None
@@ -359,6 +421,7 @@ class USAJOBSProvider(BaseJobProvider):
         remuneration = descriptor.get("PositionRemuneration", [])
         if not isinstance(remuneration, list) or not remuneration:
             return None
+
         value = remuneration[0].get("MaximumRange")
         try:
             return int(float(value)) if value is not None else None
@@ -395,36 +458,7 @@ class USAJOBSProvider(BaseJobProvider):
         if next_header:
             remainder = remainder[: next_header.start()]
 
-        return self.split_bullets(remainder[:1500], max_items=max_items)
-
-    def _extract_skill_hints(self, description: str) -> list[str]:
-        """Extract coarse skill hints from provider text."""
-        skill_bank = [
-            "python",
-            "java",
-            "javascript",
-            "typescript",
-            "react",
-            "node",
-            "aws",
-            "docker",
-            "kubernetes",
-            "sql",
-            "postgres",
-            "graphql",
-            "rest",
-            "fastapi",
-            "django",
-            "flask",
-            "go",
-            "rust",
-            "c++",
-            "security",
-            "linux",
-            "cloud",
-        ]
-        lowered = description.casefold()
-        return [skill for skill in skill_bank if skill in lowered][:10]
+        return split_bullets(remainder[:1500], max_items=max_items)
 
     def _safe_str(self, value: Any) -> str:
         """Return a stripped string representation for arbitrary values."""
