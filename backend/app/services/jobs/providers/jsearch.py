@@ -7,7 +7,24 @@ from typing import Any
 import httpx
 
 from app.core.config import get_settings
+from app.schemas.jobs import NormalizedJob
 from app.services.jobs.providers.base import BaseJobProvider
+from app.services.jobs.providers.common.experience_rules import (
+    infer_experience_level_from_text,
+)
+from app.services.jobs.providers.common.role_taxonomy import (
+    infer_role_type_from_text,
+)
+from app.services.jobs.providers.common.skill_hints import (
+    extract_skill_hints,
+)
+from app.services.jobs.providers.common.text_cleaning import (
+    strip_html,
+)
+from app.services.jobs.providers.common.title_rules import (
+    is_obviously_senior_title,
+    should_keep_title_for_earlybloom,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +91,14 @@ class JSearchProvider(BaseJobProvider):
             date_posted=getattr(settings, "JOB_PROVIDER_JSEARCH_DATE_POSTED", None),
         )
 
-    async def fetch_jobs(self) -> list[dict[str, Any]]:
+    async def fetch_jobs(self) -> list[NormalizedJob]:
+        """Fetch and normalize jobs from JSearch."""
         headers = {
             "X-RapidAPI-Key": self.api_key,
             "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
         }
 
-        jobs: list[dict[str, Any]] = []
+        jobs: list[NormalizedJob] = []
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             for page_offset in range(self.num_pages):
@@ -122,23 +140,33 @@ class JSearchProvider(BaseJobProvider):
 
         return jobs[: self.max_jobs]
 
-    def _normalize_job(self, item: dict[str, Any]) -> dict[str, Any] | None:
+    def _normalize_job(self, item: dict[str, Any]) -> NormalizedJob | None:
         title = self._safe_str(item.get("job_title"))
         company = self._safe_str(item.get("employer_name")) or "Unknown Company"
         location = self._build_location(item) or "Unknown"
         url = self._safe_str(item.get("job_apply_link") or item.get("job_google_link"))
         external_id = self._safe_str(item.get("job_id"))
-        description = self._safe_str(item.get("job_description"))
+        description_raw = self._safe_str(item.get("job_description"))
+        employment_type = self._safe_str(item.get("job_employment_type")) or None
 
         if not title or not company or not url:
             return None
+
+        if is_obviously_senior_title(title):
+            return None
+
+        if not should_keep_title_for_earlybloom(title):
+            return None
+
+        description = strip_html(description_raw)
+        summary = self.summarize(description or title)
 
         remote, remote_type = self.infer_remote_type(
             title,
             location,
             description,
             self._safe_str(item.get("job_is_remote")),
-            self._safe_str(item.get("job_employment_type")),
+            employment_type or "",
         )
 
         tags = self._coerce_string_list(
@@ -148,34 +176,85 @@ class JSearchProvider(BaseJobProvider):
                 item.get("job_city"),
                 item.get("job_state"),
                 item.get("job_country"),
+                item.get("job_location"),
+                item.get("employer_name"),
             ]
         )
 
-        return {
-            "source": self.source_name,
-            "external_id": external_id or self.build_stable_job_id(
-                external_id=external_id,
-                url=url,
+        role_type = infer_role_type_from_text(
+            title=title,
+            description=description,
+            tags=tags,
+        )
+
+        experience_level = self._normalize_experience_level(
+            infer_experience_level_from_text(
                 title=title,
-                company=company,
-                location=location,
+                description=description,
+                tags=tags,
+            )
+        )
+
+        combined_skill_text = "\n".join(
+            part
+            for part in [
+                title,
+                description,
+                employment_type or "",
+                " ".join(tags),
+            ]
+            if part
+        )
+
+        salary_min, salary_max = self._extract_salary_range(item)
+
+        job_id = self.build_stable_job_id(
+            external_id=external_id,
+            url=url,
+            title=title,
+            company=company,
+            location=location,
+        )
+
+        return NormalizedJob(
+            id=job_id,
+            title=title,
+            company=company,
+            location=location,
+            remote=remote,
+            remote_type=remote_type,
+            url=url,
+            source=self.source_name,
+            summary=summary,
+            description=description,
+            responsibilities=[],
+            qualifications=[],
+            required_skills=extract_skill_hints(
+                combined_skill_text,
+                role_type=role_type,
+                limit=12,
             ),
-            "title": title,
-            "company": company,
-            "location": location,
-            "remote": remote,
-            "remote_type": remote_type,
-            "url": url,
-            "salary_min": None,
-            "salary_max": None,
-            "currency": None,
-            "description": description,
-            "summary": self.summarize(description or title),
-            "posted_at": self._safe_str(item.get("job_posted_at_datetime_utc")) or None,
-            "employment_type": self._safe_str(item.get("job_employment_type")) or None,
-            "seniority_hint": self.infer_experience_level(title, description),
-            "tags": tags,
-        }
+            preferred_skills=tags[:8],
+            employment_type=employment_type,
+            experience_level=experience_level,
+            salary_min=salary_min,
+            salary_max=salary_max,
+            salary_currency=self._extract_salary_currency(item),
+        )
+
+    def _normalize_experience_level(self, level: str | None) -> str:
+        """Map helper output into the schema's allowed enum values."""
+        normalized = str(level or "").strip().lower()
+
+        if normalized in {"entry", "entry-level"}:
+            return "entry-level"
+        if normalized == "junior":
+            return "junior"
+        if normalized in {"mid", "mid-level", "midlevel"}:
+            return "mid-level"
+        if normalized == "senior":
+            return "senior"
+        return "unknown"
 
     def _build_location(self, item: dict[str, Any]) -> str:
         city = self._safe_str(item.get("job_city"))
@@ -194,6 +273,27 @@ class JSearchProvider(BaseJobProvider):
             return "Remote"
 
         return ""
+
+    def _extract_salary_range(self, item: dict[str, Any]) -> tuple[int | None, int | None]:
+        min_value = item.get("job_min_salary") or item.get("job_salary_min")
+        max_value = item.get("job_max_salary") or item.get("job_salary_max")
+
+        return self._coerce_int(min_value), self._coerce_int(max_value)
+
+    def _extract_salary_currency(self, item: dict[str, Any]) -> str | None:
+        currency = self._safe_str(
+            item.get("job_salary_currency")
+            or item.get("job_currency")
+        )
+        return currency or None
+
+    def _coerce_int(self, value: Any) -> int | None:
+        if value is None or value == "":
+            return None
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
 
     def _coerce_string_list(self, values: list[Any]) -> list[str]:
         cleaned: list[str] = []
