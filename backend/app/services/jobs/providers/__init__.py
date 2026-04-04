@@ -15,22 +15,22 @@ logger = logging.getLogger(__name__)
 def get_configured_providers() -> dict[str, BaseJobProvider]:
     """Return configured Layer 1 job providers.
 
-    This registry is intentionally limited to trusted or relatively stable
-    free-tier sources. Providers are instantiated behind env/settings toggles
-    and omitted when they are disabled or not configured.
-
-    Returns:
-        Mapping of provider source names to provider instances.
+    Layer 1 priorities:
+    - Prefer U.S.-aligned and relatively stable sources first
+    - Omit providers that are disabled or not configured
+    - Keep provider trust/order explicit for debugging and staging quality
     """
     providers: dict[str, BaseJobProvider] = {}
 
-    for provider_cls in (
+    provider_classes: tuple[type[BaseJobProvider], ...] = (
         USAJOBSProvider,
-        RemotiveProvider,
-        ArbeitNowProvider,
         JSearchProvider,
+        RemotiveProvider,
         JobicyProvider,
-    ):
+        ArbeitNowProvider,
+    )
+
+    for provider_cls in provider_classes:
         try:
             provider = provider_cls.from_env()
         except Exception as exc:
@@ -42,9 +42,18 @@ def get_configured_providers() -> dict[str, BaseJobProvider]:
             continue
 
         if provider is None:
+            logger.info(
+                "Provider not configured or disabled. provider=%s",
+                provider_cls.__name__,
+            )
             continue
 
         providers[provider.source_name] = provider
+
+    logger.info(
+        "Configured job providers: %s",
+        ", ".join(providers.keys()) if providers else "none",
+    )
 
     return providers
 
