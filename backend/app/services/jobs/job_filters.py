@@ -6,6 +6,12 @@ from dataclasses import dataclass
 import re
 from typing import Iterable
 
+from app.services.jobs.providers.common.title_rules import (
+    is_ambiguous_but_keep_title,
+    is_early_career_title,
+    is_obviously_senior_title,
+    normalize_title,
+)
 
 DEFAULT_LEVELS = {"entry-level", "junior"}
 
@@ -45,95 +51,80 @@ SUPPORTED_ROLE_TYPES = {
     "developer-tools",
 }
 
-SENIOR_TITLE_PATTERNS = [
-    r"\bchief\b",
-    r"\bciso\b",
-    r"\bcto\b",
-    r"\bcio\b",
-    r"\bvp\b",
-    r"\bvice president\b",
-    r"\bdirector\b",
-    r"\bhead\b",
-    r"\bprincipal\b",
-    r"\bstaff\b",
-    r"\bsenior\b",
-    r"\bsr\.?\b",
-    r"\blead\b",
-    r"\bmanager\b",
-    r"\barchitect\b",
-    r"\bofficer\b",
-    r"\bcommander\b",
-]
-
-NOT_EARLY_CAREER_TITLE_PATTERNS = [
-    r"\bit specialist\b",
-    r"\bsystems administration\b",
-    r"\bsysadmin\b",
-    r"\bnetwork\b",
-    r"\bnetworking\b",
-    r"\bcustspt\b",
-    r"\bcustomer support\b",
-    r"\bsecurity officer\b",
-    r"\binformation security\b",
-    r"\binfosec\b",
-    r"\btitle 32\b",
-    r"\bnational guard\b",
-    r"\bair national guard\b",
-    r"\barmy national guard\b",
-    r"\bprogram manager\b",
-    r"\bproject manager\b",
-]
-
-EXPLICIT_JUNIOR_TITLE_PATTERNS = [
-    r"\bjunior\b",
-    r"\bjr\.?\b",
-    r"\bentry\b",
-    r"\bentry-level\b",
-    r"\bnew grad\b",
-    r"\brecent graduate\b",
-    r"\bgraduate\b",
-    r"\bearly career\b",
-    r"\bassociate\b",
-    r"\bintern\b",
-    r"\bapprentice\b",
-    r"\btrainee\b",
-    r"\bfellow(ship)?\b",
-    r"\bdevelopment program\b",
-    r"\brotational\b",
-]
-
-JUNIOR_SAFE_TITLE_PATTERNS = [
-    r"\bjunior software engineer\b",
-    r"\bsoftware engineer i\b",
-    r"\bsoftware engineer level 1\b",
-    r"\bentry-level software engineer\b",
-    r"\bassociate software engineer\b",
-    r"\bfrontend developer\b",
-    r"\bbackend developer\b",
-    r"\bfull stack developer\b",
-    r"\bqa engineer\b",
-    r"\btest engineer\b",
-    r"\bdata analyst\b",
-    r"\bproduct analyst\b",
-    r"\bsupport engineer\b",
-    r"\bimplementation specialist\b",
-    r"\bsolutions engineer\b",
-    r"\bsecurity analyst\b",
-    r"\bbusiness analyst\b",
-]
-
-MID_OR_HIGHER_HINTS = [
+MID_LEVEL_HINTS = [
     r"\bii\b",
     r"\biii\b",
     r"\blevel\s?2\b",
     r"\blevel\s?3\b",
     r"\bintermediate\b",
     r"\bjourneyman\b",
+]
+
+HARD_SENIOR_EXPERIENCE_HINTS = [
     r"\b5\+?\s+years?\b",
     r"\b6\+?\s+years?\b",
     r"\b7\+?\s+years?\b",
     r"\b8\+?\s+years?\b",
+    r"\b9\+?\s+years?\b",
+    r"\b10\+?\s+years?\b",
 ]
+
+UNKNOWN_SAFE_PATTERNS = [
+    r"\banalyst\b",
+    r"\bspecialist\b",
+    r"\bcoordinator\b",
+    r"\bsupport\b",
+    r"\btechnician\b",
+    r"\badministrator\b",
+    r"\boperator\b",
+    r"\brepresentative\b",
+    r"\bimplementation\b",
+    r"\bhelp desk\b",
+    r"\bservice desk\b",
+    r"\bqa\b",
+    r"\btester\b",
+    r"\bdeveloper\b",
+    r"\bengineer\b",
+    r"\bit\b",
+    r"\bsecurity\b",
+    r"\bcyber\b",
+    r"\bdata\b",
+    r"\bproduct\b",
+    r"\bsystems?\b",
+    r"\bnetwork\b",
+    r"\bsoftware\b",
+    r"\bfrontend\b",
+    r"\bbackend\b",
+    r"\bfull stack\b",
+]
+
+ENTRY_JUNIOR_STRETCH_PATTERNS = [
+    r"\bsoftware engineer i\b",
+    r"\bassociate\b",
+    r"\banalyst\b",
+    r"\bspecialist\b",
+    r"\bcoordinator\b",
+    r"\btechnical support\b",
+    r"\bit support\b",
+    r"\bhelp desk\b",
+    r"\bservice desk\b",
+    r"\bimplementation\b",
+    r"\bqa\b",
+    r"\btest engineer\b",
+    r"\bsecurity analyst\b",
+    r"\bbusiness analyst\b",
+    r"\bdata analyst\b",
+    r"\bproduct analyst\b",
+    r"\bsupport engineer\b",
+]
+
+ROLE_TYPE_ALIASES = {
+    "software": "software-engineering",
+    "it_support": "technical-support",
+    "analyst": "business-analyst",
+    "security": "cybersecurity",
+    "cloud_devops": "devops",
+}
 
 
 @dataclass(frozen=True)
@@ -155,28 +146,40 @@ def _matches_any_pattern(text: str, patterns: list[str]) -> bool:
 
 
 def normalize_levels(levels: Iterable[str] | None) -> set[str]:
-    """Normalize user-selected job levels."""
-    if not levels:
-        return set(DEFAULT_LEVELS)
+    """Normalize user-selected job levels.
 
-    normalized = {
+    A missing or empty value means no backend level filter.
+    """
+    if levels is None:
+        return set()
+
+    return {
         str(level).strip().lower()
         for level in levels
         if str(level).strip().lower() in SUPPORTED_LEVELS
     }
-    return normalized or set(DEFAULT_LEVELS)
 
 
 def normalize_role_types(role_types: Iterable[str] | None) -> set[str]:
-    """Normalize user-selected role types."""
-    if not role_types:
+    """Normalize user-selected role types.
+
+    A missing or empty value means no backend role-type filter.
+    """
+    if role_types is None:
         return set()
 
-    return {
-        str(role_type).strip().lower()
-        for role_type in role_types
-        if str(role_type).strip().lower() in SUPPORTED_ROLE_TYPES
-    }
+    normalized: set[str] = set()
+    for role_type in role_types:
+        value = str(role_type).strip().lower()
+        if value in SUPPORTED_ROLE_TYPES:
+            normalized.add(value)
+            continue
+
+        alias = ROLE_TYPE_ALIASES.get(value)
+        if alias and alias in SUPPORTED_ROLE_TYPES:
+            normalized.add(alias)
+
+    return normalized
 
 
 def build_filter_options(
@@ -190,41 +193,44 @@ def build_filter_options(
     )
 
 
-def is_obviously_senior_title(title: str | None) -> bool:
-    """Return True when the title clearly signals a senior role."""
+def has_mid_level_hint(title: str | None) -> bool:
+    """Return True when a title suggests mid-level but not necessarily senior."""
     normalized_title = _normalize_text(title)
     if not normalized_title:
         return False
 
-    return _matches_any_pattern(normalized_title, SENIOR_TITLE_PATTERNS)
+    return _matches_any_pattern(normalized_title, MID_LEVEL_HINTS)
 
 
-def is_not_early_career_title(title: str | None) -> bool:
-    """Return True for titles that are usually not a fit for early-career users."""
+def has_hard_senior_experience_hint(title: str | None) -> bool:
+    """Return True when a title itself contains a strong seniority hint."""
     normalized_title = _normalize_text(title)
     if not normalized_title:
         return False
 
-    if _matches_any_pattern(normalized_title, NOT_EARLY_CAREER_TITLE_PATTERNS):
+    return _matches_any_pattern(normalized_title, HARD_SENIOR_EXPERIENCE_HINTS)
+
+
+def is_unknown_level_safe_title(title: str | None) -> bool:
+    """Return True when an unknown-level title is still plausible for EB users."""
+    normalized_title = normalize_title(title)
+    if not normalized_title:
+        return False
+
+    if is_obviously_senior_title(normalized_title):
+        return False
+
+    if is_early_career_title(normalized_title):
         return True
 
-    if _matches_any_pattern(normalized_title, MID_OR_HIGHER_HINTS):
+    if is_ambiguous_but_keep_title(normalized_title):
         return True
 
-    return False
+    return _matches_any_pattern(normalized_title, UNKNOWN_SAFE_PATTERNS)
 
 
-def has_explicit_junior_signal(title: str | None) -> bool:
-    """Return True when a title contains explicit entry/junior wording."""
-    normalized_title = _normalize_text(title)
-    if not normalized_title:
-        return False
-
-    return _matches_any_pattern(normalized_title, EXPLICIT_JUNIOR_TITLE_PATTERNS)
-
-
-def is_junior_safe_unknown_title(title: str | None) -> bool:
-    """Return True only for unknown-level roles that are clearly junior-safe."""
+def is_entry_junior_stretch_title(title: str | None) -> bool:
+    """Return True for titles that are realistic for entry/junior users to consider."""
     normalized_title = _normalize_text(title)
     if not normalized_title:
         return False
@@ -232,15 +238,13 @@ def is_junior_safe_unknown_title(title: str | None) -> bool:
     if is_obviously_senior_title(normalized_title):
         return False
 
-    if is_not_early_career_title(normalized_title) and not has_explicit_junior_signal(
-        normalized_title
-    ):
-        return False
-
-    if has_explicit_junior_signal(normalized_title):
+    if is_early_career_title(normalized_title):
         return True
 
-    return _matches_any_pattern(normalized_title, JUNIOR_SAFE_TITLE_PATTERNS)
+    if _matches_any_pattern(normalized_title, ENTRY_JUNIOR_STRETCH_PATTERNS):
+        return True
+
+    return False
 
 
 def matches_level_filter(
@@ -250,30 +254,46 @@ def matches_level_filter(
     selected_levels: set[str],
 ) -> bool:
     """Check whether a job matches selected experience-level filters."""
-    level = _normalize_text(normalized_level)
-
-    if is_obviously_senior_title(title):
-        return False
-
-    if is_not_early_career_title(title) and not has_explicit_junior_signal(title):
-        if selected_levels.issubset(DEFAULT_LEVELS):
-            return False
-
-    if level == "mid-level" and "mid-level" not in selected_levels:
-        return False
-
-    if level == "senior" and "senior" not in selected_levels:
-        return False
-
-    if level in selected_levels:
-        if level in DEFAULT_LEVELS and is_not_early_career_title(title):
-            return has_explicit_junior_signal(title)
+    if not selected_levels:
         return True
 
-    if level == "unknown":
-        return is_junior_safe_unknown_title(title)
+    level = _normalize_text(normalized_level)
+    title_text = _normalize_text(title)
 
-    return False
+    if is_obviously_senior_title(title_text):
+        return False
+
+    if has_hard_senior_experience_hint(title_text):
+        return False
+
+    if level == "senior":
+        return "senior" in selected_levels
+
+    if level == "mid-level":
+        if "mid-level" in selected_levels:
+            return True
+
+        # If the user selected only entry/junior, still allow some realistic
+        # stretch titles that are not explicitly senior.
+        if selected_levels.issubset(DEFAULT_LEVELS):
+            return is_entry_junior_stretch_title(title_text)
+
+        return False
+
+    if level in {"entry-level", "junior"}:
+        return level in selected_levels
+
+    if level == "unknown":
+        if "mid-level" in selected_levels and is_unknown_level_safe_title(title_text):
+            return True
+
+        if selected_levels.issubset(DEFAULT_LEVELS):
+            return is_unknown_level_safe_title(title_text)
+
+        return is_unknown_level_safe_title(title_text)
+
+    # Any other weird value: be conservative but not overly harsh.
+    return is_unknown_level_safe_title(title_text)
 
 
 def matches_role_type_filter(
@@ -286,6 +306,12 @@ def matches_role_type_filter(
         return True
 
     role_type = _normalize_text(normalized_role_type)
+    if not role_type:
+        # Until the pipeline consistently stores normalized role_type,
+        # do not auto-kill jobs here.
+        return True
+
+    role_type = ROLE_TYPE_ALIASES.get(role_type, role_type)
     return role_type in selected_role_types
 
 

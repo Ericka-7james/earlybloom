@@ -18,8 +18,12 @@ US_REMOTE_ONLY_PATTERNS = {
     "remote, us",
     "remote united states",
     "remote - united states",
+    "remote within the us",
+    "remote within the united states",
+    "remote across the us",
     "us only",
     "u.s. only",
+    "usa only",
     "united states only",
     "must be based in the us",
     "must be based in the u.s.",
@@ -35,15 +39,29 @@ US_REMOTE_ONLY_PATTERNS = {
     "must be authorized to work in the united states",
     "u.s. work authorization",
     "us work authorization",
-    "no visa sponsorship",
-    "cannot sponsor",
-    "unable to sponsor",
     "eligible to work in the united states",
+    "eligible to work in the us",
     "must work us hours",
     "must work eastern time",
     "must work central time",
     "must work pacific time",
     "must work in us time zones",
+    "must work in eastern time",
+    "must work in central time",
+    "must work in pacific time",
+    "must overlap with us time zones",
+    "must overlap with eastern time",
+    "must overlap with est hours",
+    "must overlap with pst hours",
+    "based in the united states",
+    "based in the us",
+    "u.s.-based",
+    "us-based",
+    "usa-based",
+    "federal government",
+    "telework eligible",
+    "u.s. citizenship",
+    "citizenship required",
 }
 
 GLOBAL_REMOTE_PATTERNS = {
@@ -59,6 +77,37 @@ GLOBAL_REMOTE_PATTERNS = {
     "remote anywhere",
     "work anywhere",
     "location independent",
+    "work from anywhere in the world",
+}
+
+REGION_LIMIT_PATTERNS = {
+    "emea",
+    "apac",
+    "latam",
+    "latin america",
+    "europe only",
+    "uk only",
+    "eu only",
+    "canada only",
+    "australia only",
+    "india only",
+}
+
+US_TIMEZONE_HINTS = {
+    "est",
+    "edt",
+    "cst",
+    "cdt",
+    "mst",
+    "mdt",
+    "pst",
+    "pdt",
+    "eastern time",
+    "central time",
+    "mountain time",
+    "pacific time",
+    "us time zones",
+    "u.s. time zones",
 }
 
 SCAM_PATTERNS = [
@@ -102,7 +151,10 @@ def looks_us_location(location: str | None) -> bool:
     if not loc:
         return False
 
-    if "united states" in loc or "u.s." in loc or "usa" in loc:
+    if any(token in loc for token in ("united states", "u.s.", "usa", "us-based", "u.s.-based")):
+        return True
+
+    if "remote" in loc and any(token in loc for token in ("us", "u.s.", "usa", "united states")):
         return True
 
     for state in US_STATE_NAMES:
@@ -118,6 +170,10 @@ def looks_non_us_location(location: str | None) -> bool:
     loc = _safe_lower(location)
     if not loc:
         return False
+
+    if looks_us_location(loc):
+        return False
+
     return any(keyword in loc for keyword in NON_US_LOCATION_KEYWORDS)
 
 
@@ -126,7 +182,38 @@ def has_non_us_hint(*values: str | None) -> bool:
     text = _normalize_text(*values)
     if not text:
         return False
+
+    if any(pattern in text for pattern in REGION_LIMIT_PATTERNS):
+        return True
+
+    # If the text also clearly says U.S.-eligible, do not fail it here.
+    if has_us_eligibility_hint(*values):
+        return False
+
     return any(keyword in text for keyword in NON_US_LOCATION_KEYWORDS)
+
+
+def has_us_timezone_hint(*values: str | None) -> bool:
+    """Return True when text implies U.S. working hours or U.S. timezone alignment."""
+    text = _normalize_text(*values)
+    if not text:
+        return False
+    return any(hint in text for hint in US_TIMEZONE_HINTS)
+
+
+def has_us_eligibility_hint(*values: str | None) -> bool:
+    """Return True when text explicitly suggests U.S. work eligibility."""
+    text = _normalize_text(*values)
+    if not text:
+        return False
+
+    if any(pattern in text for pattern in US_REMOTE_ONLY_PATTERNS):
+        return True
+
+    if has_us_timezone_hint(text):
+        return True
+
+    return False
 
 
 def is_remote_like(location: str | None, description: str | None, remote_flag: bool | None) -> bool:
@@ -141,7 +228,14 @@ def is_remote_like(location: str | None, description: str | None, remote_flag: b
 def is_global_remote_role(location: str | None, description: str | None, title: str | None) -> bool:
     """Return True when the remote scope looks worldwide or explicitly non-U.S."""
     text = _normalize_text(title, location, description)
-    return any(pattern in text for pattern in GLOBAL_REMOTE_PATTERNS)
+
+    if any(pattern in text for pattern in GLOBAL_REMOTE_PATTERNS):
+        return True
+
+    if any(pattern in text for pattern in REGION_LIMIT_PATTERNS):
+        return True
+
+    return False
 
 
 def is_us_remote_role(
@@ -150,12 +244,22 @@ def is_us_remote_role(
     remote_flag: bool | None,
     title: str | None = None,
 ) -> bool:
-    """Return True for remote jobs that are explicitly U.S.-restricted."""
+    """Return True for remote jobs that are explicitly or strongly U.S.-restricted."""
     if not is_remote_like(location=location, description=description, remote_flag=remote_flag):
         return False
 
     text = _normalize_text(title, location, description)
-    return any(pattern in text for pattern in US_REMOTE_ONLY_PATTERNS)
+
+    if any(pattern in text for pattern in US_REMOTE_ONLY_PATTERNS):
+        return True
+
+    if has_us_timezone_hint(text):
+        return True
+
+    if "remote" in text and looks_us_location(location):
+        return True
+
+    return False
 
 
 def should_keep_us_focused_job(
@@ -164,23 +268,25 @@ def should_keep_us_focused_job(
     remote_flag: bool | None,
     title: str | None = None,
 ) -> bool:
-    """Keep only legitimate jobs that are clearly U.S.-based or clearly U.S.-remote."""
-    if looks_non_us_location(location):
-        return False
+    """Keep legitimate jobs that are clearly U.S.-based or plausibly U.S.-eligible.
 
-    if looks_us_location(location):
-        return True
+    Layer 1 behavior:
+    - reject obvious non-U.S. and worldwide/region-limited roles
+    - keep clear U.S. physical roles
+    - keep explicit or strong-signal U.S. remote roles
+    - keep remote U.S.-ambiguous roles only when they strongly lean U.S.
+    """
+    location_text = _safe_lower(location)
+    text = _normalize_text(title, location, description)
+
+    if looks_non_us_location(location_text):
+        return False
 
     if is_global_remote_role(location=location, description=description, title=title):
         return False
 
-    if has_non_us_hint(title, description) and not is_us_remote_role(
-        location=location,
-        description=description,
-        remote_flag=remote_flag,
-        title=title,
-    ):
-        return False
+    if looks_us_location(location_text):
+        return True
 
     if is_us_remote_role(
         location=location,
@@ -189,6 +295,24 @@ def should_keep_us_focused_job(
         title=title,
     ):
         return True
+
+    if has_non_us_hint(title, description, location) and not has_us_eligibility_hint(
+        title,
+        description,
+        location,
+    ):
+        return False
+
+    # Plausible U.S.-leaning fallback for remote jobs with weak metadata:
+    # keep if remote and text hints U.S. work eligibility or U.S. timezone overlap.
+    if is_remote_like(location=location, description=description, remote_flag=remote_flag):
+        if has_us_eligibility_hint(title, description, location):
+            return True
+
+        # If location is just "remote" but description mentions U.S. states or U.S. hours,
+        # keep it for Layer 1 staging.
+        if any(state in text for state in US_STATE_NAMES):
+            return True
 
     return False
 

@@ -15,6 +15,15 @@ from app.services.jobs.constants import (
     ONSITE_KEYWORDS,
     REMOTE_KEYWORDS,
 )
+from app.services.jobs.providers.common.experience_rules import (
+    extract_general_years_requirement,
+    extract_production_years_requirement,
+    infer_experience_level_from_text,
+)
+from app.services.jobs.providers.common.title_rules import (
+    is_early_career_title,
+    is_obviously_senior_title,
+)
 
 
 HEADER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 ,/&()'’-]{2,80}:?$")
@@ -28,105 +37,34 @@ SINGLE_SALARY_RE = re.compile(
     re.IGNORECASE,
 )
 
-_EXPERIENCE_LEVEL_ORDER = {
-    "unknown": 0,
-    "entry-level": 1,
-    "junior": 2,
-    "mid-level": 3,
-    "senior": 4,
-}
+_SOFT_MID_PATTERNS = (
+    r"\bsoftware engineer ii\b",
+    r"\bengineer ii\b",
+    r"\bdeveloper ii\b",
+    r"\banalyst ii\b",
+    r"\bspecialist ii\b",
+    r"\blevel\s?2\b",
+    r"\bmid[-\s]?level\b",
+    r"\bintermediate\b",
+    r"\bjourneyman\b",
+)
 
-_TITLE_PATTERNS_BY_LEVEL: dict[str, tuple[str, ...]] = {
-    "senior": (
-        r"\bchief\b",
-        r"\bciso\b",
-        r"\bcto\b",
-        r"\bcio\b",
-        r"\bvp\b",
-        r"\bvice president\b",
-        r"\bdirector\b",
-        r"\bhead\b",
-        r"\bprincipal\b",
-        r"\bstaff\b",
-        r"\bsenior\b",
-        r"\bsr\.?\b",
-        r"\blead\b",
-        r"\bmanager\b",
-        r"\barchitect\b",
-    ),
-    "mid-level": (
-        r"\bmid[-\s]?level\b",
-        r"\bintermediate\b",
-        r"\bii\b",
-        r"\biii\b",
-        r"\blevel\s?2\b",
-        r"\blevel\s?3\b",
-        r"\bjourneyman\b",
-        r"\bexperienced\b",
-    ),
-    "junior": (
-        r"\bjunior\b",
-        r"\bjr\.?\b",
-        r"\bassociate\b",
-        r"\bgraduate\b",
-        r"\bnew grad\b",
-        r"\bearly career\b",
-        r"\bapprentice\b",
-        r"\btrainee\b",
-    ),
-    "entry-level": (
-        r"\bentry[-\s]?level\b",
-        r"\bintern(ship)?\b",
-        r"\bco-?op\b",
-        r"\bfellow(ship)?\b",
-        r"\brotation(?:al)?\b",
-        r"\bdevelopment program\b",
-    ),
-}
-
-_DESCRIPTION_PATTERNS_BY_LEVEL: dict[str, tuple[str, ...]] = {
-    "senior": (
-        r"\b(?:8|9|10|1[1-9]|[2-9][0-9])\+?\s+years?\b",
-        r"\b(?:minimum of|at least)\s+(?:8|9|10|1[1-9]|[2-9][0-9])\s+years?\b",
-        r"\bmanag(?:e|ing)\b",
-        r"\blead(?:ership)?\b",
-        r"\bown(?:er|ership)\b",
-        r"\bmentor(?:ing)?\b",
-        r"\bstrategy\b",
-        r"\broadmap\b",
-    ),
-    "mid-level": (
-        r"\b(?:3|4|5|6|7)\+?\s+years?\b",
-        r"\b(?:minimum of|at least)\s+(?:3|4|5|6|7)\s+years?\b",
-        r"\bintermediate\b",
-        r"\bmid[-\s]?level\b",
-    ),
-    "junior": (
-        r"\b(?:0|1|2)\+?\s+years?\b",
-        r"\b(?:0\s*-\s*2|1\s*-\s*2|0\s*-\s*3)\s+years?\b",
-        r"\b(?:minimum of|at least)\s+(?:0|1|2)\s+years?\b",
-        r"\bnew grad\b",
-        r"\brecent graduate\b",
-        r"\bearly career\b",
-        r"\bentry into\b",
-    ),
-    "entry-level": (
-        r"\bno experience required\b",
-        r"\bno prior experience\b",
-        r"\bentry[-\s]?level\b",
-        r"\bintern(ship)?\b",
-        r"\btraining provided\b",
-    ),
-}
+_STRONG_SENIOR_DESCRIPTION_PATTERNS = (
+    r"\b(?:8|9|10|1[1-9]|[2-9][0-9])\+?\s+years?\b",
+    r"\b(?:minimum of|at least)\s+(?:8|9|10|1[1-9]|[2-9][0-9])\s+years?\b",
+    r"\bpeople management\b",
+    r"\bmanage a team\b",
+    r"\blead a team\b",
+    r"\bengineering manager\b",
+    r"\barchitecture ownership\b",
+    r"\bexecutive stakeholder\b",
+)
 
 _NEGATIVE_TITLE_PATTERNS = (
     r"\bassistant manager\b",
     r"\bproject manager\b",
     r"\bproduct manager\b",
 )
-
-_TITLE_WEIGHT = 3
-_DESCRIPTION_WEIGHT = 1
 
 
 def _normalize_header(value: str) -> str:
@@ -137,8 +75,8 @@ def _normalize_money(raw: str) -> int | None:
     value = raw.strip().lower().replace(",", "")
     if value.endswith("k"):
         numeric = value[:-1]
-        if numeric.isdigit():
-            return int(numeric) * 1000
+        if numeric.replace(".", "", 1).isdigit():
+            return int(float(numeric) * 1000)
         return None
     if value.isdigit():
         return int(value)
@@ -150,61 +88,21 @@ def _normalize_experience_text(value: str | None) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
-def _count_pattern_hits(text: str, patterns: tuple[str, ...]) -> int:
-    """Count regex pattern hits within normalized text."""
-    return sum(1 for pattern in patterns if re.search(pattern, text))
+def _is_soft_mid_title(title: str | None) -> bool:
+    normalized_title = _normalize_experience_text(title)
+    if not normalized_title:
+        return False
+    return any(re.search(pattern, normalized_title) for pattern in _SOFT_MID_PATTERNS)
 
 
-def _extract_year_values(text: str) -> list[int]:
-    """Extract likely years-of-experience integers from text."""
-    values: list[int] = []
-
-    for match in re.finditer(r"\b(\d{1,2})\+?\s+years?\b", text):
-        values.append(int(match.group(1)))
-
-    for match in re.finditer(r"\b(\d{1,2})\s*-\s*(\d{1,2})\s+years?\b", text):
-        values.append(int(match.group(2)))
-
-    for match in re.finditer(
-        r"\b(?:minimum of|at least)\s+(\d{1,2})\s+years?\b",
-        text,
-    ):
-        values.append(int(match.group(1)))
-
-    return values
-
-
-def _classify_years_signal(years: list[int]) -> str:
-    """Map extracted years-of-experience values to a normalized level."""
-    if not years:
-        return "unknown"
-
-    strongest = max(years)
-
-    if strongest >= 8:
-        return "senior"
-    if strongest >= 3:
-        return "mid-level"
-    if strongest >= 0:
-        return "junior"
-
-    return "unknown"
-
-
-def _best_scored_level(scores: dict[str, int]) -> str:
-    """Return the highest-confidence experience level from weighted scores."""
-    best_level = "unknown"
-    best_score = 0
-
-    for level, score in scores.items():
-        if score > best_score:
-            best_level = level
-            best_score = score
-        elif score == best_score and score > 0:
-            if _EXPERIENCE_LEVEL_ORDER[level] > _EXPERIENCE_LEVEL_ORDER[best_level]:
-                best_level = level
-
-    return best_level if best_score > 0 else "unknown"
+def _has_strong_senior_description_signal(description: str | None) -> bool:
+    normalized_description = _normalize_experience_text(description)
+    if not normalized_description:
+        return False
+    return any(
+        re.search(pattern, normalized_description)
+        for pattern in _STRONG_SENIOR_DESCRIPTION_PATTERNS
+    )
 
 
 def split_lines(text: str | None) -> list[str]:
@@ -236,11 +134,11 @@ def detect_experience_level(title: str | None, description: str | None) -> str:
     - senior
     - unknown
 
-    Detection strategy:
-    1. Strong title signals win first.
-    2. Description signals contribute weighted evidence.
-    3. Years-of-experience evidence acts as a structured fallback.
-    4. Conflicting weak signals fall back to the strongest weighted level.
+    EarlyBloom strategy:
+    1. Obvious senior titles lose immediately.
+    2. Early-career titles win quickly.
+    3. Shared experience rules interpret years more carefully.
+    4. 3 years general experience is softer than 3 years production software experience.
     """
     normalized_title = _normalize_experience_text(title)
     normalized_description = _normalize_experience_text(description)
@@ -250,41 +148,63 @@ def detect_experience_level(title: str | None, description: str | None) -> str:
 
     for pattern in _NEGATIVE_TITLE_PATTERNS:
         if re.search(pattern, normalized_title):
-            normalized_title = re.sub(pattern, "", normalized_title)
+            normalized_title = re.sub(pattern, "", normalized_title).strip()
 
-    title_scores = {
-        level: _count_pattern_hits(normalized_title, patterns) * _TITLE_WEIGHT
-        for level, patterns in _TITLE_PATTERNS_BY_LEVEL.items()
-    }
-    description_scores = {
-        level: _count_pattern_hits(normalized_description, patterns) * _DESCRIPTION_WEIGHT
-        for level, patterns in _DESCRIPTION_PATTERNS_BY_LEVEL.items()
-    }
-
-    combined_scores = {
-        level: title_scores.get(level, 0) + description_scores.get(level, 0)
-        for level in ("entry-level", "junior", "mid-level", "senior")
-    }
-
-    title_winner = _best_scored_level(title_scores)
-    if title_winner == "senior":
+    if is_obviously_senior_title(normalized_title):
         return "senior"
 
-    if title_winner in {"entry-level", "junior"} and title_scores[title_winner] >= _TITLE_WEIGHT:
-        return title_winner
+    if is_early_career_title(normalized_title):
+        return "entry-level"
 
-    years_signal = _classify_years_signal(_extract_year_values(normalized_description))
-    if years_signal == "senior":
+    shared_level = infer_experience_level_from_text(
+        title=normalized_title,
+        description=normalized_description,
+        tags=None,
+    )
+    shared_level = _normalize_level_value(shared_level)
+
+    production_years = extract_production_years_requirement(normalized_description)
+    general_years = extract_general_years_requirement(normalized_description)
+
+    if production_years is not None:
+        if production_years >= 4:
+            return "senior"
+        if production_years == 3:
+            return "mid-level"
+        if production_years <= 2:
+            return "junior"
+
+    if general_years is not None:
+        if general_years >= 5:
+            return "senior"
+        if general_years in {3, 4}:
+            # Keep this softer for EarlyBloom. 3-4 general years is often
+            # still a realistic stretch, not an automatic hard seniority wall.
+            return "mid-level"
+        if general_years <= 2:
+            return "junior"
+
+    if _has_strong_senior_description_signal(normalized_description):
         return "senior"
 
-    combined_winner = _best_scored_level(combined_scores)
-    if combined_winner != "unknown":
-        if years_signal != "unknown":
-            if _EXPERIENCE_LEVEL_ORDER[years_signal] > _EXPERIENCE_LEVEL_ORDER[combined_winner]:
-                return years_signal
-        return combined_winner
+    if _is_soft_mid_title(normalized_title):
+        return "mid-level"
 
-    return years_signal
+    return shared_level
+
+
+def _normalize_level_value(level: str | None) -> str:
+    normalized = str(level or "").strip().lower()
+
+    if normalized in {"entry", "entry-level"}:
+        return "entry-level"
+    if normalized == "junior":
+        return "junior"
+    if normalized in {"mid", "midlevel", "mid-level"}:
+        return "mid-level"
+    if normalized == "senior":
+        return "senior"
+    return "unknown"
 
 
 def detect_employment_type(description: str | None) -> str | None:
