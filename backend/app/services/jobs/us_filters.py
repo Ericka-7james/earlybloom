@@ -12,6 +12,12 @@ from app.services.jobs.constants import (
     US_STATE_NAMES,
 )
 
+STRICT_US_SIGNAL_SOURCES = {
+    "arbeitnow",
+    "remotive",
+    "jobicy",
+}
+
 US_REMOTE_ONLY_PATTERNS = {
     "remote us",
     "remote - us",
@@ -93,22 +99,12 @@ REGION_LIMIT_PATTERNS = {
     "india only",
 }
 
-US_TIMEZONE_HINTS = {
-    "est",
-    "edt",
-    "cst",
-    "cdt",
-    "mst",
-    "mdt",
-    "pst",
-    "pdt",
-    "eastern time",
-    "central time",
-    "mountain time",
-    "pacific time",
-    "us time zones",
-    "u.s. time zones",
-}
+US_TIMEZONE_PATTERNS = [
+    re.compile(r"\b(?:eastern|central|mountain|pacific)\s+time\b", re.IGNORECASE),
+    re.compile(r"\b(?:u\.s\.|us)\s+time\s+zones?\b", re.IGNORECASE),
+    re.compile(r"\b(?:overlap|work|working|coverage|available|availability)\b.{0,30}\b(?:est|edt|cst|cdt|mst|mdt|pst|pdt)\b", re.IGNORECASE),
+    re.compile(r"\b(?:est|edt|cst|cdt|mst|mdt|pst|pdt)\b.{0,20}\b(?:hours?|timezone|time zone|coverage|overlap|business hours)\b", re.IGNORECASE),
+]
 
 SCAM_PATTERNS = [
     re.compile(r"mention the word\s+\w+", re.IGNORECASE),
@@ -154,7 +150,9 @@ def looks_us_location(location: str | None) -> bool:
     if any(token in loc for token in ("united states", "u.s.", "usa", "us-based", "u.s.-based")):
         return True
 
-    if "remote" in loc and any(token in loc for token in ("us", "u.s.", "usa", "united states")):
+    if "remote" in loc and any(
+        token in loc for token in (" us", "u.s.", "usa", "united states")
+    ):
         return True
 
     for state in US_STATE_NAMES:
@@ -186,7 +184,6 @@ def has_non_us_hint(*values: str | None) -> bool:
     if any(pattern in text for pattern in REGION_LIMIT_PATTERNS):
         return True
 
-    # If the text also clearly says U.S.-eligible, do not fail it here.
     if has_us_eligibility_hint(*values):
         return False
 
@@ -194,11 +191,12 @@ def has_non_us_hint(*values: str | None) -> bool:
 
 
 def has_us_timezone_hint(*values: str | None) -> bool:
-    """Return True when text implies U.S. working hours or U.S. timezone alignment."""
+    """Return True when text implies U.S. working hours or timezone alignment."""
     text = _normalize_text(*values)
     if not text:
         return False
-    return any(hint in text for hint in US_TIMEZONE_HINTS)
+
+    return any(pattern.search(text) for pattern in US_TIMEZONE_PATTERNS)
 
 
 def has_us_eligibility_hint(*values: str | None) -> bool:
@@ -210,10 +208,7 @@ def has_us_eligibility_hint(*values: str | None) -> bool:
     if any(pattern in text for pattern in US_REMOTE_ONLY_PATTERNS):
         return True
 
-    if has_us_timezone_hint(text):
-        return True
-
-    return False
+    return has_us_timezone_hint(text)
 
 
 def is_remote_like(location: str | None, description: str | None, remote_flag: bool | None) -> bool:
@@ -267,15 +262,17 @@ def should_keep_us_focused_job(
     description: str | None,
     remote_flag: bool | None,
     title: str | None = None,
+    source: str | None = None,
 ) -> bool:
     """Keep legitimate jobs that are clearly U.S.-based or plausibly U.S.-eligible.
 
-    Layer 1 behavior:
+    Source-aware behavior:
     - reject obvious non-U.S. and worldwide/region-limited roles
     - keep clear U.S. physical roles
-    - keep explicit or strong-signal U.S. remote roles
-    - keep remote U.S.-ambiguous roles only when they strongly lean U.S.
+    - for global-first sources, require an explicit U.S. signal
+    - for U.S.-leaning or trusted sources, allow a small remote fallback path
     """
+    source_name = _safe_lower(source)
     location_text = _safe_lower(location)
     text = _normalize_text(title, location, description)
 
@@ -303,14 +300,16 @@ def should_keep_us_focused_job(
     ):
         return False
 
-    # Plausible U.S.-leaning fallback for remote jobs with weak metadata:
-    # keep if remote and text hints U.S. work eligibility or U.S. timezone overlap.
+    # Global-first / non-U.S.-first sources must prove U.S. eligibility.
+    if source_name in STRICT_US_SIGNAL_SOURCES:
+        return has_us_eligibility_hint(title, description, location)
+
+    # For U.S.-leaning sources, allow a small fallback path for remote jobs
+    # with weak metadata but some U.S. clues.
     if is_remote_like(location=location, description=description, remote_flag=remote_flag):
         if has_us_eligibility_hint(title, description, location):
             return True
 
-        # If location is just "remote" but description mentions U.S. states or U.S. hours,
-        # keep it for Layer 1 staging.
         if any(state in text for state in US_STATE_NAMES):
             return True
 

@@ -73,6 +73,15 @@ function normalizeValue(value) {
     .toLowerCase();
 }
 
+function arraysEqualAsSets(left, right) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const leftSet = new Set(left);
+  return right.every((value) => leftSet.has(value));
+}
+
 function getJobExperienceLevel(job) {
   const directLevel = normalizeValue(
     job.experienceLevel || job.experience_level || job.level
@@ -487,6 +496,57 @@ function Jobs() {
     });
   }, [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]);
 
+  const hasActiveFilters =
+    selectedExperienceLevels.length > 0 ||
+    selectedWorkplaces.length > 0 ||
+    selectedRoleTypes.length > 0;
+
+  const isUsingDefaultExperiencePreset = useMemo(() => {
+    return arraysEqualAsSets(
+      selectedExperienceLevels,
+      DEFAULT_SELECTED_EXPERIENCE_LEVELS
+    );
+  }, [selectedExperienceLevels]);
+
+  const activeFilterTags = useMemo(() => {
+    const tags = [];
+
+    FILTER_GROUPS.experienceLevel.forEach((option) => {
+      if (selectedExperienceLevels.includes(option.value)) {
+        tags.push({
+          group: "Experience",
+          label: option.label,
+          value: option.value,
+          type: "experience",
+        });
+      }
+    });
+
+    FILTER_GROUPS.workplace.forEach((option) => {
+      if (selectedWorkplaces.includes(option.value)) {
+        tags.push({
+          group: "Workplace",
+          label: option.label,
+          value: option.value,
+          type: "workplace",
+        });
+      }
+    });
+
+    FILTER_GROUPS.roleType.forEach((option) => {
+      if (selectedRoleTypes.includes(option.value)) {
+        tags.push({
+          group: "Role type",
+          label: option.label,
+          value: option.value,
+          type: "role",
+        });
+      }
+    });
+
+    return tags;
+  }, [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]);
+
   function handleOpenReasonsModal(job) {
     setActiveReasonsJob(job);
   }
@@ -542,6 +602,32 @@ function Jobs() {
     setIsResumeModalOpen(true);
   }
 
+  function clearAllFilters() {
+    setSelectedExperienceLevels([]);
+    setSelectedWorkplaces([]);
+    setSelectedRoleTypes([]);
+  }
+
+  function removeActiveFilterTag(tag) {
+    if (tag.type === "experience") {
+      setSelectedExperienceLevels((currentValues) =>
+        currentValues.filter((value) => value !== tag.value)
+      );
+      return;
+    }
+
+    if (tag.type === "workplace") {
+      setSelectedWorkplaces((currentValues) =>
+        currentValues.filter((value) => value !== tag.value)
+      );
+      return;
+    }
+
+    setSelectedRoleTypes((currentValues) =>
+      currentValues.filter((value) => value !== tag.value)
+    );
+  }
+
   function renderFilterChips(options, selectedValues, onToggle) {
     return (
       <div className="jobs-chip-list">
@@ -556,10 +642,70 @@ function Jobs() {
               aria-pressed={isSelected}
               onClick={() => onToggle(option.value)}
             >
-              {option.label}
+              <span className="jobs-chip__label">{option.label}</span>
+              {isSelected ? (
+                <span className="jobs-chip__check" aria-hidden="true">
+                  ✓
+                </span>
+              ) : null}
             </button>
           );
         })}
+      </div>
+    );
+  }
+
+  function renderActiveFilters() {
+    if (!hasActiveFilters) {
+      return (
+        <div className="jobs-active-filters jobs-active-filters--empty">
+          <p className="jobs-results__text">Showing all roles.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="jobs-active-filters">
+        <div className="jobs-active-filters__top">
+          <div>
+            <p className="jobs-active-filters__label">Active filters</p>
+            <p className="jobs-active-filters__text">
+              {isUsingDefaultExperiencePreset &&
+              selectedWorkplaces.length === 0 &&
+              selectedRoleTypes.length === 0
+                ? "Entry-level and Junior are currently selected."
+                : `${activeFilterTags.length} filter${
+                    activeFilterTags.length === 1 ? "" : "s"
+                  } applied.`}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="jobs-chip jobs-chip--muted"
+            onClick={clearAllFilters}
+          >
+            Clear filters
+          </button>
+        </div>
+
+        <div className="jobs-active-filters__list">
+          {activeFilterTags.map((tag) => (
+            <button
+              key={`${tag.type}-${tag.value}`}
+              type="button"
+              className="jobs-active-filter-tag"
+              onClick={() => removeActiveFilterTag(tag)}
+              aria-label={`Remove ${tag.group} filter ${tag.label}`}
+            >
+              <span className="jobs-active-filter-tag__group">{tag.group}</span>
+              <span className="jobs-active-filter-tag__value">{tag.label}</span>
+              <span className="jobs-active-filter-tag__remove" aria-hidden="true">
+                ×
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
@@ -568,15 +714,36 @@ function Jobs() {
     return (
       <>
         <div className="jobs-filters__header">
-          <h2 className="jobs-results__title">Filters</h2>
+          <div className="jobs-filters__title-row">
+            <h2 className="jobs-results__title">Filters</h2>
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                className="jobs-chip jobs-chip--muted"
+                onClick={clearAllFilters}
+              >
+                Clear all
+              </button>
+            ) : null}
+          </div>
+
           <p className="jobs-filters__text">
-            Entry-level and junior are selected by default for development, but
-            you can widen the search whenever you want.
+            Entry-level and junior start selected by default right now so the
+            feed stays early-career focused, but you can widen it whenever you
+            want.
           </p>
         </div>
 
         <div className="jobs-filter-group">
-          <h3 className="jobs-filter-group__title">Experience level</h3>
+          <div className="jobs-filter-group__header">
+            <h3 className="jobs-filter-group__title">Experience level</h3>
+            {selectedExperienceLevels.length > 0 ? (
+              <span className="jobs-filter-group__count">
+                {selectedExperienceLevels.length} selected
+              </span>
+            ) : null}
+          </div>
+
           {renderFilterChips(
             FILTER_GROUPS.experienceLevel,
             selectedExperienceLevels,
@@ -588,7 +755,15 @@ function Jobs() {
         </div>
 
         <div className="jobs-filter-group">
-          <h3 className="jobs-filter-group__title">Workplace</h3>
+          <div className="jobs-filter-group__header">
+            <h3 className="jobs-filter-group__title">Workplace</h3>
+            {selectedWorkplaces.length > 0 ? (
+              <span className="jobs-filter-group__count">
+                {selectedWorkplaces.length} selected
+              </span>
+            ) : null}
+          </div>
+
           {renderFilterChips(
             FILTER_GROUPS.workplace,
             selectedWorkplaces,
@@ -600,7 +775,15 @@ function Jobs() {
         </div>
 
         <div className="jobs-filter-group">
-          <h3 className="jobs-filter-group__title">Role type</h3>
+          <div className="jobs-filter-group__header">
+            <h3 className="jobs-filter-group__title">Role type</h3>
+            {selectedRoleTypes.length > 0 ? (
+              <span className="jobs-filter-group__count">
+                {selectedRoleTypes.length} selected
+              </span>
+            ) : null}
+          </div>
+
           {renderFilterChips(
             FILTER_GROUPS.roleType,
             selectedRoleTypes,
@@ -681,6 +864,8 @@ function Jobs() {
               </button>
             </div>
 
+            {renderActiveFilters()}
+
             <div className="jobs-results__header">
               <div>
                 <h2 className="jobs-results__title">Open roles</h2>
@@ -734,14 +919,32 @@ function Jobs() {
 
             {!isLoading && !error && jobs.length === 0 ? (
               <div className="section-card" aria-live="polite">
-                <h3 className="jobs-results__title">No roles match these filters</h3>
+                <h3 className="jobs-results__title">
+                  {hasActiveFilters
+                    ? "No roles match these filters"
+                    : "No roles available right now"}
+                </h3>
+
                 <p
                   className="jobs-results__text"
                   style={{ marginTop: "0.5rem" }}
                 >
-                  Try widening your experience level, workplace, or role type
-                  filters to see more jobs.
+                  {hasActiveFilters
+                    ? "Try clearing a few filters or widening your search to see more roles."
+                    : "We could not find any roles to show right now. Refresh and try again in a moment."}
                 </p>
+
+                {hasActiveFilters ? (
+                  <div style={{ marginTop: "1rem" }}>
+                    <button
+                      type="button"
+                      className="jobs-chip"
+                      onClick={clearAllFilters}
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
