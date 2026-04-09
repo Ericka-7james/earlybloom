@@ -13,6 +13,7 @@ Layer 1 strategy:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from typing import Any
 from urllib.parse import urlparse
@@ -31,6 +32,7 @@ from app.services.jobs.job_filters import (
 )
 from app.services.jobs.normalizer import normalize_provider_job
 from app.services.jobs.providers import get_configured_providers
+from app.services.jobs.us_filters import should_keep_us_focused_job
 
 logger = logging.getLogger(__name__)
 
@@ -68,14 +70,20 @@ async def get_jobs(
         return _get_mock_jobs()
 
     provider_registry = providers or get_configured_providers()
-    cache_key = build_jobs_cache_key(
-        remote_only=remote_only,
-        provider_names=list(provider_registry.keys()),
-    )
 
-    cached = get_cached_value(cache_key)
-    if cached is not None and levels is None and role_types is None:
-        return cached
+    # Only use cache for the default configured provider registry.
+    # Test-injected providers should bypass cache to avoid stale cross-test data.
+    use_cache = providers is None and levels is None and role_types is None
+
+    cache_key: str | None = None
+    if use_cache:
+        cache_key = build_jobs_cache_key(
+            remote_only=remote_only,
+            provider_names=list(provider_registry.keys()),
+        )
+        cached = get_cached_value(cache_key)
+        if cached is not None:
+            return cached
 
     live_jobs = await _get_live_jobs(
         remote_only=remote_only,
@@ -84,7 +92,7 @@ async def get_jobs(
         providers=provider_registry,
     )
 
-    if levels is None and role_types is None:
+    if use_cache and cache_key is not None:
         set_cached_value(cache_key, live_jobs)
 
     return live_jobs
@@ -147,7 +155,13 @@ async def _get_live_jobs(
 
             normalized_count += 1
 
-            if not _is_us_eligible_job(normalized):
+            if not should_keep_us_focused_job(
+                title=normalized.title,
+                location=normalized.location,
+                description=normalized.description,
+                remote_flag=normalized.remote,
+                source=normalized.source,
+            ):
                 non_us_filtered_count += 1
                 continue
 
@@ -200,7 +214,10 @@ async def _fetch_provider_jobs(
     provider: Any,
 ) -> list[Any]:
     """Fetch jobs from a single provider instance."""
-    jobs = await provider.fetch_jobs()
+    fetcher = provider.fetch_jobs
+    jobs = fetcher()
+    if inspect.isawaitable(jobs):
+        jobs = await jobs
 
     if not isinstance(jobs, list):
         logger.warning(
@@ -262,108 +279,6 @@ def _get_mock_jobs() -> list[dict[str, Any]]:
             "preferred_skills": [],
         }
     ]
-
-
-def _is_us_eligible_job(job: NormalizedJob) -> bool:
-    """Keep only U.S.-based / U.S.-eligible roles for EarlyBloom Layer 1."""
-    text = " ".join(
-        [
-            _normalize_text(job.title),
-            _normalize_text(job.location),
-            _normalize_text(job.description),
-            _normalize_text(job.summary),
-        ]
-    )
-
-    positive_markers = [
-        "united states",
-        "united states only",
-        "us only",
-        "u.s. only",
-        "usa",
-        "u.s.a.",
-        "us-based",
-        "u.s.-based",
-        "based in the united states",
-        "must be authorized to work in the us",
-        "must be authorized to work in the u.s.",
-        "eligible to work in the us",
-        "eligible to work in the united states",
-        "work authorization in the us",
-        "citizenship required",
-        "u.s. citizenship",
-        "federal government",
-        "telework eligible",
-    ]
-
-    negative_markers = [
-        "anywhere in the world",
-        "worldwide",
-        "europe only",
-        "europe",
-        "uk only",
-        "united kingdom",
-        "canada only",
-        "canada",
-        "germany",
-        "france",
-        "spain",
-        "poland",
-        "netherlands",
-        "portugal",
-        "latam",
-        "latin america",
-        "apac",
-        "emea",
-        "asia pacific",
-        "berlin",
-        "london",
-        "amsterdam",
-        "barcelona",
-        "lisbon",
-        "warsaw",
-    ]
-
-    if any(marker in text for marker in positive_markers):
-        return True
-
-    if any(marker in text for marker in negative_markers):
-        return False
-
-    location = _normalize_text(job.location)
-    if location in {"remote", "unknown", ""}:
-        return False
-
-    us_state_tokens = {
-        "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "ia",
-        "id", "il", "in", "ks", "ky", "la", "ma", "md", "me", "mi", "mn", "mo",
-        "ms", "mt", "nc", "nd", "ne", "nh", "nj", "nm", "nv", "ny", "oh", "ok",
-        "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "va", "vt", "wa", "wi",
-        "wv", "wy", "dc",
-    }
-    us_state_names = {
-        "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
-        "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
-        "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
-        "maine", "maryland", "massachusetts", "michigan", "minnesota",
-        "mississippi", "missouri", "montana", "nebraska", "nevada",
-        "new hampshire", "new jersey", "new mexico", "new york",
-        "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
-        "pennsylvania", "rhode island", "south carolina", "south dakota",
-        "tennessee", "texas", "utah", "vermont", "virginia", "washington",
-        "west virginia", "wisconsin", "wyoming", "district of columbia",
-    }
-
-    location_parts = {
-        part.strip(" ,")
-        for part in location.replace("/", ",").split(",")
-        if part.strip(" ,")
-    }
-
-    if any(part in us_state_tokens or part in us_state_names for part in location_parts):
-        return True
-
-    return False
 
 
 def _is_remote_job(job: NormalizedJob) -> bool:

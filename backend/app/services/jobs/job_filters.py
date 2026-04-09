@@ -202,13 +202,13 @@ def has_mid_level_hint(title: str | None) -> bool:
     return _matches_any_pattern(normalized_title, MID_LEVEL_HINTS)
 
 
-def has_hard_senior_experience_hint(title: str | None) -> bool:
-    """Return True when a title itself contains a strong seniority hint."""
-    normalized_title = _normalize_text(title)
-    if not normalized_title:
+def has_hard_senior_experience_hint(text: str | None) -> bool:
+    """Return True when text contains a strong seniority hint."""
+    normalized_text = _normalize_text(text)
+    if not normalized_text:
         return False
 
-    return _matches_any_pattern(normalized_title, HARD_SENIOR_EXPERIENCE_HINTS)
+    return _matches_any_pattern(normalized_text, HARD_SENIOR_EXPERIENCE_HINTS)
 
 
 def is_unknown_level_safe_title(title: str | None) -> bool:
@@ -254,20 +254,23 @@ def matches_level_filter(
     selected_levels: set[str],
 ) -> bool:
     """Check whether a job matches selected experience-level filters."""
-    if not selected_levels:
-        return True
-
     level = _normalize_text(normalized_level)
     title_text = _normalize_text(title)
 
+    # Always reject obvious senior roles, even when no explicit level filter
+    # was selected. This prevents senior titles from leaking into the default
+    # EarlyBloom browsing experience.
     if is_obviously_senior_title(title_text):
+        return False
+
+    if level == "senior":
         return False
 
     if has_hard_senior_experience_hint(title_text):
         return False
 
-    if level == "senior":
-        return "senior" in selected_levels
+    if not selected_levels:
+        return True
 
     if level == "mid-level":
         if "mid-level" in selected_levels:
