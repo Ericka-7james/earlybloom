@@ -17,3 +17,5 @@ typing-extensions
 
 # If you're using file uploads anywhere (FastAPI forms)
 python-multipart
+
+pydantic-settings
