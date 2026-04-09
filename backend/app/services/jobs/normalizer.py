@@ -131,6 +131,7 @@ def normalize_provider_job(raw_job: dict[str, Any] | NormalizedJob, source: str)
             location=location,
             description=cleaned_description,
             remote_flag=provider_remote_flag,
+            source=source,
         ):
             logger.debug(
                 "Dropping non-U.S. or unclear-scope job. source=%s title=%s company=%s location=%s",
@@ -238,6 +239,7 @@ def _normalize_existing_job(job: NormalizedJob) -> NormalizedJob | None:
         location=location,
         description=description,
         remote_flag=bool(job.remote),
+        source=job.source,
     ):
         return None
 
