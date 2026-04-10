@@ -1,6 +1,9 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import JobCard from "../components/jobs/JobCard.jsx";
+import JobsFiltersPanel from "../components/jobs/JobsFiltersPanel.jsx";
+import JobsActiveFilters from "../components/jobs/JobsActiveFilters.jsx";
+import JobDetailsModal from "../components/jobs/JobDetailsModal.jsx";
 import ResumeUploadModal from "../components/jobs/ResumeUploadModal.jsx";
 import CommonModal from "../components/common/CommonModal.jsx";
 import "../styles/components/jobs.css";
@@ -10,410 +13,24 @@ import mapJobsForDisplay from "../lib/jobs/mapJobsForDisplay";
 import { readCachedResumeUiState } from "../lib/resumes";
 import { useJobs } from "../hooks/useJobs";
 import { useAuth } from "../hooks/useAuth";
+import {
+  DEFAULT_SELECTED_EXPERIENCE_LEVELS,
+  arraysEqualAsSets,
+  filterJobs,
+  getFilterSummary,
+  getActiveFilterTags,
+} from "../lib/jobs/jobFilters";
 
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
 
-const FILTER_GROUPS = {
-  experienceLevel: [
-    { label: "Entry-level", value: "entry-level" },
-    { label: "Junior", value: "junior" },
-    { label: "Mid-level", value: "mid-level" },
-    { label: "Senior", value: "senior" },
-  ],
-  workplace: [
-    { label: "Remote", value: "remote" },
-    { label: "Onsite", value: "onsite" },
-    { label: "Hybrid", value: "hybrid" },
-  ],
-  roleType: [
-    { label: "Frontend", value: "frontend" },
-    { label: "Backend", value: "backend" },
-    { label: "Full Stack", value: "full-stack" },
-    { label: "Software Engineering", value: "software-engineering" },
-    { label: "Mobile", value: "mobile" },
-    { label: "Data", value: "data" },
-    { label: "Data Engineering", value: "data-engineering" },
-    { label: "Data Analyst", value: "data-analyst" },
-    { label: "Machine Learning", value: "machine-learning" },
-    { label: "AI", value: "ai" },
-    { label: "DevOps", value: "devops" },
-    { label: "SRE", value: "sre" },
-    { label: "Cloud", value: "cloud" },
-    { label: "Infrastructure", value: "infrastructure" },
-    { label: "Cybersecurity", value: "cybersecurity" },
-    { label: "QA", value: "qa" },
-    { label: "Test Automation", value: "test-automation" },
-    { label: "Product", value: "product" },
-    { label: "Product Design", value: "product-design" },
-    { label: "UX", value: "ux" },
-    { label: "Solutions Engineering", value: "solutions-engineering" },
-    { label: "Technical Support", value: "technical-support" },
-    { label: "IT", value: "it" },
-    { label: "Business Analyst", value: "business-analyst" },
-    { label: "Platform", value: "platform" },
-    { label: "Developer Tools", value: "developer-tools" },
-  ],
-};
-
-const DEFAULT_SELECTED_EXPERIENCE_LEVELS = ["entry-level", "junior"];
-
 const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
 const WELCOME_MODAL_PENDING_KEY = "earlybloom_welcome_modal_pending";
-
-function getFitTagModifier(fitTag) {
-  return String(fitTag || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "-");
-}
-
-function normalizeValue(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
-}
-
-function arraysEqualAsSets(left, right) {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  const leftSet = new Set(left);
-  return right.every((value) => leftSet.has(value));
-}
-
-function getJobExperienceLevel(job) {
-  const directLevel = normalizeValue(
-    job.experienceLevel || job.experience_level || job.level
-  );
-
-  if (
-    directLevel === "entry-level" ||
-    directLevel === "junior" ||
-    directLevel === "mid-level" ||
-    directLevel === "senior"
-  ) {
-    return directLevel;
-  }
-
-  if (directLevel === "mid") {
-    return "mid-level";
-  }
-
-  const title = normalizeValue(job.title);
-  const summary = normalizeValue(job.summary);
-  const description = normalizeValue(job.description);
-  const haystack = `${title} ${summary} ${description}`;
-
-  if (
-    haystack.includes("entry-level") ||
-    haystack.includes("entry level") ||
-    haystack.includes("new grad") ||
-    haystack.includes("graduate") ||
-    haystack.includes("early career")
-  ) {
-    return "entry-level";
-  }
-
-  if (haystack.includes("junior") || haystack.includes("jr ")) {
-    return "junior";
-  }
-
-  if (
-    haystack.includes("senior") ||
-    haystack.includes("staff") ||
-    haystack.includes("principal") ||
-    haystack.includes("lead") ||
-    haystack.includes("chief") ||
-    haystack.includes("director")
-  ) {
-    return "senior";
-  }
-
-  if (
-    haystack.includes("mid-level") ||
-    haystack.includes("mid level") ||
-    haystack.includes("intermediate") ||
-    haystack.includes("level ii") ||
-    haystack.includes("level 2")
-  ) {
-    return "mid-level";
-  }
-
-  return "unknown";
-}
-
-function getJobWorkplace(job) {
-  const remoteType = normalizeValue(job.remoteType || job.remote_type);
-  if (
-    remoteType === "remote" ||
-    remoteType === "onsite" ||
-    remoteType === "hybrid"
-  ) {
-    return remoteType;
-  }
-
-  if (job.remote === true) {
-    return "remote";
-  }
-
-  const haystack = normalizeValue(
-    `${job.location || ""} ${job.summary || ""} ${job.description || ""}`
-  );
-
-  if (haystack.includes("hybrid")) {
-    return "hybrid";
-  }
-
-  if (haystack.includes("remote") || haystack.includes("telework")) {
-    return "remote";
-  }
-
-  if (haystack.includes("onsite") || haystack.includes("on-site")) {
-    return "onsite";
-  }
-
-  return "unknown";
-}
-
-function inferRoleType(job) {
-  const directRoleType = normalizeValue(job.roleType || job.role_type);
-  if (directRoleType) {
-    return directRoleType;
-  }
-
-  const haystack = normalizeValue(
-    `${job.title || ""} ${job.summary || ""} ${job.description || ""}`
-  );
-
-  if (
-    haystack.includes("frontend") ||
-    haystack.includes("front-end") ||
-    haystack.includes("react") ||
-    haystack.includes("ui engineer")
-  ) {
-    return "frontend";
-  }
-
-  if (
-    haystack.includes("backend") ||
-    haystack.includes("back-end") ||
-    haystack.includes("api") ||
-    haystack.includes("server-side")
-  ) {
-    return "backend";
-  }
-
-  if (
-    haystack.includes("full stack") ||
-    haystack.includes("full-stack") ||
-    haystack.includes("fullstack")
-  ) {
-    return "full-stack";
-  }
-
-  if (
-    haystack.includes("software engineer") ||
-    haystack.includes("software developer") ||
-    haystack.includes("application developer") ||
-    haystack.includes("programmer")
-  ) {
-    return "software-engineering";
-  }
-
-  if (
-    haystack.includes("ios") ||
-    haystack.includes("android") ||
-    haystack.includes("mobile")
-  ) {
-    return "mobile";
-  }
-
-  if (
-    haystack.includes("data engineer") ||
-    haystack.includes("etl") ||
-    haystack.includes("pipeline")
-  ) {
-    return "data-engineering";
-  }
-
-  if (
-    haystack.includes("data analyst") ||
-    haystack.includes("business intelligence") ||
-    haystack.includes("reporting analyst")
-  ) {
-    return "data-analyst";
-  }
-
-  if (
-    haystack.includes("data ") ||
-    haystack.includes("analytics") ||
-    haystack.includes("analyst")
-  ) {
-    return "data";
-  }
-
-  if (
-    haystack.includes("machine learning") ||
-    haystack.includes("ml engineer")
-  ) {
-    return "machine-learning";
-  }
-
-  if (
-    haystack.includes("artificial intelligence") ||
-    haystack.includes(" ai ")
-  ) {
-    return "ai";
-  }
-
-  if (
-    haystack.includes("devops") ||
-    haystack.includes("devsecops") ||
-    haystack.includes("ci/cd")
-  ) {
-    return "devops";
-  }
-
-  if (
-    haystack.includes("site reliability") ||
-    haystack.includes(" sre ")
-  ) {
-    return "sre";
-  }
-
-  if (haystack.includes("cloud")) {
-    return "cloud";
-  }
-
-  if (
-    haystack.includes("infrastructure") ||
-    haystack.includes("sysadmin") ||
-    haystack.includes("systems administration")
-  ) {
-    return "infrastructure";
-  }
-
-  if (
-    haystack.includes("cyber") ||
-    haystack.includes("security") ||
-    haystack.includes("infosec")
-  ) {
-    return "cybersecurity";
-  }
-
-  if (
-    haystack.includes("qa") ||
-    haystack.includes("quality assurance") ||
-    haystack.includes("test automation") ||
-    haystack.includes("sdet")
-  ) {
-    return haystack.includes("automation") ? "test-automation" : "qa";
-  }
-
-  if (haystack.includes("product manager")) {
-    return "product";
-  }
-
-  if (
-    haystack.includes("product design") ||
-    haystack.includes("product designer")
-  ) {
-    return "product-design";
-  }
-
-  if (
-    haystack.includes("ux") ||
-    haystack.includes("user experience") ||
-    haystack.includes("ui/ux")
-  ) {
-    return "ux";
-  }
-
-  if (
-    haystack.includes("solutions engineer") ||
-    haystack.includes("sales engineer") ||
-    haystack.includes("implementation engineer")
-  ) {
-    return "solutions-engineering";
-  }
-
-  if (
-    haystack.includes("technical support") ||
-    haystack.includes("support engineer") ||
-    haystack.includes("help desk")
-  ) {
-    return "technical-support";
-  }
-
-  if (
-    haystack.includes("it specialist") ||
-    haystack.includes("it support") ||
-    haystack.includes("information technology")
-  ) {
-    return "it";
-  }
-
-  if (
-    haystack.includes("business analyst") ||
-    haystack.includes("systems analyst")
-  ) {
-    return "business-analyst";
-  }
-
-  if (haystack.includes("platform")) {
-    return "platform";
-  }
-
-  if (
-    haystack.includes("developer tools") ||
-    haystack.includes("devtools")
-  ) {
-    return "developer-tools";
-  }
-
-  return "unknown";
-}
-
-function toggleSelectedValue(currentValues, value) {
-  if (currentValues.includes(value)) {
-    return currentValues.filter((item) => item !== value);
-  }
-
-  return [...currentValues, value];
-}
-
-function getFilterSummary({
-  selectedExperienceLevels,
-  selectedWorkplaces,
-  selectedRoleTypes,
-}) {
-  const parts = [];
-
-  if (selectedExperienceLevels.length > 0) {
-    parts.push(`${selectedExperienceLevels.length} level`);
-  }
-
-  if (selectedWorkplaces.length > 0) {
-    parts.push(`${selectedWorkplaces.length} workplace`);
-  }
-
-  if (selectedRoleTypes.length > 0) {
-    parts.push(`${selectedRoleTypes.length} role type`);
-  }
-
-  if (parts.length === 0) {
-    return "All roles";
-  }
-
-  return parts.join(" • ");
-}
 
 function Jobs() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
 
-  const [activeReasonsJob, setActiveReasonsJob] = useState(null);
+  const [activeJob, setActiveJob] = useState(null);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [isLoginRequiredModalOpen, setIsLoginRequiredModalOpen] =
     useState(false);
@@ -423,6 +40,7 @@ function Jobs() {
   );
   const [selectedWorkplaces, setSelectedWorkplaces] = useState([]);
   const [selectedRoleTypes, setSelectedRoleTypes] = useState([]);
+  const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
 
   const visibleResumeFile = useMemo(() => {
     if (!user) {
@@ -450,8 +68,6 @@ function Jobs() {
     retry,
   } = useJobs();
 
-  const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
-
   const scoredJobs = useMemo(() => {
     return scoreJobsForUser(rawJobs, resolvedUserProfile);
   }, [rawJobs, resolvedUserProfile]);
@@ -463,23 +79,10 @@ function Jobs() {
   }, [rawJobs, scoredJobs]);
 
   const jobs = useMemo(() => {
-    return mappedJobs.filter((job) => {
-      const experienceLevel = getJobExperienceLevel(job);
-      const workplace = getJobWorkplace(job);
-      const roleType = inferRoleType(job);
-
-      const matchesExperienceLevel =
-        selectedExperienceLevels.length === 0 ||
-        selectedExperienceLevels.includes(experienceLevel);
-
-      const matchesWorkplace =
-        selectedWorkplaces.length === 0 ||
-        selectedWorkplaces.includes(workplace);
-
-      const matchesRoleType =
-        selectedRoleTypes.length === 0 || selectedRoleTypes.includes(roleType);
-
-      return matchesExperienceLevel && matchesWorkplace && matchesRoleType;
+    return filterJobs(mappedJobs, {
+      selectedExperienceLevels,
+      selectedWorkplaces,
+      selectedRoleTypes,
     });
   }, [
     mappedJobs,
@@ -509,50 +112,19 @@ function Jobs() {
   }, [selectedExperienceLevels]);
 
   const activeFilterTags = useMemo(() => {
-    const tags = [];
-
-    FILTER_GROUPS.experienceLevel.forEach((option) => {
-      if (selectedExperienceLevels.includes(option.value)) {
-        tags.push({
-          group: "Experience",
-          label: option.label,
-          value: option.value,
-          type: "experience",
-        });
-      }
+    return getActiveFilterTags({
+      selectedExperienceLevels,
+      selectedWorkplaces,
+      selectedRoleTypes,
     });
-
-    FILTER_GROUPS.workplace.forEach((option) => {
-      if (selectedWorkplaces.includes(option.value)) {
-        tags.push({
-          group: "Workplace",
-          label: option.label,
-          value: option.value,
-          type: "workplace",
-        });
-      }
-    });
-
-    FILTER_GROUPS.roleType.forEach((option) => {
-      if (selectedRoleTypes.includes(option.value)) {
-        tags.push({
-          group: "Role type",
-          label: option.label,
-          value: option.value,
-          type: "role",
-        });
-      }
-    });
-
-    return tags;
   }, [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]);
 
-  function handleOpenReasonsModal(job) {
-    setActiveReasonsJob(job);
+  function handleOpenDetails(job) {
+    setActiveJob(job);
   }
 
-  function handleCloseReasonsModal() {
-    setActiveReasonsJob(null);
+  function handleCloseDetails() {
+    setActiveJob(null);
   }
 
   function handleCloseResumeModal() {
@@ -628,175 +200,6 @@ function Jobs() {
     );
   }
 
-  function renderFilterChips(options, selectedValues, onToggle) {
-    return (
-      <div className="jobs-chip-list">
-        {options.map((option) => {
-          const isSelected = selectedValues.includes(option.value);
-
-          return (
-            <button
-              key={option.value}
-              type="button"
-              className={`jobs-chip ${isSelected ? "jobs-chip--active" : ""}`}
-              aria-pressed={isSelected}
-              onClick={() => onToggle(option.value)}
-            >
-              <span className="jobs-chip__label">{option.label}</span>
-              {isSelected ? (
-                <span className="jobs-chip__check" aria-hidden="true">
-                  ✓
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
-    );
-  }
-
-  function renderActiveFilters() {
-    if (!hasActiveFilters) {
-      return (
-        <div className="jobs-active-filters jobs-active-filters--empty">
-          <p className="jobs-results__text">Showing all roles.</p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="jobs-active-filters">
-        <div className="jobs-active-filters__top">
-          <div>
-            <p className="jobs-active-filters__label">Active filters</p>
-            <p className="jobs-active-filters__text">
-              {isUsingDefaultExperiencePreset &&
-              selectedWorkplaces.length === 0 &&
-              selectedRoleTypes.length === 0
-                ? "Entry-level and Junior are currently selected."
-                : `${activeFilterTags.length} filter${
-                    activeFilterTags.length === 1 ? "" : "s"
-                  } applied.`}
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className="jobs-chip jobs-chip--muted"
-            onClick={clearAllFilters}
-          >
-            Clear filters
-          </button>
-        </div>
-
-        <div className="jobs-active-filters__list">
-          {activeFilterTags.map((tag) => (
-            <button
-              key={`${tag.type}-${tag.value}`}
-              type="button"
-              className="jobs-active-filter-tag"
-              onClick={() => removeActiveFilterTag(tag)}
-              aria-label={`Remove ${tag.group} filter ${tag.label}`}
-            >
-              <span className="jobs-active-filter-tag__group">{tag.group}</span>
-              <span className="jobs-active-filter-tag__value">{tag.label}</span>
-              <span className="jobs-active-filter-tag__remove" aria-hidden="true">
-                ×
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  function renderFiltersContent() {
-    return (
-      <>
-        <div className="jobs-filters__header">
-          <div className="jobs-filters__title-row">
-            <h2 className="jobs-results__title">Filters</h2>
-            {hasActiveFilters ? (
-              <button
-                type="button"
-                className="jobs-chip jobs-chip--muted"
-                onClick={clearAllFilters}
-              >
-                Clear all
-              </button>
-            ) : null}
-          </div>
-
-          <p className="jobs-filters__text">
-            Entry-level and junior start selected by default right now so the
-            feed stays early-career focused, but you can widen it whenever you
-            want.
-          </p>
-        </div>
-
-        <div className="jobs-filter-group">
-          <div className="jobs-filter-group__header">
-            <h3 className="jobs-filter-group__title">Experience level</h3>
-            {selectedExperienceLevels.length > 0 ? (
-              <span className="jobs-filter-group__count">
-                {selectedExperienceLevels.length} selected
-              </span>
-            ) : null}
-          </div>
-
-          {renderFilterChips(
-            FILTER_GROUPS.experienceLevel,
-            selectedExperienceLevels,
-            (value) =>
-              setSelectedExperienceLevels((currentValues) =>
-                toggleSelectedValue(currentValues, value)
-              )
-          )}
-        </div>
-
-        <div className="jobs-filter-group">
-          <div className="jobs-filter-group__header">
-            <h3 className="jobs-filter-group__title">Workplace</h3>
-            {selectedWorkplaces.length > 0 ? (
-              <span className="jobs-filter-group__count">
-                {selectedWorkplaces.length} selected
-              </span>
-            ) : null}
-          </div>
-
-          {renderFilterChips(
-            FILTER_GROUPS.workplace,
-            selectedWorkplaces,
-            (value) =>
-              setSelectedWorkplaces((currentValues) =>
-                toggleSelectedValue(currentValues, value)
-              )
-          )}
-        </div>
-
-        <div className="jobs-filter-group">
-          <div className="jobs-filter-group__header">
-            <h3 className="jobs-filter-group__title">Role type</h3>
-            {selectedRoleTypes.length > 0 ? (
-              <span className="jobs-filter-group__count">
-                {selectedRoleTypes.length} selected
-              </span>
-            ) : null}
-          </div>
-
-          {renderFilterChips(
-            FILTER_GROUPS.roleType,
-            selectedRoleTypes,
-            (value) =>
-              setSelectedRoleTypes((currentValues) =>
-                toggleSelectedValue(currentValues, value)
-              )
-          )}
-        </div>
-      </>
-    );
-  }
-
   return (
     <main className="jobs-page">
       <section className="section-pad">
@@ -846,7 +249,16 @@ function Jobs() {
             className="jobs-filters section-card jobs-filters--desktop"
             aria-label="Job filters"
           >
-            {renderFiltersContent()}
+            <JobsFiltersPanel
+              hasActiveFilters={hasActiveFilters}
+              selectedExperienceLevels={selectedExperienceLevels}
+              selectedWorkplaces={selectedWorkplaces}
+              selectedRoleTypes={selectedRoleTypes}
+              setSelectedExperienceLevels={setSelectedExperienceLevels}
+              setSelectedWorkplaces={setSelectedWorkplaces}
+              setSelectedRoleTypes={setSelectedRoleTypes}
+              onClearAll={clearAllFilters}
+            />
           </aside>
 
           <div className="jobs-results">
@@ -864,7 +276,15 @@ function Jobs() {
               </button>
             </div>
 
-            {renderActiveFilters()}
+            <JobsActiveFilters
+              hasActiveFilters={hasActiveFilters}
+              isUsingDefaultExperiencePreset={isUsingDefaultExperiencePreset}
+              selectedWorkplaces={selectedWorkplaces}
+              selectedRoleTypes={selectedRoleTypes}
+              activeFilterTags={activeFilterTags}
+              onClearAll={clearAllFilters}
+              onRemoveTag={removeActiveFilterTag}
+            />
 
             <div className="jobs-results__header">
               <div>
@@ -906,11 +326,7 @@ function Jobs() {
                   {error}
                 </p>
                 <div style={{ marginTop: "1rem" }}>
-                  <button
-                    type="button"
-                    className="jobs-chip"
-                    onClick={retry}
-                  >
+                  <button type="button" className="jobs-chip" onClick={retry}>
                     Try again
                   </button>
                 </div>
@@ -954,7 +370,7 @@ function Jobs() {
                   <JobCard
                     key={job.id}
                     job={job}
-                    onOpenReasonsModal={handleOpenReasonsModal}
+                    onOpenDetails={handleOpenDetails}
                   />
                 ))}
               </div>
@@ -972,7 +388,16 @@ function Jobs() {
         iconAlt="EarlyBloom Bloombug icon"
       >
         <div className="jobs-filters jobs-filters--modal">
-          {renderFiltersContent()}
+          <JobsFiltersPanel
+            hasActiveFilters={hasActiveFilters}
+            selectedExperienceLevels={selectedExperienceLevels}
+            selectedWorkplaces={selectedWorkplaces}
+            selectedRoleTypes={selectedRoleTypes}
+            setSelectedExperienceLevels={setSelectedExperienceLevels}
+            setSelectedWorkplaces={setSelectedWorkplaces}
+            setSelectedRoleTypes={setSelectedRoleTypes}
+            onClearAll={clearAllFilters}
+          />
         </div>
       </CommonModal>
 
@@ -1000,14 +425,7 @@ function Jobs() {
             </p>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              gap: "0.75rem",
-              flexWrap: "wrap",
-              marginTop: "1rem",
-            }}
-          >
+          <div className="jobs-inline-actions">
             <button
               type="button"
               className="button button--primary"
@@ -1051,14 +469,7 @@ function Jobs() {
             </p>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              gap: "0.75rem",
-              flexWrap: "wrap",
-              marginTop: "1rem",
-            }}
-          >
+          <div className="jobs-inline-actions">
             <button
               type="button"
               className="button button--primary"
@@ -1078,91 +489,11 @@ function Jobs() {
         </div>
       </CommonModal>
 
-      <CommonModal
-        isOpen={Boolean(activeReasonsJob)}
-        title="Why EarlyBloom surfaced this"
-        onClose={handleCloseReasonsModal}
-        size="md"
-        iconImage={BloombugAppIcon}
-        iconAlt="EarlyBloom Bloombug icon"
-      >
-        {activeReasonsJob ? (
-          <div className="jobs-reasons-modal">
-            <div className="jobs-reasons-modal__intro">
-              <p className="jobs-reasons-modal__eyebrow">
-                <span
-                  className={`jobs-reasons-modal__eyebrow-fit jobs-reasons-modal__eyebrow-fit--${getFitTagModifier(
-                    activeReasonsJob.fitTag
-                  )}`}
-                >
-                  {activeReasonsJob.fitTag}
-                </span>
-                {" • "}
-                {activeReasonsJob.matchScore}% match
-              </p>
-
-              <h3 className="jobs-reasons-modal__job-title">
-                {activeReasonsJob.title}
-              </h3>
-
-              <p className="jobs-reasons-modal__job-meta">
-                {activeReasonsJob.company} • {activeReasonsJob.location}
-              </p>
-            </div>
-
-            <div className="jobs-reasons-modal__section">
-              <p className="jobs-reasons-modal__label">Top reasons</p>
-              <ul className="jobs-reasons-modal__list">
-                {(activeReasonsJob.reasons || []).map((reason, index) => (
-                  <li
-                    key={`${activeReasonsJob.id}-modal-reason-${index}`}
-                    className="jobs-reasons-modal__list-item"
-                  >
-                    {reason}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {Array.isArray(activeReasonsJob.warningFlags) &&
-            activeReasonsJob.warningFlags.length > 0 ? (
-              <div className="jobs-reasons-modal__section">
-                <p className="jobs-reasons-modal__label">Watchouts</p>
-                <ul className="jobs-reasons-modal__list jobs-reasons-modal__list--warning">
-                  {activeReasonsJob.warningFlags.map((warning, index) => (
-                    <li
-                      key={`${activeReasonsJob.id}-modal-warning-${index}`}
-                      className="jobs-reasons-modal__list-item"
-                    >
-                      {warning}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {activeReasonsJob.summary ? (
-              <div className="jobs-reasons-modal__section">
-                <p className="jobs-reasons-modal__label">Summary</p>
-                <p className="jobs-results__text">{activeReasonsJob.summary}</p>
-              </div>
-            ) : null}
-
-            {activeReasonsJob.url ? (
-              <div style={{ marginTop: "1rem" }}>
-                <a
-                  href={activeReasonsJob.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="button button--primary jobs-reasons-modal__listing-link"
-                >
-                  View listing
-                </a>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </CommonModal>
+      <JobDetailsModal
+        job={activeJob}
+        isOpen={Boolean(activeJob)}
+        onClose={handleCloseDetails}
+      />
 
       <ResumeUploadModal
         isOpen={isResumeModalOpen}
