@@ -1,5 +1,5 @@
 /**
- * Maps raw + scored jobs into UI-ready job cards.
+ * Maps raw + scored jobs into UI-ready job cards and modal details.
  */
 
 function formatCompensation(comp) {
@@ -61,7 +61,7 @@ function resolveLocation(job) {
   if (job.location?.display) return cleanText(job.location.display);
   if (typeof job.location === "string") return cleanText(job.location);
   if (job.jobLocation) return cleanText(job.jobLocation);
-  return "Location not listed";
+  return "";
 }
 
 function looksMultiLocation(location) {
@@ -78,7 +78,8 @@ function looksMultiLocation(location) {
     normalized.includes("few vacancies") ||
     normalized.includes("locations") ||
     normalized.split(";").length >= 3 ||
-    normalized.split("|").length >= 3
+    normalized.split("|").length >= 3 ||
+    normalized.split(", ").length >= 6
   );
 }
 
@@ -100,6 +101,25 @@ function formatCardLocation(location, source) {
 
   if (safeLocation.length > 72) {
     return "Location details in modal";
+  }
+
+  return safeLocation;
+}
+
+function formatModalLocation(location, source) {
+  const safeLocation = cleanText(location);
+  const safeSource = cleanText(source).toLowerCase();
+
+  if (!safeLocation) {
+    return null;
+  }
+
+  if (safeSource === "usajobs" && looksMultiLocation(safeLocation)) {
+    return "Multiple U.S. locations";
+  }
+
+  if (looksMultiLocation(safeLocation)) {
+    return "Multiple locations";
   }
 
   return safeLocation;
@@ -127,6 +147,29 @@ function resolveRoleType(job) {
 
 function resolveExperienceLevel(job) {
   return job.experienceLevel ?? job.experience_level ?? job.level ?? null;
+}
+
+function normalizeExperienceLevel(level) {
+  const normalized = cleanText(level).toLowerCase();
+
+  if (!normalized || normalized === "unknown") {
+    return null;
+  }
+
+  switch (normalized) {
+    case "entry":
+    case "entry-level":
+      return "Entry-level";
+    case "junior":
+      return "Junior";
+    case "mid":
+    case "mid-level":
+      return "Mid-level";
+    case "senior":
+      return "Senior";
+    default:
+      return level || null;
+  }
 }
 
 function resolveFitTag(scored) {
@@ -170,6 +213,27 @@ function resolveRemote(job) {
   return remoteType === "remote";
 }
 
+function formatSourceLabel(source) {
+  switch (source) {
+    case "greenhouse":
+      return "Greenhouse";
+    case "lever":
+      return "Lever";
+    case "adzuna":
+      return "Adzuna";
+    case "usajobs":
+      return "USAJobs";
+    case "remoteok":
+      return "RemoteOK";
+    case "jobicy":
+      return "Jobicy";
+    case "arbeitnow":
+      return "ArbeitNow";
+    default:
+      return source || null;
+  }
+}
+
 export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
   const scoredMap = new Map(scoredJobs.map((job) => [job.id, job]));
 
@@ -179,20 +243,22 @@ export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
     const sourceUrl = resolveSourceUrl(job);
     const source = job.source ?? job.source_name ?? null;
     const fullLocation = resolveLocation(job);
+    const modalLocation = formatModalLocation(fullLocation, source);
 
     return {
       id: job.id,
       title: job.title ?? "Untitled role",
       company: resolveCompany(job),
-      location: fullLocation,
+      location: fullLocation || "Location not listed",
       cardLocation: formatCardLocation(fullLocation, source),
+      modalLocation,
       fullLocation,
       workplaceType: resolveWorkplaceType(job),
       remoteType: resolveWorkplaceType(job),
       remote: resolveRemote(job),
       employmentType: resolveEmploymentType(job),
       roleType: resolveRoleType(job),
-      experienceLevel: resolveExperienceLevel(job),
+      experienceLevel: normalizeExperienceLevel(resolveExperienceLevel(job)),
       description: job.description ?? "",
       summary: resolveSummary(job),
       fitTag: resolveFitTag(scored),
@@ -204,6 +270,7 @@ export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
       compensation: formatCompensation(compensation),
       postedAt: resolvePostedAt(job),
       source,
+      sourceLabel: formatSourceLabel(source),
       sourceUrl,
       url: sourceUrl,
     };

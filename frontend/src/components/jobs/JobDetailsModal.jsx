@@ -27,6 +27,19 @@ function renderParagraphs(text) {
 }
 
 function JobDetailsModal({ job, isOpen, onClose }) {
+  const detailMeta = job
+    ? [
+        job.experienceLevel,
+        job.compensation,
+        job.sourceLabel ? `Source: ${job.sourceLabel}` : null,
+      ].filter(Boolean)
+    : [];
+
+  const shouldShowLocationDetails =
+    job?.fullLocation &&
+    job?.modalLocation &&
+    job.fullLocation !== job.modalLocation;
+
   return (
     <CommonModal
       isOpen={isOpen}
@@ -54,20 +67,19 @@ function JobDetailsModal({ job, isOpen, onClose }) {
             <h3 className="jobs-reasons-modal__job-title">{job.title}</h3>
 
             <p className="jobs-reasons-modal__job-meta">
-              {job.company} • {job.fullLocation || job.location}
+              {job.company}
+              {job.modalLocation ? ` • ${job.modalLocation}` : ""}
             </p>
 
-            <div className="jobs-detail-modal__meta">
-              {job.experienceLevel ? (
-                <span className="job-card__tag">{job.experienceLevel}</span>
-              ) : null}
-              {job.compensation ? (
-                <span className="job-card__tag">{job.compensation}</span>
-              ) : null}
-              {job.source ? (
-                <span className="job-card__tag">Source: {job.source}</span>
-              ) : null}
-            </div>
+            {detailMeta.length > 0 ? (
+              <div className="jobs-detail-modal__meta">
+                {detailMeta.map((item, index) => (
+                  <span key={`${job.id}-detail-meta-${index}`} className="job-card__tag">
+                    {item}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           {Array.isArray(job.reasons) && job.reasons.length > 0 ? (
@@ -99,6 +111,13 @@ function JobDetailsModal({ job, isOpen, onClose }) {
                   </li>
                 ))}
               </ul>
+            </div>
+          ) : null}
+
+          {shouldShowLocationDetails ? (
+            <div className="jobs-reasons-modal__section">
+              <p className="jobs-reasons-modal__label">Location details</p>
+              <p className="jobs-results__text">{job.fullLocation}</p>
             </div>
           ) : null}
 
