@@ -1,12 +1,5 @@
 import React from "react";
 
-/**
- * Returns a semantic class name for the fit tag badge.
- *
- * @param {"Real Junior" | "Stretch Role" | "Too Senior" | "Misleading Junior"} fitTag
- *   Job fit label.
- * @returns {string} CSS modifier class.
- */
 function getFitTagClassName(fitTag) {
   switch (fitTag) {
     case "Real Junior":
@@ -21,12 +14,6 @@ function getFitTagClassName(fitTag) {
   }
 }
 
-/**
- * Returns a label for the source system.
- *
- * @param {string | null | undefined} source Source identifier.
- * @returns {string | null} Human-readable source label.
- */
 function formatSourceLabel(source) {
   switch (source) {
     case "greenhouse":
@@ -39,18 +26,15 @@ function formatSourceLabel(source) {
       return "USAJobs";
     case "remoteok":
       return "RemoteOK";
+    case "jobicy":
+      return "Jobicy";
+    case "arbeitnow":
+      return "ArbeitNow";
     default:
       return source || null;
   }
 }
 
-/**
- * Returns a safe fit tag for display.
- *
- * @param {string | null | undefined} fitTag Raw fit tag.
- * @returns {"Real Junior" | "Stretch Role" | "Too Senior" | "Misleading Junior"}
- *   Safe fit tag.
- */
 function getSafeFitTag(fitTag) {
   switch (fitTag) {
     case "Real Junior":
@@ -63,12 +47,6 @@ function getSafeFitTag(fitTag) {
   }
 }
 
-/**
- * Returns a safe percentage match score.
- *
- * @param {number | null | undefined} matchScore Raw match score.
- * @returns {number} Safe match score clamped between 0 and 100.
- */
 function getSafeMatchScore(matchScore) {
   if (!Number.isFinite(matchScore)) {
     return 0;
@@ -77,36 +55,6 @@ function getSafeMatchScore(matchScore) {
   return Math.max(0, Math.min(100, Math.round(matchScore)));
 }
 
-/**
- * Returns a short safe text preview.
- *
- * @param {string | null | undefined} value Raw text.
- * @param {number} maxLength Max allowed length.
- * @returns {string} Safe preview string.
- */
-function getPreviewText(value, maxLength = 140) {
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  const trimmed = value.replace(/\s+/g, " ").trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  if (trimmed.length <= maxLength) {
-    return trimmed;
-  }
-
-  return `${trimmed.slice(0, maxLength).trimEnd()}...`;
-}
-
-/**
- * Formats experience level for display.
- *
- * @param {string | null | undefined} experienceLevel Raw level value.
- * @returns {string | null} Display-ready level label.
- */
 function formatExperienceLevel(experienceLevel) {
   const normalized = String(experienceLevel || "")
     .trim()
@@ -124,90 +72,39 @@ function formatExperienceLevel(experienceLevel) {
       return "Senior";
     case "unknown":
     case "":
-      return "Unknown";
+      return null;
     default:
       return experienceLevel || null;
   }
 }
 
-/**
- * Builds compact metadata pills for the card.
- *
- * @param {Object} params Metadata candidates.
- * @param {string | null | undefined} params.location
- * @param {string | null | undefined} params.experienceLevel
- * @param {string | null | undefined} params.sourceLabel
- * @returns {string[]} Display-ready compact metadata.
- */
-function getCompactMeta({ location, experienceLevel, sourceLabel }) {
-  return [
-    location,
-    formatExperienceLevel(experienceLevel),
-    sourceLabel ? `Source: ${sourceLabel}` : null,
-  ]
+function getCompactMeta({ location, experienceLevel, compensation, sourceLabel }) {
+  return [location, formatExperienceLevel(experienceLevel), compensation, sourceLabel]
     .filter((value) => typeof value === "string" && value.trim().length > 0)
-    .slice(0, 3);
+    .slice(0, 4);
 }
 
-/**
- * Renders a single compact job card.
- *
- * @param {{
- *   job: {
- *     id: string,
- *     title?: string,
- *     company?: string,
- *     location?: string,
- *     experienceLevel?: string | null,
- *     experience_level?: string | null,
- *     summary?: string | null,
- *     fitTag?: "Real Junior" | "Stretch Role" | "Too Senior" | "Misleading Junior",
- *     matchScore?: number,
- *     reasons?: string[],
- *     warningFlags?: string[],
- *     source?: string | null,
- *     sourceUrl?: string | null,
- *     url?: string | null
- *   },
- *   onOpenReasonsModal?: (job: Object) => void
- * }} props
- * @returns {JSX.Element} Job card.
- */
-function JobCard({ job, onOpenReasonsModal }) {
+function JobCard({ job, onOpenDetails }) {
   const id = job.id;
   const title = job.title || "Untitled role";
   const company = job.company || "Unknown company";
-  const location = job.location || "Location not listed";
-  const experienceLevel =
-    job.experienceLevel || job.experience_level || "unknown";
-  const summary = job.summary || "";
-  const fitTag = job.fitTag;
-  const matchScore = job.matchScore;
-  const reasons = Array.isArray(job.reasons) ? job.reasons : [];
-  const warningFlags = Array.isArray(job.warningFlags) ? job.warningFlags : [];
-  const source = job.source || null;
-
-  const safeFitTag = getSafeFitTag(fitTag);
-  const safeMatchScore = getSafeMatchScore(matchScore);
-  const sourceLabel = formatSourceLabel(source);
-
+  const fitTag = getSafeFitTag(job.fitTag);
+  const matchScore = getSafeMatchScore(job.matchScore);
+  const sourceLabel = formatSourceLabel(job.source)
+    ? `Source: ${formatSourceLabel(job.source)}`
+    : null;
   const compactMeta = getCompactMeta({
-    location,
-    experienceLevel,
+    location: job.cardLocation || job.location || "Location not listed",
+    experienceLevel: job.experienceLevel,
+    compensation: job.compensation,
     sourceLabel,
   });
-
-  const reasonPreview =
-    reasons.length > 0 ? getPreviewText(reasons[0], 120) : "";
-
-  const summaryPreview = getPreviewText(summary, 150);
-  const hasWarningFlags = warningFlags.length > 0;
-
-  const canOpenModal = typeof onOpenReasonsModal === "function";
+  const hasWarningFlags =
+    Array.isArray(job.warningFlags) && job.warningFlags.length > 0;
 
   const handleOpen = () => {
-    if (canOpenModal) {
-      onOpenReasonsModal(job);
+    if (typeof onOpenDetails === "function") {
+      onOpenDetails(job);
     }
   };
 
@@ -226,17 +123,21 @@ function JobCard({ job, onOpenReasonsModal }) {
           <div className="job-card__heading">
             <div className="job-card__meta-row">
               <span
-                className={`job-card__fit-tag ${getFitTagClassName(safeFitTag)}`}
+                className={`job-card__fit-tag ${getFitTagClassName(fitTag)}`}
               >
-                {safeFitTag}
+                {fitTag}
               </span>
 
               <span
                 className="job-card__match-badge"
-                aria-label={`${safeMatchScore} percent match`}
+                aria-label={`${matchScore} percent match`}
               >
-                {safeMatchScore}% match
+                {matchScore}% match
               </span>
+
+              {hasWarningFlags ? (
+                <span className="job-card__watchout-chip">Watchouts</span>
+              ) : null}
             </div>
 
             <h3 id={`job-card-title-${id}`} className="job-card__title">
@@ -261,20 +162,9 @@ function JobCard({ job, onOpenReasonsModal }) {
           </div>
         ) : null}
 
-        {reasonPreview ? (
-          <div className="job-card__preview-block">
-            <p className="job-card__preview-label">Why</p>
-            <p className="job-card__preview-text">{reasonPreview}</p>
-          </div>
-        ) : null}
-
-        {summaryPreview ? (
-          <p className="job-card__summary">{summaryPreview}</p>
-        ) : null}
-
-        {hasWarningFlags ? (
-          <p className="job-card__watchout">Includes watchouts</p>
-        ) : null}
+        <div className="job-card__footer-row">
+          <span className="job-card__footer-link">View details</span>
+        </div>
       </button>
     </article>
   );

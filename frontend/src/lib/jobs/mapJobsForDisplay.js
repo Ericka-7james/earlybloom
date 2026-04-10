@@ -53,11 +53,56 @@ function normalizeScoreBreakdown(breakdown) {
   };
 }
 
+function cleanText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
 function resolveLocation(job) {
-  if (job.location?.display) return job.location.display;
-  if (typeof job.location === "string") return job.location;
-  if (job.jobLocation) return job.jobLocation;
+  if (job.location?.display) return cleanText(job.location.display);
+  if (typeof job.location === "string") return cleanText(job.location);
+  if (job.jobLocation) return cleanText(job.jobLocation);
   return "Location not listed";
+}
+
+function looksMultiLocation(location) {
+  const normalized = cleanText(location).toLowerCase();
+
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.includes("location negotiable after selection") ||
+    normalized.includes("many vacancies") ||
+    normalized.includes("multiple locations") ||
+    normalized.includes("few vacancies") ||
+    normalized.includes("locations") ||
+    normalized.split(";").length >= 3 ||
+    normalized.split("|").length >= 3
+  );
+}
+
+function formatCardLocation(location, source) {
+  const safeLocation = cleanText(location);
+  const safeSource = cleanText(source).toLowerCase();
+
+  if (!safeLocation) {
+    return "Location not listed";
+  }
+
+  if (safeSource === "usajobs" && looksMultiLocation(safeLocation)) {
+    return "Multiple U.S. locations";
+  }
+
+  if (looksMultiLocation(safeLocation)) {
+    return "Multiple locations";
+  }
+
+  if (safeLocation.length > 72) {
+    return "Location details in modal";
+  }
+
+  return safeLocation;
 }
 
 function resolveWorkplaceType(job) {
@@ -81,12 +126,7 @@ function resolveRoleType(job) {
 }
 
 function resolveExperienceLevel(job) {
-  return (
-    job.experienceLevel ??
-    job.experience_level ??
-    job.level ??
-    null
-  );
+  return job.experienceLevel ?? job.experience_level ?? job.level ?? null;
 }
 
 function resolveFitTag(scored) {
@@ -137,12 +177,16 @@ export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
     const scored = scoredMap.get(job.id);
     const compensation = buildCompensation(job);
     const sourceUrl = resolveSourceUrl(job);
+    const source = job.source ?? job.source_name ?? null;
+    const fullLocation = resolveLocation(job);
 
     return {
       id: job.id,
       title: job.title ?? "Untitled role",
       company: resolveCompany(job),
-      location: resolveLocation(job),
+      location: fullLocation,
+      cardLocation: formatCardLocation(fullLocation, source),
+      fullLocation,
       workplaceType: resolveWorkplaceType(job),
       remoteType: resolveWorkplaceType(job),
       remote: resolveRemote(job),
@@ -159,7 +203,7 @@ export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
       confidence: scored?.confidence ?? null,
       compensation: formatCompensation(compensation),
       postedAt: resolvePostedAt(job),
-      source: job.source ?? job.source_name ?? null,
+      source,
       sourceUrl,
       url: sourceUrl,
     };

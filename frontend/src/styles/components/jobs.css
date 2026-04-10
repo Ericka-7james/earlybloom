@@ -346,7 +346,8 @@
 
 .job-card__fit-tag,
 .job-card__match-badge,
-.job-card__tag {
+.job-card__tag,
+.job-card__watchout-chip {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
@@ -391,6 +392,13 @@
   border: 1px solid rgba(111, 84, 201, 0.12);
 }
 
+.job-card__watchout-chip {
+  padding: 0.38rem 0.68rem;
+  background: rgba(255, 240, 168, 0.18);
+  color: #8a5a12;
+  border: 1px solid rgba(138, 90, 18, 0.14);
+}
+
 .job-card__title {
   margin: 0 0 0.25rem;
   color: var(--color-heading);
@@ -425,73 +433,28 @@
   background: rgba(255, 255, 255, 0.8);
   border: 1px solid var(--color-border);
   color: var(--color-text-soft);
+  max-width: 100%;
 }
 
-.job-card__preview-block {
-  display: grid;
-  gap: 0.2rem;
+.job-card__footer-row {
+  display: flex;
+  justify-content: flex-end;
 }
 
-.job-card__preview-label {
-  margin: 0;
-  color: var(--color-heading);
-  font-size: 0.8rem;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-}
-
-.job-card__preview-text {
-  margin: 0;
-  color: var(--color-text-soft);
-  font-size: 0.92rem;
-  line-height: 1.55;
-}
-
-.job-card__summary {
-  margin: 0;
-  color: var(--color-text-soft);
-  font-size: 0.92rem;
-  line-height: 1.55;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.job-card__watchout {
-  margin: 0;
-  color: #8a5a12;
-  font-size: 0.84rem;
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.job-card__why-pill {
-  flex-shrink: 0;
-  align-self: flex-start;
-  border: 1px solid rgba(124, 92, 255, 0.22);
-  background: rgba(245, 239, 255, 0.96);
+.job-card__footer-link {
   color: var(--color-primary-deep);
-  border-radius: 999px;
-  padding: 0.45rem 0.78rem;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-  transition:
-    transform 160ms ease,
-    box-shadow 160ms ease,
-    border-color 160ms ease,
-    background-color 160ms ease;
+  font-size: 0.88rem;
+  font-weight: 800;
 }
 
-.job-card__why-pill:hover,
-.job-card__why-pill:focus-visible {
-  transform: translateY(-1px);
-  border-color: rgba(124, 92, 255, 0.35);
-  background: rgba(240, 232, 255, 1);
-  box-shadow: 0 10px 24px rgba(124, 92, 255, 0.14);
-  outline: none;
+/* Hide old card preview content now that modal is the detail surface */
+.job-card__preview-block,
+.job-card__preview-label,
+.job-card__preview-text,
+.job-card__summary,
+.job-card__watchout,
+.job-card__why-pill {
+  display: none;
 }
 
 /* Legacy selectors kept calm */
@@ -616,7 +579,7 @@
   color: var(--color-text);
 }
 
-/* Reasons modal */
+/* Job details modal */
 .jobs-reasons-modal {
   display: flex;
   flex-direction: column;
@@ -712,6 +675,29 @@
 .jobs-reasons-modal__listing-link {
   width: 100%;
   justify-content: center;
+}
+
+.jobs-detail-modal__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.9rem;
+}
+
+.jobs-detail-modal__copy {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.jobs-detail-modal__actions {
+  margin-top: 0.5rem;
+}
+
+.jobs-inline-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
 }
 
 .eyebrow-pill {
