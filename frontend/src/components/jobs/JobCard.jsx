@@ -93,12 +93,14 @@ function JobCard({ job, onOpenDetails }) {
   const sourceLabel = formatSourceLabel(job.source)
     ? `Source: ${formatSourceLabel(job.source)}`
     : null;
+
   const compactMeta = getCompactMeta({
     location: job.cardLocation || job.location || "Location not listed",
     experienceLevel: job.experienceLevel,
     compensation: job.compensation,
     sourceLabel,
   });
+
   const hasWarningFlags =
     Array.isArray(job.warningFlags) && job.warningFlags.length > 0;
 
@@ -147,8 +149,8 @@ function JobCard({ job, onOpenDetails }) {
             <p className="job-card__company">{company}</p>
           </div>
 
-          <span className="job-card__chevron" aria-hidden="true">
-            →
+          <span className="job-card__details-link" aria-hidden="true">
+            View details
           </span>
         </div>
 
@@ -161,10 +163,6 @@ function JobCard({ job, onOpenDetails }) {
             ))}
           </div>
         ) : null}
-
-        <div className="job-card__footer-row">
-          <span className="job-card__footer-link">View details</span>
-        </div>
       </button>
     </article>
   );
