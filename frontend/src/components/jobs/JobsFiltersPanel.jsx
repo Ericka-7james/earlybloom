@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import {
   FILTER_GROUPS,
   toggleSelectedValue,
@@ -31,6 +31,46 @@ function renderFilterChips(options, selectedValues, onToggle) {
   );
 }
 
+function FilterSection({
+  title,
+  selectedCount,
+  isOpen,
+  onToggleOpen,
+  children,
+}) {
+  return (
+    <section className={`jobs-filter-group ${isOpen ? "jobs-filter-group--open" : ""}`}>
+      <button
+        type="button"
+        className="jobs-filter-group__toggle"
+        onClick={onToggleOpen}
+        aria-expanded={isOpen}
+      >
+        <div className="jobs-filter-group__header">
+          <h3 className="jobs-filter-group__title">{title}</h3>
+
+          <div className="jobs-filter-group__header-meta">
+            {selectedCount > 0 ? (
+              <span className="jobs-filter-group__count">
+                {selectedCount} selected
+              </span>
+            ) : null}
+
+            <span
+              className="jobs-filter-group__chevron"
+              aria-hidden="true"
+            >
+              {isOpen ? "−" : "+"}
+            </span>
+          </div>
+        </div>
+      </button>
+
+      {isOpen ? <div className="jobs-filter-group__body">{children}</div> : null}
+    </section>
+  );
+}
+
 function JobsFiltersPanel({
   hasActiveFilters,
   selectedExperienceLevels,
@@ -41,20 +81,63 @@ function JobsFiltersPanel({
   setSelectedRoleTypes,
   onClearAll,
 }) {
+  const [openSections, setOpenSections] = useState({
+    experience: true,
+    workplace: false,
+    roleType: false,
+  });
+
+  const totalSelectedCount = useMemo(
+    () =>
+      selectedExperienceLevels.length +
+      selectedWorkplaces.length +
+      selectedRoleTypes.length,
+    [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]
+  );
+
+  function toggleSection(sectionKey) {
+    setOpenSections((current) => ({
+      ...current,
+      [sectionKey]: !current[sectionKey],
+    }));
+  }
+
+  function scrollPanelToTop() {
+    const panel = document.querySelector(".jobs-filters--desktop");
+    if (!panel) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    panel.scrollTo({ top: 0, behavior: "smooth" });
+    panel.focus({ preventScroll: true });
+  }
+
   return (
     <>
       <div className="jobs-filters__header">
         <div className="jobs-filters__title-row">
           <h2 className="jobs-results__title">Filters</h2>
-          {hasActiveFilters ? (
+
+          <div className="jobs-filters__header-actions">
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                className="jobs-chip jobs-chip--muted"
+                onClick={onClearAll}
+              >
+                Clear all
+              </button>
+            ) : null}
+
             <button
               type="button"
-              className="jobs-chip jobs-chip--muted"
-              onClick={onClearAll}
+              className="jobs-chip jobs-chip--muted jobs-filters__top-button"
+              onClick={scrollPanelToTop}
             >
-              Clear all
+              Back to top
             </button>
-          ) : null}
+          </div>
         </div>
 
         <p className="jobs-filters__text">
@@ -62,18 +145,20 @@ function JobsFiltersPanel({
           feed stays early-career focused, but you can widen it whenever you
           want.
         </p>
+
+        {totalSelectedCount > 0 ? (
+          <p className="jobs-filters__summary">
+            {totalSelectedCount} filter{totalSelectedCount === 1 ? "" : "s"} selected
+          </p>
+        ) : null}
       </div>
 
-      <div className="jobs-filter-group">
-        <div className="jobs-filter-group__header">
-          <h3 className="jobs-filter-group__title">Experience level</h3>
-          {selectedExperienceLevels.length > 0 ? (
-            <span className="jobs-filter-group__count">
-              {selectedExperienceLevels.length} selected
-            </span>
-          ) : null}
-        </div>
-
+      <FilterSection
+        title="Experience level"
+        selectedCount={selectedExperienceLevels.length}
+        isOpen={openSections.experience}
+        onToggleOpen={() => toggleSection("experience")}
+      >
         {renderFilterChips(
           FILTER_GROUPS.experienceLevel,
           selectedExperienceLevels,
@@ -82,18 +167,14 @@ function JobsFiltersPanel({
               toggleSelectedValue(currentValues, value)
             )
         )}
-      </div>
+      </FilterSection>
 
-      <div className="jobs-filter-group">
-        <div className="jobs-filter-group__header">
-          <h3 className="jobs-filter-group__title">Workplace</h3>
-          {selectedWorkplaces.length > 0 ? (
-            <span className="jobs-filter-group__count">
-              {selectedWorkplaces.length} selected
-            </span>
-          ) : null}
-        </div>
-
+      <FilterSection
+        title="Workplace"
+        selectedCount={selectedWorkplaces.length}
+        isOpen={openSections.workplace}
+        onToggleOpen={() => toggleSection("workplace")}
+      >
         {renderFilterChips(
           FILTER_GROUPS.workplace,
           selectedWorkplaces,
@@ -102,18 +183,14 @@ function JobsFiltersPanel({
               toggleSelectedValue(currentValues, value)
             )
         )}
-      </div>
+      </FilterSection>
 
-      <div className="jobs-filter-group">
-        <div className="jobs-filter-group__header">
-          <h3 className="jobs-filter-group__title">Role type</h3>
-          {selectedRoleTypes.length > 0 ? (
-            <span className="jobs-filter-group__count">
-              {selectedRoleTypes.length} selected
-            </span>
-          ) : null}
-        </div>
-
+      <FilterSection
+        title="Role type"
+        selectedCount={selectedRoleTypes.length}
+        isOpen={openSections.roleType}
+        onToggleOpen={() => toggleSection("roleType")}
+      >
         {renderFilterChips(
           FILTER_GROUPS.roleType,
           selectedRoleTypes,
@@ -122,7 +199,7 @@ function JobsFiltersPanel({
               toggleSelectedValue(currentValues, value)
             )
         )}
-      </div>
+      </FilterSection>
     </>
   );
 }
