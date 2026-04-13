@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.services.jobs.providers.common.title_rules import (
+from app.services.jobs.common.title_rules import (
     is_early_career_title,
     is_obviously_senior_title,
 )

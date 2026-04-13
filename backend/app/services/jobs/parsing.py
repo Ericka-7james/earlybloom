@@ -15,12 +15,12 @@ from app.services.jobs.constants import (
     ONSITE_KEYWORDS,
     REMOTE_KEYWORDS,
 )
-from app.services.jobs.providers.common.experience_rules import (
+from app.services.jobs.common.experience_rules import (
     extract_general_years_requirement,
     extract_production_years_requirement,
     infer_experience_level_from_text,
 )
-from app.services.jobs.providers.common.title_rules import (
+from app.services.jobs.common.title_rules import (
     is_early_career_title,
     is_obviously_senior_title,
 )
