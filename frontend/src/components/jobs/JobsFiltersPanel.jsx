@@ -102,17 +102,6 @@ function JobsFiltersPanel({
     }));
   }
 
-  function scrollPanelToTop() {
-    const panel = document.querySelector(".jobs-filters--desktop");
-    if (!panel) {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      return;
-    }
-
-    panel.scrollTo({ top: 0, behavior: "smooth" });
-    panel.focus({ preventScroll: true });
-  }
-
   return (
     <>
       <div className="jobs-filters__header">
@@ -129,14 +118,6 @@ function JobsFiltersPanel({
                 Clear all
               </button>
             ) : null}
-
-            <button
-              type="button"
-              className="jobs-chip jobs-chip--muted jobs-filters__top-button"
-              onClick={scrollPanelToTop}
-            >
-              Back to top
-            </button>
           </div>
         </div>
 

@@ -9,9 +9,8 @@
 
 .navbar {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 0.75rem;
   min-height: 76px;
   padding-top: 0.75rem;
@@ -21,9 +20,9 @@
 .brand {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 0.85rem;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .brand__icon {
@@ -32,6 +31,7 @@
   object-fit: contain;
   border-radius: 18px;
   box-shadow: var(--shadow-soft);
+  flex-shrink: 0;
 }
 
 .brand__text {
@@ -45,20 +45,24 @@
   font-weight: 800;
   letter-spacing: -0.03em;
   color: var(--color-heading);
+  line-height: 1.1;
 }
 
 .brand__subtitle {
   font-size: 0.78rem;
   color: var(--color-text-soft);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav-links {
-  display: flex;
+  display: none;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   gap: 0.5rem;
-  width: 100%;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
 }
 
 .nav-link {
@@ -68,13 +72,15 @@
   transition:
     background-color 180ms ease,
     color 180ms ease,
-    transform 180ms ease;
+    transform 180ms ease,
+    box-shadow 180ms ease;
 }
 
 .nav-link:hover {
   background: rgba(255, 255, 255, 0.7);
   color: var(--color-heading);
   transform: translateY(-1px);
+  box-shadow: var(--shadow-soft);
 }
 
 .nav-link--button {
@@ -89,26 +95,105 @@
   pointer-events: none;
 }
 
-.nav-link--email {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .nav-auth-placeholder {
   min-width: 110px;
   display: inline-flex;
   justify-content: center;
 }
 
-@media (max-width: 425px) {
-  .nav-links {
-    gap: 0.35rem;
-  }
+.nav-menu {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+}
 
-  .nav-link {
-    padding: 0.55rem 0.7rem;
+.nav-menu__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.32);
+  border: 1px solid rgba(124, 92, 163, 0.14);
+  color: var(--color-heading);
+  transition:
+    transform 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.nav-menu__trigger:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: var(--shadow-soft);
+}
+
+.nav-menu__dots {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.nav-menu__dropdown {
+  position: absolute;
+  top: calc(100% + 0.65rem);
+  right: 0;
+  min-width: 220px;
+  padding: 0.55rem;
+  display: grid;
+  gap: 0.2rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 18px 48px rgba(81, 58, 130, 0.18);
+  backdrop-filter: blur(18px);
+}
+
+.nav-menu__item-wrap {
+  display: grid;
+}
+
+.nav-menu__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  color: #1f1a2e;
+  background: transparent;
+  text-align: left;
+  font-weight: 500;
+  font-size: 1.05rem;
+}
+
+.nav-menu__item:hover,
+.nav-menu__item--button:hover {
+  background: rgba(245, 239, 255, 0.9);
+}
+
+.nav-menu__item--button {
+  border: 0;
+  cursor: pointer;
+}
+
+.nav-menu__item--muted {
+  color: var(--color-text-soft);
+}
+
+.nav-menu__trigger:focus-visible,
+.nav-link:focus-visible,
+.nav-link--button:focus-visible,
+.nav-menu__item:focus-visible,
+.nav-menu__item--button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 425px) {
+  .brand__icon {
+    width: 48px;
+    height: 48px;
   }
 
   .brand__title {
@@ -120,28 +205,12 @@
   }
 }
 
-@media (min-width: 860px) {
-  .navbar {
-    flex-direction: row;
-    justify-content: space-between;
-    gap: 1rem;
-    padding-top: 0;
-    padding-bottom: 0;
-  }
-
-  .brand {
-    flex: 1;
-    justify-content: flex-start;
-  }
-
+@media (min-width: 769px) {
   .nav-links {
-    flex: 1;
-    justify-content: center;
-    flex-wrap: nowrap;
-    width: auto;
+    display: flex;
   }
 
-  .nav-link--email {
+  .nav-menu {
     display: none;
   }
 }

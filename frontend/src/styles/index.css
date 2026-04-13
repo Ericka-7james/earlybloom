@@ -71,6 +71,7 @@ html {
 
 body {
   margin: 0;
+  min-width: 320px;
   background: var(--gradient-page);
   color: var(--color-text);
   overflow-x: clip;
@@ -185,7 +186,10 @@ button {
   padding: 0.85rem 1.15rem;
   border-radius: 999px;
   font-weight: 700;
-  transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
 }
 
 .button:hover {

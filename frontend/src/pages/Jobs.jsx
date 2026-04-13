@@ -168,9 +168,6 @@ function Jobs() {
     return getVisiblePageNumbers(currentPage, totalPages);
   }, [currentPage, totalPages]);
 
-  const pageStartCount = jobs.length === 0 ? 0 : (currentPage - 1) * JOBS_PER_PAGE + 1;
-  const pageEndCount = Math.min(currentPage * JOBS_PER_PAGE, jobs.length);
-
   const filtersSummary = useMemo(() => {
     return getFilterSummary({
       selectedExperienceLevels,
