@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+requests
+pydantic
+pydantic-settings
+python-dotenv
+typing-extensions
+python-multipart
