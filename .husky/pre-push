@@ -7,7 +7,7 @@ npm ci || exit 1
 echo "🔍 Running lint..."
 npm run lint || exit 1
 
-echo "🧪 Running tests..."
+echo "🧪 Running coverage checks..."
 npm run test:coverage || exit 1
 
 echo "🏗️ Running build..."
