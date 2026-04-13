@@ -12,6 +12,11 @@ from app.services.jobs.constants import (
 )
 
 _WHITESPACE_RE = re.compile(r"\s+")
+_LOCATION_SPLIT_RE = re.compile(r"\s*;\s*|\s*\|\s*")
+_MULTI_LOCATION_SOURCES = {
+    "greenhouse",
+    "lever",
+}
 
 _EXPERIENCE_LEVEL_RANK = {
     "unknown": 0,
@@ -36,6 +41,7 @@ def dedupe_jobs(jobs: list[NormalizedJob]) -> list[NormalizedJob]:
     1. Canonical URL
     2. Source + title + company + location
     3. Title + company + location
+    4. For selected multi-location commercial providers, source + title + company
 
     When duplicates are detected, the richer record is kept and merged.
 
@@ -80,7 +86,7 @@ def _find_existing_index(
 
 
 def _candidate_aliases(job: NormalizedJob) -> set[str]:
-    """Build the layered dedupe aliases for a normalized job."""
+    """Build layered dedupe aliases for a normalized job."""
     aliases: set[str] = set()
 
     canonical_url = _canonicalize_url(str(job.url or ""))
@@ -108,7 +114,38 @@ def _candidate_aliases(job: NormalizedJob) -> set[str]:
     if title_company_location.replace("::", ""):
         aliases.add(f"tcl::{title_company_location}")
 
+    # For selected ATS-style providers, also merge same title/company/source
+    # across multiple office postings.
+    if _supports_multilocation_family_merge(job):
+        source_title_company = "::".join(
+            [
+                _norm(job.source),
+                _norm(job.title),
+                _norm(job.company),
+            ]
+        )
+        if source_title_company.replace("::", ""):
+            aliases.add(f"stc::{source_title_company}")
+
     return aliases
+
+
+def _supports_multilocation_family_merge(job: NormalizedJob) -> bool:
+    """Return True when same-role multi-location cards should be merged."""
+    source = _norm(job.source)
+    if source not in _MULTI_LOCATION_SOURCES:
+        return False
+
+    title = _norm(job.title)
+    company = _norm(job.company)
+    if not title or not company:
+        return False
+
+    # Be conservative and avoid over-merging govt-ish or generic cases.
+    if source == "usajobs":
+        return False
+
+    return True
 
 
 def _merge_jobs(left: NormalizedJob, right: NormalizedJob) -> NormalizedJob:
@@ -133,12 +170,24 @@ def _merge_jobs(left: NormalizedJob, right: NormalizedJob) -> NormalizedJob:
         _EXPERIENCE_LEVEL_RANK,
     )
 
+    merged_role_type = primary.role_type
+    if str(merged_role_type or "").strip().lower() == "unknown":
+        merged_role_type = secondary.role_type
+
     salary_min = primary.salary_min if primary.salary_min is not None else secondary.salary_min
     salary_max = primary.salary_max if primary.salary_max is not None else secondary.salary_max
     salary_currency = primary.salary_currency or secondary.salary_currency
     employment_type = primary.employment_type or secondary.employment_type
-    location = primary.location or secondary.location or "Unknown"
-    url = str(primary.url or secondary.url or "")
+
+    merged_location = _merge_locations(primary.location, secondary.location)
+    merged_location_display = _merge_locations(
+        primary.location_display or primary.location,
+        secondary.location_display or secondary.location,
+    )
+    merged_url = str(primary.url or secondary.url or "")
+    merged_source_job_id = primary.source_job_id or secondary.source_job_id
+    merged_stable_key = primary.stable_key or secondary.stable_key
+    merged_provider_payload_hash = primary.provider_payload_hash or secondary.provider_payload_hash
 
     return primary.model_copy(
         update={
@@ -151,12 +200,17 @@ def _merge_jobs(left: NormalizedJob, right: NormalizedJob) -> NormalizedJob:
             "remote": bool(primary.remote or secondary.remote),
             "remote_type": merged_remote_type,
             "experience_level": merged_experience_level,
+            "role_type": merged_role_type,
             "employment_type": employment_type,
             "salary_min": salary_min,
             "salary_max": salary_max,
             "salary_currency": salary_currency,
-            "location": location,
-            "url": url,
+            "location": merged_location,
+            "location_display": merged_location_display,
+            "url": merged_url,
+            "source_job_id": merged_source_job_id,
+            "stable_key": merged_stable_key,
+            "provider_payload_hash": merged_provider_payload_hash,
         }
     )
 
@@ -193,8 +247,12 @@ def _richness_score(job: NormalizedJob) -> int:
         score += 2
     if job.experience_level != "unknown":
         score += 2
+    if job.role_type != "unknown":
+        score += 2
     if str(job.url or "").strip():
         score += 4
+    if str(job.location_display or job.location or "").strip():
+        score += 2
 
     return score
 
@@ -233,6 +291,41 @@ def _prefer_ranked_value(
     if ranking.get(right_value, 0) > ranking.get(left_value, 0):
         return right_value
     return left_value
+
+
+def _merge_locations(left: str | None, right: str | None) -> str:
+    """Merge location strings while preserving readable order."""
+    left_parts = _split_locations(left)
+    right_parts = _split_locations(right)
+
+    merged: list[str] = []
+    seen: set[str] = set()
+
+    for part in [*left_parts, *right_parts]:
+        key = _norm(part)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append(part)
+
+    if not merged:
+        return ""
+
+    if len(merged) == 1:
+        return merged[0]
+
+    return "; ".join(merged)
+
+
+def _split_locations(value: str | None) -> list[str]:
+    """Split a location string into de-duplicable pieces."""
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+
+    parts = _LOCATION_SPLIT_RE.split(raw)
+    cleaned = [" ".join(part.split()) for part in parts if " ".join(part.split())]
+    return cleaned
 
 
 def _norm(value: str | None) -> str:
