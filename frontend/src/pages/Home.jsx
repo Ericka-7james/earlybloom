@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import bloombugMarketingMascot from "../assets/bloombug/BloombugMarketingMascot.png";
 import BloombugCareerGarden from "../assets/bloombug/BloombugCareerGarden.png";
 
@@ -36,13 +37,13 @@ function Home() {
           </p>
 
           <div className="hero__actions">
-            <button type="button" className="button button--primary">
+            <Link to="/jobs" className="button button--primary">
               Start Exploring
-            </button>
+            </Link>
 
-            <button type="button" className="button button--secondary">
-              See the Mission
-            </button>
+            <Link to="/learn-more" className="button button--secondary">
+              Learn More
+            </Link>
           </div>
 
           <div className="hero__tags" aria-label="Product highlights">
@@ -126,8 +127,10 @@ function Home() {
             <p className="section-label">What is coming next</p>
             <h2 className="section-title">A growing toolkit for job seekers.</h2>
             <p className="section-copy">
-              Upcoming pages will include a jobs explorer, a resume upload flow,
-              and an application tracker built to help users search smarter.
+              EarlyBloom is growing into a cleaner, kinder way to search for
+              work. The goal is to help people spot realistic opportunities,
+              understand why a role fits, and stay organized without drowning in
+              noise.
             </p>
 
             <ul className="soft-list" aria-label="Upcoming features">
