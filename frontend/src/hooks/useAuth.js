@@ -5,10 +5,21 @@
  * - user
  * - loading state
  * - refresh + signOut helpers
+ *
+ * Also listens for app-wide auth changes so Navbar and pages stay in sync.
  */
 
 import { useEffect, useState, useCallback } from "react";
 import { getSession, signOut } from "../lib/auth/authApi";
+
+const AUTH_CHANGED_EVENT = "earlybloom:auth-changed";
+
+/**
+ * Broadcasts that auth state changed somewhere in the app.
+ */
+export function notifyAuthChanged() {
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+}
 
 /**
  * Auth hook.
@@ -16,7 +27,7 @@ import { getSession, signOut } from "../lib/auth/authApi";
  * @returns {{
  *   user: object | null,
  *   loading: boolean,
- *   refresh: () => Promise<void>,
+ *   refresh: () => Promise<object | null>,
  *   handleSignOut: () => Promise<void>
  * }}
  */
@@ -27,9 +38,12 @@ export function useAuth() {
   const fetchSession = useCallback(async () => {
     try {
       const session = await getSession();
-      setUser(session?.user || null);
+      const nextUser = session?.user || null;
+      setUser(nextUser);
+      return nextUser;
     } catch {
       setUser(null);
+      return null;
     } finally {
       setLoading(false);
     }
@@ -37,11 +51,26 @@ export function useAuth() {
 
   useEffect(() => {
     fetchSession();
+
+    function handleAuthChanged() {
+      setLoading(true);
+      fetchSession();
+    }
+
+    window.addEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
+
+    return () => {
+      window.removeEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
+    };
   }, [fetchSession]);
 
   async function handleSignOut() {
-    await signOut();
-    setUser(null);
+    try {
+      await signOut();
+    } finally {
+      setUser(null);
+      notifyAuthChanged();
+    }
   }
 
   return {
