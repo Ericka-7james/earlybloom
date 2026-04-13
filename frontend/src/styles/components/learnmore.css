@@ -1,0 +1,179 @@
+.learnmore-page {
+  width: 100%;
+}
+
+.learnmore-hero {
+  display: grid;
+  gap: 1.2rem;
+  align-items: center;
+  padding-top: 1.25rem;
+  padding-bottom: 1rem;
+}
+
+.learnmore-hero__content {
+  min-width: 0;
+}
+
+.learnmore-hero__media {
+  display: none;
+}
+
+.learnmore-hero__title {
+  margin: 1rem 0 0;
+  color: var(--color-heading);
+  font-size: clamp(2.2rem, 10vw, 4.2rem);
+  line-height: 0.98;
+  letter-spacing: -0.06em;
+  max-width: 12ch;
+}
+
+.learnmore-hero__description {
+  margin: 1rem 0 0;
+  color: var(--color-text-soft);
+  font-size: 1rem;
+  line-height: 1.75;
+  max-width: 60ch;
+}
+
+.learnmore-hero-card,
+.learnmore-panel,
+.learnmore-card,
+.learnmore-callout {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(14px);
+}
+
+.learnmore-hero-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  padding: 1rem;
+}
+
+.learnmore-hero-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--gradient-brand);
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+.learnmore-hero-card__image {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 420px);
+  margin-inline: auto;
+}
+
+.learnmore-story {
+  display: grid;
+  gap: 1rem;
+}
+
+.learnmore-panel {
+  border-radius: var(--radius-xl);
+  padding: 1.25rem;
+}
+
+.learnmore-values {
+  display: grid;
+  gap: 1rem;
+}
+
+.learnmore-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.learnmore-card {
+  border-radius: var(--radius-lg);
+  padding: 1.2rem;
+}
+
+.learnmore-card__number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: 16px;
+  background: var(--gradient-brand);
+  color: var(--color-heading);
+  font-weight: 800;
+}
+
+.learnmore-card__title {
+  margin: 1rem 0 0;
+  color: var(--color-heading);
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.learnmore-card__copy {
+  margin: 0.6rem 0 0;
+  color: var(--color-text-soft);
+  line-height: 1.7;
+}
+
+.learnmore-callout {
+  display: grid;
+  gap: 1.2rem;
+  border-radius: var(--radius-xl);
+  padding: 1.25rem;
+  align-items: center;
+}
+
+.learnmore-callout__media {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.learnmore-callout__content {
+  text-align: left;
+}
+
+.learnmore-callout__image {
+  width: min(100%, 280px);
+  margin-inline: auto;
+}
+
+@media (min-width: 640px) {
+  .learnmore-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .learnmore-hero-card {
+    padding: 1.35rem;
+  }
+}
+
+@media (min-width: 860px) {
+  .learnmore-hero {
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 2rem;
+    padding-top: 2rem;
+    padding-bottom: 1.5rem;
+  }
+
+  .learnmore-hero__media {
+    display: block;
+  }
+
+  .learnmore-story {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .learnmore-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .learnmore-callout {
+    grid-template-columns: 0.9fr 1.1fr;
+    gap: 2rem;
+  }
+}
