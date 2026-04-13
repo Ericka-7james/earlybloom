@@ -967,37 +967,38 @@
 }
 
 .jobs-pagination {
-  padding: 0.9rem 1rem;
-  overflow-x: auto;
+  padding: 0.85rem 1rem;
+  overflow: hidden;
 }
 
 .jobs-pagination__inner {
   display: flex;
   align-items: center;
-  justify-content: center;   /* always centered */
-  gap: 0.75rem;
+  justify-content: center;
+  gap: 0.5rem;
   flex-wrap: nowrap;
-  white-space: nowrap;
-  min-width: max-content;
-  margin: 0 auto;
+  width: 100%;
+  min-width: 0;
 }
 
 .jobs-pagination__pages {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 0.45rem;
   flex-wrap: nowrap;
-  white-space: nowrap;
+  min-width: 0;
 }
 
 .jobs-pagination__ellipsis {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 2rem;
+  min-width: 1.35rem;
   color: var(--color-text-soft);
   font-weight: 700;
+  line-height: 1;
+  flex: 0 0 auto;
 }
 
 .jobs-pagination .jobs-chip {
@@ -1084,11 +1085,27 @@
   .jobs-reasons-modal__job-title {
     font-size: 1.15rem;
   }
+
+  .jobs-pagination {
+    padding: 0.9rem 1rem;
+  }
+
+  .jobs-pagination__inner {
+    gap: 0.55rem;
+  }
+
+  .jobs-pagination__pages {
+    gap: 0.5rem;
+  }
 }
 
 @media (min-width: 1024px) {
   .jobs-layout {
     grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+  }
+
+  .jobs-pagination {
+    padding: 0.95rem 1.05rem;
   }
 }
 
@@ -1125,5 +1142,49 @@
   .job-card__details-button {
     width: 100%;
     justify-content: center;
+  }
+
+  .jobs-pagination {
+    padding: 0.8rem 0.9rem;
+  }
+
+  .jobs-pagination__inner {
+    gap: 0.4rem;
+  }
+
+  .jobs-pagination__pages {
+    gap: 0.35rem;
+  }
+
+  .jobs-pagination .jobs-chip {
+    padding: 0.58rem 0.78rem;
+  }
+
+  .jobs-pagination__ellipsis {
+    min-width: 1.1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .jobs-pagination {
+    padding: 0.75rem 0.75rem;
+  }
+
+  .jobs-pagination__inner {
+    gap: 0.3rem;
+  }
+
+  .jobs-pagination__pages {
+    gap: 0.28rem;
+  }
+
+  .jobs-pagination .jobs-chip {
+    padding: 0.56rem 0.7rem;
+    font-size: 0.92rem;
+  }
+
+  .jobs-pagination__ellipsis {
+    min-width: 1rem;
+    font-size: 0.92rem;
   }
 }

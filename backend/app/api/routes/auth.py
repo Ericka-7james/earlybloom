@@ -49,7 +49,7 @@ def sign_up(payload: SignUpRequest, response: Response) -> AuthSessionResponse:
     auth_response, session = sign_up_user(payload)
 
     if session is not None:
-      set_auth_cookies(response, session)
+        set_auth_cookies(response, session)
 
     return auth_response
 

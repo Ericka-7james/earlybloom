@@ -22,8 +22,8 @@ if not SUPABASE_URL or not SUPABASE_SECRET_KEY:
 
 _supabase_admin: Client | None = None
 
-# If your relation tables use a different FK column name, change it here once.
-TRACKER_JOB_FK_COLUMN = "jobs_cache_id"
+# Matches the actual FK column name in user_saved_jobs and user_hidden_jobs.
+TRACKER_JOB_FK_COLUMN = "job_cache_id"
 USER_SAVED_JOBS_TABLE = "user_saved_jobs"
 USER_HIDDEN_JOBS_TABLE = "user_hidden_jobs"
 
@@ -142,7 +142,9 @@ class JobCacheRepository:
         if not public_job_ids:
             return []
 
-        normalized_ids = [str(job_id).strip() for job_id in public_job_ids if str(job_id).strip()]
+        normalized_ids = [
+            str(job_id).strip() for job_id in public_job_ids if str(job_id).strip()
+        ]
         if not normalized_ids:
             return []
 
@@ -400,7 +402,11 @@ class JobCacheRepository:
 
         return result.data or []
 
-    def delete_long_expired_jobs(self, *, grace_hours: int = 48) -> list[Dict[str, Any]]:
+    def delete_long_expired_jobs(
+        self,
+        *,
+        grace_hours: int = 48,
+    ) -> list[Dict[str, Any]]:
         """Delete jobs that have been expired longer than the grace window."""
         cutoff_iso = (
             datetime.now(timezone.utc) - timedelta(hours=grace_hours)
@@ -621,7 +627,9 @@ class JobCacheRepository:
                 continue
 
             next_row = dict(row)
-            next_row["relation_created_at"] = relation_created_at_by_cache_id.get(cache_id)
+            next_row["relation_created_at"] = relation_created_at_by_cache_id.get(
+                cache_id
+            )
             hydrated.append(next_row)
 
         return hydrated
