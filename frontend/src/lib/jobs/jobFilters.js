@@ -43,9 +43,7 @@ const FILTER_GROUPS = {
 const DEFAULT_SELECTED_EXPERIENCE_LEVELS = ["entry-level", "junior"];
 
 function normalizeValue(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
+  return String(value || "").trim().toLowerCase();
 }
 
 function arraysEqualAsSets(left, right) {
@@ -91,25 +89,23 @@ function getJobExperienceLevel(job) {
     haystack.includes("entry-level") ||
     haystack.includes("entry level") ||
     haystack.includes("new grad") ||
+    haystack.includes("new graduate") ||
+    haystack.includes("recent graduate") ||
     haystack.includes("graduate") ||
-    haystack.includes("early career")
+    haystack.includes("early career") ||
+    haystack.includes("apprentice") ||
+    haystack.includes("intern")
   ) {
     return "entry-level";
   }
 
-  if (haystack.includes("junior") || haystack.includes("jr ")) {
-    return "junior";
-  }
-
   if (
-    haystack.includes("senior") ||
-    haystack.includes("staff") ||
-    haystack.includes("principal") ||
-    haystack.includes("lead") ||
-    haystack.includes("chief") ||
-    haystack.includes("director")
+    haystack.includes("junior") ||
+    haystack.includes(" jr ") ||
+    haystack.startsWith("jr ") ||
+    haystack.includes("junior-level")
   ) {
-    return "senior";
+    return "junior";
   }
 
   if (
@@ -122,17 +118,30 @@ function getJobExperienceLevel(job) {
     return "mid-level";
   }
 
+  if (
+    haystack.includes("senior") ||
+    haystack.includes("staff") ||
+    haystack.includes("principal") ||
+    haystack.includes("lead ") ||
+    haystack.startsWith("lead") ||
+    haystack.includes("chief") ||
+    haystack.includes("director")
+  ) {
+    return "senior";
+  }
+
   return "unknown";
 }
 
 function getJobWorkplace(job) {
-  const remoteType = normalizeValue(job.remoteType || job.remote_type);
+  const directRemoteType = normalizeValue(job.remoteType || job.remote_type);
+
   if (
-    remoteType === "remote" ||
-    remoteType === "onsite" ||
-    remoteType === "hybrid"
+    directRemoteType === "remote" ||
+    directRemoteType === "onsite" ||
+    directRemoteType === "hybrid"
   ) {
-    return remoteType;
+    return directRemoteType;
   }
 
   if (job.remote === true) {
@@ -140,18 +149,30 @@ function getJobWorkplace(job) {
   }
 
   const haystack = normalizeValue(
-    `${job.location || ""} ${job.summary || ""} ${job.description || ""}`
+    `${job.location || ""} ${job.location_display || ""} ${job.cardLocation || ""} ${job.summary || ""} ${job.description || ""}`
   );
 
-  if (haystack.includes("hybrid")) {
+  if (
+    haystack.includes("hybrid") ||
+    haystack.includes("flexible hybrid")
+  ) {
     return "hybrid";
   }
 
-  if (haystack.includes("remote") || haystack.includes("telework")) {
+  if (
+    haystack.includes("remote") ||
+    haystack.includes("telework") ||
+    haystack.includes("work from home")
+  ) {
     return "remote";
   }
 
-  if (haystack.includes("onsite") || haystack.includes("on-site")) {
+  if (
+    haystack.includes("onsite") ||
+    haystack.includes("on-site") ||
+    haystack.includes("in-office") ||
+    haystack.includes("in office")
+  ) {
     return "onsite";
   }
 
@@ -160,198 +181,209 @@ function getJobWorkplace(job) {
 
 function inferRoleType(job) {
   const directRoleType = normalizeValue(job.roleType || job.role_type);
-  if (directRoleType) {
+
+  if (directRoleType && directRoleType !== "unknown") {
     return directRoleType;
   }
 
-  const haystack = normalizeValue(
+  const haystack = ` ${normalizeValue(
     `${job.title || ""} ${job.summary || ""} ${job.description || ""}`
-  );
+  )} `;
 
   if (
-    haystack.includes("frontend") ||
-    haystack.includes("front-end") ||
-    haystack.includes("react") ||
-    haystack.includes("ui engineer")
+    haystack.includes(" frontend ") ||
+    haystack.includes(" front-end ") ||
+    haystack.includes(" react ") ||
+    haystack.includes(" ui engineer ")
   ) {
     return "frontend";
   }
 
   if (
-    haystack.includes("backend") ||
-    haystack.includes("back-end") ||
-    haystack.includes("api") ||
-    haystack.includes("server-side")
+    haystack.includes(" backend ") ||
+    haystack.includes(" back-end ") ||
+    haystack.includes(" api ") ||
+    haystack.includes(" server-side ")
   ) {
     return "backend";
   }
 
   if (
-    haystack.includes("full stack") ||
-    haystack.includes("full-stack") ||
-    haystack.includes("fullstack")
+    haystack.includes(" full stack ") ||
+    haystack.includes(" full-stack ") ||
+    haystack.includes(" fullstack ")
   ) {
     return "full-stack";
   }
 
   if (
-    haystack.includes("software engineer") ||
-    haystack.includes("software developer") ||
-    haystack.includes("application developer") ||
-    haystack.includes("programmer")
-  ) {
-    return "software-engineering";
-  }
-
-  if (
-    haystack.includes("ios") ||
-    haystack.includes("android") ||
-    haystack.includes("mobile")
+    haystack.includes(" ios ") ||
+    haystack.includes(" android ") ||
+    haystack.includes(" mobile ")
   ) {
     return "mobile";
   }
 
   if (
-    haystack.includes("data engineer") ||
-    haystack.includes("etl") ||
-    haystack.includes("pipeline")
+    haystack.includes(" data engineer ") ||
+    haystack.includes(" etl ") ||
+    haystack.includes(" pipeline ")
   ) {
     return "data-engineering";
   }
 
   if (
-    haystack.includes("data analyst") ||
-    haystack.includes("business intelligence") ||
-    haystack.includes("reporting analyst")
+    haystack.includes(" data analyst ") ||
+    haystack.includes(" business intelligence ") ||
+    haystack.includes(" reporting analyst ")
   ) {
     return "data-analyst";
   }
 
   if (
-    haystack.includes("data ") ||
-    haystack.includes("analytics") ||
-    haystack.includes("analyst")
-  ) {
-    return "data";
-  }
-
-  if (
-    haystack.includes("machine learning") ||
-    haystack.includes("ml engineer")
+    haystack.includes(" machine learning ") ||
+    haystack.includes(" ml engineer ")
   ) {
     return "machine-learning";
   }
 
   if (
-    haystack.includes("artificial intelligence") ||
-    haystack.includes(" ai ")
+    haystack.includes(" artificial intelligence ") ||
+    haystack.includes(" ai ") ||
+    haystack.includes(" genai ") ||
+    haystack.includes(" llm ")
   ) {
     return "ai";
   }
 
   if (
-    haystack.includes("devops") ||
-    haystack.includes("devsecops") ||
-    haystack.includes("ci/cd")
+    haystack.includes(" devops ") ||
+    haystack.includes(" devsecops ") ||
+    haystack.includes(" ci/cd ")
   ) {
     return "devops";
   }
 
   if (
-    haystack.includes("site reliability") ||
+    haystack.includes(" site reliability ") ||
     haystack.includes(" sre ")
   ) {
     return "sre";
   }
 
-  if (haystack.includes("cloud")) {
+  if (haystack.includes(" cloud ")) {
     return "cloud";
   }
 
   if (
-    haystack.includes("infrastructure") ||
-    haystack.includes("sysadmin") ||
-    haystack.includes("systems administration")
+    haystack.includes(" infrastructure ") ||
+    haystack.includes(" sysadmin ") ||
+    haystack.includes(" systems administration ")
   ) {
     return "infrastructure";
   }
 
   if (
-    haystack.includes("cyber") ||
-    haystack.includes("security") ||
-    haystack.includes("infosec")
+    haystack.includes(" cyber ") ||
+    haystack.includes(" security ") ||
+    haystack.includes(" infosec ")
   ) {
     return "cybersecurity";
   }
 
   if (
-    haystack.includes("qa") ||
-    haystack.includes("quality assurance") ||
-    haystack.includes("test automation") ||
-    haystack.includes("sdet")
+    haystack.includes(" test automation ") ||
+    haystack.includes(" sdet ")
   ) {
-    return haystack.includes("automation") ? "test-automation" : "qa";
+    return "test-automation";
   }
 
-  if (haystack.includes("product manager")) {
+  if (
+    haystack.includes(" qa ") ||
+    haystack.includes(" quality assurance ")
+  ) {
+    return "qa";
+  }
+
+  if (
+    haystack.includes(" product manager ") ||
+    haystack.includes(" product owner ")
+  ) {
     return "product";
   }
 
   if (
-    haystack.includes("product design") ||
-    haystack.includes("product designer")
+    haystack.includes(" product design ") ||
+    haystack.includes(" product designer ")
   ) {
     return "product-design";
   }
 
   if (
-    haystack.includes("ux") ||
-    haystack.includes("user experience") ||
-    haystack.includes("ui/ux")
+    haystack.includes(" ux ") ||
+    haystack.includes(" user experience ") ||
+    haystack.includes(" ui/ux ")
   ) {
     return "ux";
   }
 
   if (
-    haystack.includes("solutions engineer") ||
-    haystack.includes("sales engineer") ||
-    haystack.includes("implementation engineer")
+    haystack.includes(" solutions engineer ") ||
+    haystack.includes(" sales engineer ") ||
+    haystack.includes(" implementation engineer ")
   ) {
     return "solutions-engineering";
   }
 
   if (
-    haystack.includes("technical support") ||
-    haystack.includes("support engineer") ||
-    haystack.includes("help desk")
+    haystack.includes(" technical support ") ||
+    haystack.includes(" support engineer ") ||
+    haystack.includes(" help desk ")
   ) {
     return "technical-support";
   }
 
   if (
-    haystack.includes("it specialist") ||
-    haystack.includes("it support") ||
-    haystack.includes("information technology")
-  ) {
-    return "it";
-  }
-
-  if (
-    haystack.includes("business analyst") ||
-    haystack.includes("systems analyst")
+    haystack.includes(" business analyst ") ||
+    haystack.includes(" systems analyst ")
   ) {
     return "business-analyst";
   }
 
-  if (haystack.includes("platform")) {
+  if (
+    haystack.includes(" it specialist ") ||
+    haystack.includes(" it support ") ||
+    haystack.includes(" information technology ")
+  ) {
+    return "it";
+  }
+
+  if (haystack.includes(" platform ")) {
     return "platform";
   }
 
   if (
-    haystack.includes("developer tools") ||
-    haystack.includes("devtools")
+    haystack.includes(" developer tools ") ||
+    haystack.includes(" devtools ")
   ) {
     return "developer-tools";
+  }
+
+  if (
+    haystack.includes(" software engineer ") ||
+    haystack.includes(" software developer ") ||
+    haystack.includes(" application developer ") ||
+    haystack.includes(" programmer ")
+  ) {
+    return "software-engineering";
+  }
+
+  if (
+    haystack.includes(" data ") ||
+    haystack.includes(" analytics ") ||
+    haystack.includes(" analyst ")
+  ) {
+    return "data";
   }
 
   return "unknown";
@@ -375,7 +407,8 @@ function filterJobs(
       selectedWorkplaces.includes(workplace);
 
     const matchesRoleType =
-      selectedRoleTypes.length === 0 || selectedRoleTypes.includes(roleType);
+      selectedRoleTypes.length === 0 ||
+      selectedRoleTypes.includes(roleType);
 
     return matchesExperienceLevel && matchesWorkplace && matchesRoleType;
   });
@@ -455,6 +488,9 @@ export {
   DEFAULT_SELECTED_EXPERIENCE_LEVELS,
   arraysEqualAsSets,
   toggleSelectedValue,
+  getJobExperienceLevel,
+  getJobWorkplace,
+  inferRoleType,
   filterJobs,
   getFilterSummary,
   getActiveFilterTags,
