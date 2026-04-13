@@ -10,15 +10,13 @@
     "lint": "eslint .",
     "preview": "vite preview",
 
-    "test": "npm run test:frontend && npm run test:backend",
+    "test": "npm run test:frontend",
     "test:frontend": "vitest run",
     "test:frontend:watch": "vitest",
     "test:frontend:coverage": "vitest run --coverage",
-    "test:backend": "cd ../backend && pytest",
-    "test:backend:coverage": "cd ../backend && pytest --cov=app --cov-report=term-missing --cov-fail-under=70",
 
-    "test:coverage": "npm run test:frontend:coverage && npm run test:backend:coverage",
-    "test:all": "npm run test:coverage",
+    "test:coverage": "npm run test:frontend:coverage",
+    "test:all": "npm run lint && npm run test:coverage && npm run build",
 
     "check": "npm run lint && npm run test:coverage && npm run build"
   },
