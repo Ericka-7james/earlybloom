@@ -22,6 +22,11 @@ if not SUPABASE_URL or not SUPABASE_SECRET_KEY:
 
 _supabase_admin: Client | None = None
 
+# If your relation tables use a different FK column name, change it here once.
+TRACKER_JOB_FK_COLUMN = "jobs_cache_id"
+USER_SAVED_JOBS_TABLE = "user_saved_jobs"
+USER_HIDDEN_JOBS_TABLE = "user_hidden_jobs"
+
 
 def get_supabase_admin() -> Client:
     """Return a cached Supabase admin client."""
@@ -94,17 +99,7 @@ class JobCacheRepository:
             .execute()
         )
 
-        rows = result.data or []
-        now = datetime.now(timezone.utc)
-        filtered: list[Dict[str, Any]] = []
-
-        for row in rows:
-            expires_at = _parse_timestamptz(row.get("expires_at"))
-            if expires_at is not None and expires_at <= now:
-                continue
-            filtered.append(row)
-
-        return filtered
+        return self._filter_unexpired_rows(result.data or [])
 
     def list_active_jobs_by_ids(self, job_ids: list[str]) -> list[Dict[str, Any]]:
         """Return active jobs matching the provided stable keys."""
@@ -119,17 +114,90 @@ class JobCacheRepository:
             .execute()
         )
 
-        rows = result.data or []
-        now = datetime.now(timezone.utc)
-        filtered: list[Dict[str, Any]] = []
+        return self._filter_unexpired_rows(result.data or [])
 
+    def list_active_jobs_by_cache_row_ids(
+        self,
+        cache_row_ids: list[str],
+    ) -> list[Dict[str, Any]]:
+        """Return active jobs matching jobs_cache primary-key row ids."""
+        if not cache_row_ids:
+            return []
+
+        result = (
+            self.client.table("jobs_cache")
+            .select("*")
+            .eq("is_active", True)
+            .in_("id", cache_row_ids)
+            .execute()
+        )
+
+        return self._filter_unexpired_rows(result.data or [])
+
+    def list_active_jobs_by_public_ids(
+        self,
+        public_job_ids: list[str],
+    ) -> list[Dict[str, Any]]:
+        """Return active jobs matching frontend/public job ids."""
+        if not public_job_ids:
+            return []
+
+        normalized_ids = [str(job_id).strip() for job_id in public_job_ids if str(job_id).strip()]
+        if not normalized_ids:
+            return []
+
+        rows: list[Dict[str, Any]] = []
+
+        result = (
+            self.client.table("jobs_cache")
+            .select("*")
+            .eq("is_active", True)
+            .in_("normalized_job_id", normalized_ids)
+            .execute()
+        )
+        rows.extend(result.data or [])
+
+        found_keys = {
+            str(row.get("normalized_job_id") or row.get("stable_key") or "").strip()
+            for row in rows
+        }
+        missing_ids = [job_id for job_id in normalized_ids if job_id not in found_keys]
+
+        if missing_ids:
+            fallback = (
+                self.client.table("jobs_cache")
+                .select("*")
+                .eq("is_active", True)
+                .in_("stable_key", missing_ids)
+                .execute()
+            )
+            rows.extend(fallback.data or [])
+
+        deduped_by_row_id: dict[str, Dict[str, Any]] = {}
         for row in rows:
-            expires_at = _parse_timestamptz(row.get("expires_at"))
-            if expires_at is not None and expires_at <= now:
-                continue
-            filtered.append(row)
+            row_id = str(row.get("id") or "").strip()
+            if row_id:
+                deduped_by_row_id[row_id] = row
 
-        return filtered
+        return self._filter_unexpired_rows(list(deduped_by_row_id.values()))
+
+    def get_active_job_by_public_id(self, public_job_id: str) -> Dict[str, Any]:
+        """Resolve a frontend/public job id to the matching active jobs_cache row."""
+        public_job_id = str(public_job_id or "").strip()
+        if not public_job_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="job_id is required.",
+            )
+
+        rows = self.list_active_jobs_by_public_ids([public_job_id])
+        if not rows:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Job could not be found in the shared jobs cache.",
+            )
+
+        return rows[0]
 
     def upsert_jobs(
         self,
@@ -359,20 +427,26 @@ class JobCacheRepository:
     def row_to_normalized_job(self, row: Dict[str, Any]) -> NormalizedJob | None:
         """Convert a jobs_cache row into a NormalizedJob model."""
         try:
+            stable_key = str(row.get("stable_key") or "").strip() or None
+
             return NormalizedJob(
                 id=str(
                     row.get("normalized_job_id")
-                    or row.get("stable_key")
+                    or stable_key
                     or row.get("id")
                     or ""
                 ),
                 title=str(row.get("title") or ""),
                 company=str(row.get("company") or ""),
                 location=str(row.get("location") or ""),
+                location_display=str(
+                    row.get("location_display") or row.get("location") or ""
+                ),
                 remote=bool(row.get("remote")),
                 remote_type=str(row.get("remote_type") or "unknown"),
                 url=str(row.get("url") or ""),
                 source=str(row.get("source") or "unknown"),
+                source_job_id=row.get("source_job_id"),
                 summary=str(row.get("summary") or ""),
                 description=str(row.get("description") or ""),
                 responsibilities=_coerce_string_list(row.get("responsibilities")),
@@ -381,12 +455,262 @@ class JobCacheRepository:
                 preferred_skills=_coerce_string_list(row.get("preferred_skills")),
                 employment_type=row.get("employment_type"),
                 experience_level=str(row.get("experience_level") or "unknown"),
+                role_type=str(row.get("role_type") or "unknown"),
                 salary_min=_coerce_int(row.get("salary_min")),
                 salary_max=_coerce_int(row.get("salary_max")),
                 salary_currency=row.get("salary_currency"),
+                stable_key=stable_key,
+                provider_payload_hash=row.get("provider_payload_hash"),
             )
         except Exception:
             return None
+
+    def save_job_for_user(self, *, user_id: str, public_job_id: str) -> Dict[str, Any]:
+        job_row = self.get_active_job_by_public_id(public_job_id)
+        self._upsert_relation(
+            table_name=USER_SAVED_JOBS_TABLE,
+            user_id=user_id,
+            jobs_cache_row_id=str(job_row.get("id")),
+        )
+        return job_row
+
+    def unsave_job_for_user(self, *, user_id: str, public_job_id: str) -> None:
+        job_row = self.get_active_job_by_public_id(public_job_id)
+        self._delete_relation(
+            table_name=USER_SAVED_JOBS_TABLE,
+            user_id=user_id,
+            jobs_cache_row_id=str(job_row.get("id")),
+        )
+
+    def hide_job_for_user(self, *, user_id: str, public_job_id: str) -> Dict[str, Any]:
+        job_row = self.get_active_job_by_public_id(public_job_id)
+        self._upsert_relation(
+            table_name=USER_HIDDEN_JOBS_TABLE,
+            user_id=user_id,
+            jobs_cache_row_id=str(job_row.get("id")),
+        )
+        return job_row
+
+    def unhide_job_for_user(self, *, user_id: str, public_job_id: str) -> None:
+        job_row = self.get_active_job_by_public_id(public_job_id)
+        self._delete_relation(
+            table_name=USER_HIDDEN_JOBS_TABLE,
+            user_id=user_id,
+            jobs_cache_row_id=str(job_row.get("id")),
+        )
+
+    def list_saved_jobs_for_user(self, *, user_id: str) -> list[Dict[str, Any]]:
+        return self._list_related_jobs(
+            table_name=USER_SAVED_JOBS_TABLE,
+            user_id=user_id,
+        )
+
+    def list_hidden_jobs_for_user(self, *, user_id: str) -> list[Dict[str, Any]]:
+        return self._list_related_jobs(
+            table_name=USER_HIDDEN_JOBS_TABLE,
+            user_id=user_id,
+        )
+
+    def apply_viewer_state_to_jobs(
+        self,
+        *,
+        user_id: str,
+        jobs: list[Dict[str, Any]],
+        exclude_hidden: bool = False,
+    ) -> list[Dict[str, Any]]:
+        """Annotate jobs with the viewer's saved/hidden state and optionally filter hidden."""
+        if not jobs:
+            return []
+
+        public_job_ids = [
+            str(job.get("id") or "").strip()
+            for job in jobs
+            if str(job.get("id") or "").strip()
+        ]
+        if not public_job_ids:
+            return jobs
+
+        cache_rows = self.list_active_jobs_by_public_ids(public_job_ids)
+        cache_id_by_public_id: dict[str, str] = {}
+
+        for row in cache_rows:
+            public_id = str(
+                row.get("normalized_job_id")
+                or row.get("stable_key")
+                or ""
+            ).strip()
+            cache_row_id = str(row.get("id") or "").strip()
+
+            if public_id and cache_row_id:
+                cache_id_by_public_id[public_id] = cache_row_id
+
+        cache_row_ids = list(cache_id_by_public_id.values())
+        saved_state = self._relation_state_by_cache_row_id(
+            table_name=USER_SAVED_JOBS_TABLE,
+            user_id=user_id,
+            cache_row_ids=cache_row_ids,
+        )
+        hidden_state = self._relation_state_by_cache_row_id(
+            table_name=USER_HIDDEN_JOBS_TABLE,
+            user_id=user_id,
+            cache_row_ids=cache_row_ids,
+        )
+
+        annotated: list[Dict[str, Any]] = []
+
+        for job in jobs:
+            public_id = str(job.get("id") or "").strip()
+            cache_row_id = cache_id_by_public_id.get(public_id)
+
+            saved_at = saved_state.get(cache_row_id) if cache_row_id else None
+            hidden_at = hidden_state.get(cache_row_id) if cache_row_id else None
+
+            if exclude_hidden and hidden_at:
+                continue
+
+            viewer_state = {
+                "is_saved": bool(saved_at),
+                "is_hidden": bool(hidden_at),
+                "saved_at": saved_at,
+                "hidden_at": hidden_at,
+            }
+
+            next_job = dict(job)
+            next_job["viewer_state"] = viewer_state
+            annotated.append(next_job)
+
+        return annotated
+
+    def _list_related_jobs(
+        self,
+        *,
+        table_name: str,
+        user_id: str,
+    ) -> list[Dict[str, Any]]:
+        relation_rows = self._load_relation_rows(
+            table_name=table_name,
+            user_id=user_id,
+        )
+        if not relation_rows:
+            return []
+
+        ordered_cache_ids: list[str] = []
+        relation_created_at_by_cache_id: dict[str, str | None] = {}
+
+        for relation in relation_rows:
+            cache_id = str(relation.get(TRACKER_JOB_FK_COLUMN) or "").strip()
+            if not cache_id:
+                continue
+
+            ordered_cache_ids.append(cache_id)
+            relation_created_at_by_cache_id[cache_id] = str(
+                relation.get("created_at") or ""
+            ).strip() or None
+
+        job_rows = self.list_active_jobs_by_cache_row_ids(ordered_cache_ids)
+        jobs_by_cache_id = {
+            str(row.get("id") or "").strip(): row
+            for row in job_rows
+            if str(row.get("id") or "").strip()
+        }
+
+        hydrated: list[Dict[str, Any]] = []
+        for cache_id in ordered_cache_ids:
+            row = jobs_by_cache_id.get(cache_id)
+            if not row:
+                continue
+
+            next_row = dict(row)
+            next_row["relation_created_at"] = relation_created_at_by_cache_id.get(cache_id)
+            hydrated.append(next_row)
+
+        return hydrated
+
+    def _relation_state_by_cache_row_id(
+        self,
+        *,
+        table_name: str,
+        user_id: str,
+        cache_row_ids: list[str],
+    ) -> dict[str, str | None]:
+        rows = self._load_relation_rows(
+            table_name=table_name,
+            user_id=user_id,
+            cache_row_ids=cache_row_ids,
+        )
+
+        state: dict[str, str | None] = {}
+        for row in rows:
+            cache_row_id = str(row.get(TRACKER_JOB_FK_COLUMN) or "").strip()
+            if not cache_row_id:
+                continue
+            state[cache_row_id] = str(row.get("created_at") or "").strip() or None
+
+        return state
+
+    def _load_relation_rows(
+        self,
+        *,
+        table_name: str,
+        user_id: str,
+        cache_row_ids: list[str] | None = None,
+    ) -> list[Dict[str, Any]]:
+        query = (
+            self.client.table(table_name)
+            .select(f"{TRACKER_JOB_FK_COLUMN}, created_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+        )
+
+        if cache_row_ids:
+            query = query.in_(TRACKER_JOB_FK_COLUMN, cache_row_ids)
+
+        result = query.execute()
+        return result.data or []
+
+    def _upsert_relation(
+        self,
+        *,
+        table_name: str,
+        user_id: str,
+        jobs_cache_row_id: str,
+    ) -> None:
+        payload = {
+            "user_id": user_id,
+            TRACKER_JOB_FK_COLUMN: jobs_cache_row_id,
+        }
+
+        self.client.table(table_name).upsert(
+            payload,
+            on_conflict=f"user_id,{TRACKER_JOB_FK_COLUMN}",
+        ).execute()
+
+    def _delete_relation(
+        self,
+        *,
+        table_name: str,
+        user_id: str,
+        jobs_cache_row_id: str,
+    ) -> None:
+        (
+            self.client.table(table_name)
+            .delete()
+            .eq("user_id", user_id)
+            .eq(TRACKER_JOB_FK_COLUMN, jobs_cache_row_id)
+            .execute()
+        )
+
+    def _filter_unexpired_rows(self, rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+        now = datetime.now(timezone.utc)
+        filtered: list[Dict[str, Any]] = []
+
+        for row in rows:
+            expires_at = _parse_timestamptz(row.get("expires_at"))
+            if expires_at is not None and expires_at <= now:
+                continue
+            filtered.append(row)
+
+        return filtered
 
     def build_query_cache_key(
         self,
@@ -421,12 +745,12 @@ class JobCacheRepository:
             "title": job.title,
             "company": job.company,
             "location": job.location,
-            "location_display": job.location,
+            "location_display": job.location_display or job.location,
             "remote": bool(job.remote),
             "remote_type": job.remote_type,
             "url": str(job.url),
             "source": job.source,
-            "source_job_id": None,
+            "source_job_id": job.source_job_id,
             "summary": job.summary or "",
             "description": job.description or "",
             "responsibilities": job.responsibilities or [],
@@ -435,9 +759,11 @@ class JobCacheRepository:
             "preferred_skills": job.preferred_skills or [],
             "employment_type": job.employment_type,
             "experience_level": job.experience_level,
+            "role_type": job.role_type,
             "salary_min": job.salary_min,
             "salary_max": job.salary_max,
             "salary_currency": job.salary_currency,
+            "provider_payload_hash": job.provider_payload_hash,
             "last_seen_at": last_seen_at.isoformat(),
             "expires_at": expires_at.isoformat(),
             "is_active": True,
@@ -447,6 +773,7 @@ class JobCacheRepository:
 
 class ResumeRepository:
     """Repository for resume records and resume processing logs."""
+
     def __init__(self, client: Client | None = None) -> None:
         self.client = client or get_supabase_admin()
 

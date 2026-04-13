@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import JobCard from "../components/jobs/JobCard.jsx";
 import JobsFiltersPanel from "../components/jobs/JobsFiltersPanel.jsx";
@@ -14,6 +14,11 @@ import { readCachedResumeUiState } from "../lib/resumes";
 import { useJobs } from "../hooks/useJobs";
 import { useAuth } from "../hooks/useAuth";
 import {
+  hideJob,
+  saveJob,
+  unsaveJob,
+} from "../lib/jobs/jobsApi";
+import {
   DEFAULT_SELECTED_EXPERIENCE_LEVELS,
   arraysEqualAsSets,
   filterJobs,
@@ -26,14 +31,40 @@ import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
 const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
 const WELCOME_MODAL_PENDING_KEY = "earlybloom_welcome_modal_pending";
 
+function getLoginRequiredContent(intent) {
+  switch (intent) {
+    case "save":
+      return {
+        eyebrow: "Save jobs to come back to them later.",
+        title: "Sign in to save jobs",
+        body: "Your saved jobs live on your tracker, so you can revisit strong leads without hunting them down again.",
+      };
+    case "hide":
+      return {
+        eyebrow: "Hide jobs you do not want to keep seeing.",
+        title: "Sign in to hide jobs",
+        body: "Signing in lets EarlyBloom remember which roles you have already passed on and keep your feed cleaner.",
+      };
+    case "resume":
+    default:
+      return {
+        eyebrow: "Resume upload is available after sign in.",
+        title: "Sign in to upload your resume",
+        body: "This helps us connect your resume to your account and keep your job search data in one place.",
+      };
+  }
+}
+
 function Jobs() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
+  const viewerKey = user?.id ? `user:${user.id}` : "guest";
 
   const [activeJob, setActiveJob] = useState(null);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [isLoginRequiredModalOpen, setIsLoginRequiredModalOpen] =
     useState(false);
+  const [loginRequiredIntent, setLoginRequiredIntent] = useState("resume");
   const [resumeFile, setResumeFile] = useState(() => readCachedResumeUiState());
   const [selectedExperienceLevels, setSelectedExperienceLevels] = useState(
     DEFAULT_SELECTED_EXPERIENCE_LEVELS
@@ -41,6 +72,9 @@ function Jobs() {
   const [selectedWorkplaces, setSelectedWorkplaces] = useState([]);
   const [selectedRoleTypes, setSelectedRoleTypes] = useState([]);
   const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
+  const [jobViewerOverrides, setJobViewerOverrides] = useState({});
+  const [pendingActions, setPendingActions] = useState({});
+  const [actionError, setActionError] = useState("");
 
   const visibleResumeFile = useMemo(() => {
     if (!user) {
@@ -66,45 +100,36 @@ function Jobs() {
     error,
     isMockMode,
     retry,
-  } = useJobs();
+  } = useJobs({ viewerKey });
+
+  useEffect(() => {
+    setJobViewerOverrides({});
+    setPendingActions({});
+    setActionError("");
+  }, [viewerKey, rawJobs]);
 
   const scoredJobs = useMemo(() => {
     return scoreJobsForUser(rawJobs, resolvedUserProfile);
   }, [rawJobs, resolvedUserProfile]);
 
   const mappedJobs = useMemo(() => {
-    return mapJobsForDisplay(rawJobs, scoredJobs).sort(
-      (a, b) => b.matchScore - a.matchScore
-    );
-  }, [rawJobs, scoredJobs]);
+    return mapJobsForDisplay(rawJobs, scoredJobs, {
+      viewerStateOverrides: jobViewerOverrides,
+    }).sort((a, b) => b.matchScore - a.matchScore);
+  }, [rawJobs, scoredJobs, jobViewerOverrides]);
 
   const jobs = useMemo(() => {
     return filterJobs(mappedJobs, {
       selectedExperienceLevels,
       selectedWorkplaces,
       selectedRoleTypes,
-    });
+    }).filter((job) => !job.isHidden);
   }, [
     mappedJobs,
     selectedExperienceLevels,
     selectedWorkplaces,
     selectedRoleTypes,
   ]);
-
-  const isUsingDefaultExperiencePreset = useMemo(() => {
-    return arraysEqualAsSets(
-      selectedExperienceLevels,
-      DEFAULT_SELECTED_EXPERIENCE_LEVELS
-    );
-  }, [selectedExperienceLevels]);
-
-  const hasMeaningfulExperienceFilter =
-    selectedExperienceLevels.length > 0 && !isUsingDefaultExperiencePreset;
-
-  const hasActiveFilters =
-    hasMeaningfulExperienceFilter ||
-    selectedWorkplaces.length > 0 ||
-    selectedRoleTypes.length > 0;
 
   const filtersSummary = useMemo(() => {
     return getFilterSummary({
@@ -113,6 +138,18 @@ function Jobs() {
       selectedRoleTypes,
     });
   }, [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]);
+
+  const hasActiveFilters =
+    selectedExperienceLevels.length > 0 ||
+    selectedWorkplaces.length > 0 ||
+    selectedRoleTypes.length > 0;
+
+  const isUsingDefaultExperiencePreset = useMemo(() => {
+    return arraysEqualAsSets(
+      selectedExperienceLevels,
+      DEFAULT_SELECTED_EXPERIENCE_LEVELS
+    );
+  }, [selectedExperienceLevels]);
 
   const activeFilterTags = useMemo(() => {
     return getActiveFilterTags({
@@ -161,6 +198,11 @@ function Jobs() {
     navigate("/sign-in");
   }
 
+  function openLoginRequiredModal(intent) {
+    setLoginRequiredIntent(intent);
+    setIsLoginRequiredModalOpen(true);
+  }
+
   function handleRequestResumeUpload() {
     if (authLoading) {
       return;
@@ -169,7 +211,7 @@ function Jobs() {
     if (!user) {
       setIsWelcomeModalOpen(false);
       setIsResumeModalOpen(false);
-      setIsLoginRequiredModalOpen(true);
+      openLoginRequiredModal("resume");
       return;
     }
 
@@ -178,19 +220,16 @@ function Jobs() {
   }
 
   function clearAllFilters() {
-    setSelectedExperienceLevels(DEFAULT_SELECTED_EXPERIENCE_LEVELS);
+    setSelectedExperienceLevels([]);
     setSelectedWorkplaces([]);
     setSelectedRoleTypes([]);
   }
 
   function removeActiveFilterTag(tag) {
     if (tag.type === "experience") {
-      setSelectedExperienceLevels((currentValues) => {
-        const nextValues = currentValues.filter((value) => value !== tag.value);
-        return nextValues.length === 0
-          ? DEFAULT_SELECTED_EXPERIENCE_LEVELS
-          : nextValues;
-      });
+      setSelectedExperienceLevels((currentValues) =>
+        currentValues.filter((value) => value !== tag.value)
+      );
       return;
     }
 
@@ -205,6 +244,141 @@ function Jobs() {
       currentValues.filter((value) => value !== tag.value)
     );
   }
+
+  function updatePendingAction(jobId, nextState) {
+    setPendingActions((current) => ({
+      ...current,
+      [jobId]: {
+        ...(current[jobId] || {}),
+        ...nextState,
+      },
+    }));
+  }
+
+  function clearPendingAction(jobId, key) {
+    setPendingActions((current) => {
+      const next = { ...current };
+      const currentEntry = { ...(next[jobId] || {}) };
+      delete currentEntry[key];
+
+      if (Object.keys(currentEntry).length === 0) {
+        delete next[jobId];
+      } else {
+        next[jobId] = currentEntry;
+      }
+
+      return next;
+    });
+  }
+
+  function applyViewerOverride(jobId, patch) {
+    setJobViewerOverrides((current) => ({
+      ...current,
+      [jobId]: {
+        ...(current[jobId] || {}),
+        ...patch,
+      },
+    }));
+  }
+
+  function removeViewerOverride(jobId) {
+    setJobViewerOverrides((current) => {
+      const next = { ...current };
+      delete next[jobId];
+      return next;
+    });
+  }
+
+  async function handleToggleSave(job) {
+    if (authLoading) {
+      return;
+    }
+
+    if (!user) {
+      openLoginRequiredModal("save");
+      return;
+    }
+
+    const jobId = job.id;
+    const nextSaved = !job.isSaved;
+    const previousOverride = jobViewerOverrides[jobId];
+
+    setActionError("");
+    updatePendingAction(jobId, { saving: true });
+    applyViewerOverride(jobId, {
+      is_saved: nextSaved,
+      saved_at: nextSaved ? new Date().toISOString() : null,
+    });
+
+    try {
+      const result = nextSaved ? await saveJob(jobId) : await unsaveJob(jobId);
+      const nextViewerState = result?.viewer_state ?? null;
+
+      if (nextViewerState) {
+        applyViewerOverride(jobId, nextViewerState);
+      }
+    } catch (err) {
+      if (previousOverride) {
+        applyViewerOverride(jobId, previousOverride);
+      } else {
+        removeViewerOverride(jobId);
+      }
+
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "We could not update that saved job right now."
+      );
+    } finally {
+      clearPendingAction(jobId, "saving");
+    }
+  }
+
+  async function handleHideJob(job) {
+    if (authLoading) {
+      return;
+    }
+
+    if (!user) {
+      openLoginRequiredModal("hide");
+      return;
+    }
+
+    const jobId = job.id;
+    const previousOverride = jobViewerOverrides[jobId];
+
+    setActionError("");
+    updatePendingAction(jobId, { hiding: true });
+    applyViewerOverride(jobId, {
+      is_hidden: true,
+      hidden_at: new Date().toISOString(),
+    });
+
+    try {
+      const result = await hideJob(jobId);
+      const nextViewerState = result?.viewer_state ?? null;
+
+      if (nextViewerState) {
+        applyViewerOverride(jobId, nextViewerState);
+      }
+    } catch (err) {
+      if (previousOverride) {
+        applyViewerOverride(jobId, previousOverride);
+      } else {
+        removeViewerOverride(jobId);
+      }
+
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "We could not hide that job right now."
+      );
+    } finally {
+      clearPendingAction(jobId, "hiding");
+    }
+  }
+
+  const loginContent = getLoginRequiredContent(loginRequiredIntent);
 
   return (
     <main className="jobs-page">
@@ -254,7 +428,6 @@ function Jobs() {
           <aside
             className="jobs-filters section-card jobs-filters--desktop"
             aria-label="Job filters"
-            tabIndex={-1}
           >
             <JobsFiltersPanel
               hasActiveFilters={hasActiveFilters}
@@ -317,6 +490,12 @@ function Jobs() {
               ) : null}
             </div>
 
+            {actionError ? (
+              <div className="section-card" role="alert" aria-live="polite">
+                <p className="jobs-results__text">{actionError}</p>
+              </div>
+            ) : null}
+
             {isLoading ? (
               <div className="section-card" role="status" aria-live="polite">
                 <p className="jobs-results__text">Loading jobs...</p>
@@ -364,7 +543,7 @@ function Jobs() {
                       className="jobs-chip"
                       onClick={clearAllFilters}
                     >
-                      Reset filters
+                      Clear filters
                     </button>
                   </div>
                 ) : null}
@@ -378,6 +557,10 @@ function Jobs() {
                     key={job.id}
                     job={job}
                     onOpenDetails={handleOpenDetails}
+                    onSaveToggle={handleToggleSave}
+                    onHide={handleHideJob}
+                    isSavePending={Boolean(pendingActions[job.id]?.saving)}
+                    isHidePending={Boolean(pendingActions[job.id]?.hiding)}
                   />
                 ))}
               </div>
@@ -418,17 +601,14 @@ function Jobs() {
       >
         <div className="jobs-reasons-modal">
           <div className="jobs-reasons-modal__intro">
-            <p className="jobs-reasons-modal__job-meta">
-              Resume upload is available after sign in.
-            </p>
+            <p className="jobs-reasons-modal__job-meta">{loginContent.eyebrow}</p>
 
             <h3 className="jobs-reasons-modal__job-title">
-              Sign in to upload your resume
+              {loginContent.title}
             </h3>
 
             <p className="jobs-results__text" style={{ marginTop: "0.5rem" }}>
-              This helps us connect your resume to your account and keep your
-              job search data in one place.
+              {loginContent.body}
             </p>
           </div>
 

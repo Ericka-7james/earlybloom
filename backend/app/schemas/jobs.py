@@ -116,7 +116,13 @@ class NormalizedJob(BaseModel):
         text = str(value or "").strip()
         return text or None
 
-    @field_validator("responsibilities", "qualifications", "required_skills", "preferred_skills", mode="before")
+    @field_validator(
+        "responsibilities",
+        "qualifications",
+        "required_skills",
+        "preferred_skills",
+        mode="before",
+    )
     @classmethod
     def normalize_string_lists(cls, value: object) -> list[str]:
         """Normalize list fields into cleaned string lists."""
@@ -153,10 +159,25 @@ class NormalizedJob(BaseModel):
             return None
 
 
-class JobsResponse(BaseModel):
-    """Response payload for the jobs endpoint."""
+class JobViewerState(BaseModel):
+    """Viewer-specific save/hide state layered on top of shared jobs."""
 
-    jobs: list[NormalizedJob]
+    is_saved: bool = False
+    is_hidden: bool = False
+    saved_at: str | None = None
+    hidden_at: str | None = None
+
+
+class PublicJob(NormalizedJob):
+    """Public job payload returned to the frontend."""
+
+    viewer_state: JobViewerState = Field(default_factory=JobViewerState)
+
+
+class JobsResponse(BaseModel):
+    """Response payload for jobs-like endpoints."""
+
+    jobs: list[PublicJob]
     total: int
 
 
@@ -188,6 +209,31 @@ class JobQueryParams(BaseModel):
             normalized.append(text)
 
         return normalized
+
+
+class JobTrackerMutationRequest(BaseModel):
+    """Signed-in tracker mutation request body."""
+
+    job_id: str = Field(..., min_length=1)
+
+
+class JobTrackerMutationResponse(BaseModel):
+    """Tracker mutation response payload."""
+
+    job_id: str
+    viewer_state: JobViewerState
+
+
+class ResolvedJobProfileResponse(BaseModel):
+    """Frontend-friendly resolved profile shape used by the jobs page."""
+
+    desiredLevels: list[str] = Field(
+        default_factory=lambda: ["entry-level", "junior"]
+    )
+    preferredRoleTypes: list[str] = Field(default_factory=list)
+    preferredWorkplaceTypes: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    isLgbtFriendlyOnly: bool = False
 
 
 class JobIngestionSummary(BaseModel):

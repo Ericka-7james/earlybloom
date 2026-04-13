@@ -13,7 +13,9 @@ const DEFAULT_RESOLVED_USER_PROFILE = {
   isLgbtFriendlyOnly: false,
 };
 
-export function useJobs() {
+export function useJobs(options = {}) {
+  const { viewerKey = "guest" } = options;
+
   const [jobs, setJobs] = useState([]);
   const [resolvedUserProfile, setResolvedUserProfile] = useState(
     DEFAULT_RESOLVED_USER_PROFILE
@@ -74,7 +76,7 @@ export function useJobs() {
     loadJobsData();
 
     return () => controller.abort();
-  }, [reloadKey]);
+  }, [reloadKey, viewerKey]);
 
   return {
     jobs,
