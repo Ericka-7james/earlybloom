@@ -27,7 +27,6 @@ import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
 const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
 const WELCOME_MODAL_PENDING_KEY = "earlybloom_welcome_modal_pending";
 const JOBS_PER_PAGE = 12;
-const MAX_VISIBLE_PAGES = 10;
 
 function getLoginRequiredContent(intent) {
   switch (intent) {
@@ -53,26 +52,124 @@ function getLoginRequiredContent(intent) {
   }
 }
 
-function getVisiblePageNumbers(currentPage, totalPages) {
-  if (totalPages <= 7) {
-    return Array.from({ length: totalPages }, (_, index) => index + 1);
+function useViewportWidth() {
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? 1280 : window.innerWidth
+  );
+
+  useEffect(() => {
+    function handleResize() {
+      setViewportWidth(window.innerWidth);
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  return viewportWidth;
+}
+
+function getPaginationConfig(viewportWidth) {
+  if (viewportWidth <= 375) {
+    return {
+      nearStartCount: 2,
+      middleNeighborCount: 0,
+      nearEndCount: 2,
+    };
   }
 
-  if (currentPage <= 4) {
-    return [1, 2, 3, 4, 5, "...", totalPages];
+    if (viewportWidth <= 600) {
+    return {
+      nearStartCount: 4,
+      middleNeighborCount: 0,
+      nearEndCount: 2,
+    };
   }
 
-  if (currentPage >= totalPages - 3) {
-    return [1, "...", totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+  if (viewportWidth <= 875) {
+    return {
+      nearStartCount: 2,
+      middleNeighborCount: 0,
+      nearEndCount: 2,
+    };
   }
 
-  return [1, "...", currentPage - 1, currentPage, currentPage + 1, "...", totalPages];
+  if (viewportWidth >= 1024) {
+    return {
+      nearStartCount: 7,
+      middleNeighborCount: 1,
+      nearEndCount: 3,
+    };
+  }
+
+  return {
+    nearStartCount: 5,
+    middleNeighborCount: 1,
+    nearEndCount: 4,
+  };
+}
+
+function getVisiblePageNumbers(currentPage, totalPages, viewportWidth) {
+  if (totalPages <= 1) {
+    return [1];
+  }
+
+  const {
+    nearStartCount,
+    middleNeighborCount,
+    nearEndCount,
+  } = getPaginationConfig(viewportWidth);
+
+  const pages = new Set([1, totalPages]);
+
+  if (currentPage <= nearStartCount) {
+    for (let page = 1; page <= Math.min(totalPages, nearStartCount); page += 1) {
+      pages.add(page);
+    }
+  } else if (currentPage >= totalPages - nearEndCount + 1) {
+    for (
+      let page = Math.max(1, totalPages - nearEndCount + 1);
+      page <= totalPages;
+      page += 1
+    ) {
+      pages.add(page);
+    }
+  } else {
+    pages.add(currentPage);
+
+    for (
+      let page = currentPage - middleNeighborCount;
+      page <= currentPage + middleNeighborCount;
+      page += 1
+    ) {
+      if (page > 1 && page < totalPages) {
+        pages.add(page);
+      }
+    }
+  }
+
+  const sortedPages = Array.from(pages).sort((a, b) => a - b);
+  const result = [];
+
+  for (let index = 0; index < sortedPages.length; index += 1) {
+    const pageNumber = sortedPages[index];
+    const previousPage = sortedPages[index - 1];
+
+    if (index > 0 && pageNumber - previousPage > 1) {
+      result.push("...");
+    }
+
+    result.push(pageNumber);
+  }
+
+  return result;
 }
 
 function Jobs() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const viewerKey = user?.id ? `user:${user.id}` : "guest";
+  const viewportWidth = useViewportWidth();
 
   const [activeJob, setActiveJob] = useState(null);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
@@ -165,8 +262,11 @@ function Jobs() {
   }, [jobs, currentPage]);
 
   const visiblePageNumbers = useMemo(() => {
-    return getVisiblePageNumbers(currentPage, totalPages);
-  }, [currentPage, totalPages]);
+    return getVisiblePageNumbers(currentPage, totalPages, viewportWidth);
+  }, [currentPage, totalPages, viewportWidth]);
+
+  const pageStartCount = jobs.length === 0 ? 0 : (currentPage - 1) * JOBS_PER_PAGE + 1;
+  const pageEndCount = Math.min(currentPage * JOBS_PER_PAGE, jobs.length);
 
   const filtersSummary = useMemo(() => {
     return getFilterSummary({
@@ -525,6 +625,13 @@ function Jobs() {
                     ? "We could not load jobs right now."
                     : `${jobs.length} roles matched to your profile.`}
                 </p>
+
+                {!isLoading && !error && jobs.length > 0 ? (
+                  <p className="jobs-results__text">
+                    Showing {pageStartCount} to {pageEndCount} on page{" "}
+                    {currentPage} of {totalPages}.
+                  </p>
+                ) : null}
               </div>
 
               {!isLoading ? (
@@ -650,17 +757,22 @@ function Jobs() {
                               key={pageNumber}
                               type="button"
                               className={`jobs-chip ${
-                                pageNumber === currentPage ? "jobs-chip--active" : ""
+                                pageNumber === currentPage
+                                  ? "jobs-chip--active"
+                                  : ""
                               }`}
                               onClick={() => handleChangePage(pageNumber)}
                               aria-label={`Go to page ${pageNumber}`}
-                              aria-current={pageNumber === currentPage ? "page" : undefined}
+                              aria-current={
+                                pageNumber === currentPage ? "page" : undefined
+                              }
                             >
                               {pageNumber}
                             </button>
                           );
                         })}
                       </div>
+
                       <button
                         type="button"
                         className="jobs-chip"
