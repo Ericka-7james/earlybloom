@@ -966,6 +966,51 @@
   word-break: break-word;
 }
 
+.jobs-pagination {
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+}
+
+.jobs-pagination__inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;   /* always centered */
+  gap: 0.75rem;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  min-width: max-content;
+  margin: 0 auto;
+}
+
+.jobs-pagination__pages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.jobs-pagination__ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  color: var(--color-text-soft);
+  font-weight: 700;
+}
+
+.jobs-pagination .jobs-chip {
+  flex: 0 0 auto;
+}
+
+.jobs-pagination .jobs-chip[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 /* Responsive */
 @media (min-width: 640px) {
   .job-card__title {

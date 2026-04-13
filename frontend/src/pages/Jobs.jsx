@@ -13,11 +13,7 @@ import mapJobsForDisplay from "../lib/jobs/mapJobsForDisplay";
 import { readCachedResumeUiState } from "../lib/resumes";
 import { useJobs } from "../hooks/useJobs";
 import { useAuth } from "../hooks/useAuth";
-import {
-  hideJob,
-  saveJob,
-  unsaveJob,
-} from "../lib/jobs/jobsApi";
+import { hideJob, saveJob, unsaveJob } from "../lib/jobs/jobsApi";
 import {
   DEFAULT_SELECTED_EXPERIENCE_LEVELS,
   arraysEqualAsSets,
@@ -30,6 +26,8 @@ import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
 
 const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
 const WELCOME_MODAL_PENDING_KEY = "earlybloom_welcome_modal_pending";
+const JOBS_PER_PAGE = 12;
+const MAX_VISIBLE_PAGES = 10;
 
 function getLoginRequiredContent(intent) {
   switch (intent) {
@@ -55,6 +53,22 @@ function getLoginRequiredContent(intent) {
   }
 }
 
+function getVisiblePageNumbers(currentPage, totalPages) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  if (currentPage <= 4) {
+    return [1, 2, 3, 4, 5, "...", totalPages];
+  }
+
+  if (currentPage >= totalPages - 3) {
+    return [1, "...", totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+  }
+
+  return [1, "...", currentPage - 1, currentPage, currentPage + 1, "...", totalPages];
+}
+
 function Jobs() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
@@ -75,6 +89,7 @@ function Jobs() {
   const [jobViewerOverrides, setJobViewerOverrides] = useState({});
   const [pendingActions, setPendingActions] = useState({});
   const [actionError, setActionError] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
 
   const visibleResumeFile = useMemo(() => {
     if (!user) {
@@ -106,6 +121,7 @@ function Jobs() {
     setJobViewerOverrides({});
     setPendingActions({});
     setActionError("");
+    setCurrentPage(1);
   }, [viewerKey, rawJobs]);
 
   const scoredJobs = useMemo(() => {
@@ -130,6 +146,30 @@ function Jobs() {
     selectedWorkplaces,
     selectedRoleTypes,
   ]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(jobs.length / JOBS_PER_PAGE));
+  }, [jobs.length]);
+
+  useEffect(() => {
+    setCurrentPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  const paginatedJobs = useMemo(() => {
+    const startIndex = (currentPage - 1) * JOBS_PER_PAGE;
+    return jobs.slice(startIndex, startIndex + JOBS_PER_PAGE);
+  }, [jobs, currentPage]);
+
+  const visiblePageNumbers = useMemo(() => {
+    return getVisiblePageNumbers(currentPage, totalPages);
+  }, [currentPage, totalPages]);
+
+  const pageStartCount = jobs.length === 0 ? 0 : (currentPage - 1) * JOBS_PER_PAGE + 1;
+  const pageEndCount = Math.min(currentPage * JOBS_PER_PAGE, jobs.length);
 
   const filtersSummary = useMemo(() => {
     return getFilterSummary({
@@ -378,6 +418,18 @@ function Jobs() {
     }
   }
 
+  function handleChangePage(nextPage) {
+    if (nextPage < 1 || nextPage > totalPages || nextPage === currentPage) {
+      return;
+    }
+
+    setCurrentPage(nextPage);
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
   const loginContent = getLoginRequiredContent(loginRequiredIntent);
 
   return (
@@ -551,19 +603,80 @@ function Jobs() {
             ) : null}
 
             {!isLoading && !error && jobs.length > 0 ? (
-              <div className="jobs-list">
-                {jobs.map((job) => (
-                  <JobCard
-                    key={job.id}
-                    job={job}
-                    onOpenDetails={handleOpenDetails}
-                    onSaveToggle={handleToggleSave}
-                    onHide={handleHideJob}
-                    isSavePending={Boolean(pendingActions[job.id]?.saving)}
-                    isHidePending={Boolean(pendingActions[job.id]?.hiding)}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="jobs-list">
+                  {paginatedJobs.map((job) => (
+                    <JobCard
+                      key={job.id}
+                      job={job}
+                      onOpenDetails={handleOpenDetails}
+                      onSaveToggle={handleToggleSave}
+                      onHide={handleHideJob}
+                      isSavePending={Boolean(pendingActions[job.id]?.saving)}
+                      isHidePending={Boolean(pendingActions[job.id]?.hiding)}
+                    />
+                  ))}
+                </div>
+
+                {totalPages > 1 ? (
+                  <nav
+                    className="jobs-pagination section-card"
+                    aria-label="Job results pages"
+                  >
+                    <div className="jobs-pagination__inner">
+                      <button
+                        type="button"
+                        className="jobs-chip"
+                        onClick={() => handleChangePage(currentPage - 1)}
+                        disabled={currentPage === 1}
+                        aria-label="Go to previous page"
+                      >
+                        Prev
+                      </button>
+
+                      <div className="jobs-pagination__pages">
+                        {visiblePageNumbers.map((pageNumber, index) => {
+                          if (pageNumber === "...") {
+                            return (
+                              <span
+                                key={`ellipsis-${index}`}
+                                className="jobs-pagination__ellipsis"
+                                aria-hidden="true"
+                              >
+                                ...
+                              </span>
+                            );
+                          }
+
+                          return (
+                            <button
+                              key={pageNumber}
+                              type="button"
+                              className={`jobs-chip ${
+                                pageNumber === currentPage ? "jobs-chip--active" : ""
+                              }`}
+                              onClick={() => handleChangePage(pageNumber)}
+                              aria-label={`Go to page ${pageNumber}`}
+                              aria-current={pageNumber === currentPage ? "page" : undefined}
+                            >
+                              {pageNumber}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <button
+                        type="button"
+                        className="jobs-chip"
+                        onClick={() => handleChangePage(currentPage + 1)}
+                        disabled={currentPage === totalPages}
+                        aria-label="Go to next page"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </nav>
+                ) : null}
+              </>
             ) : null}
           </div>
         </div>
@@ -601,7 +714,9 @@ function Jobs() {
       >
         <div className="jobs-reasons-modal">
           <div className="jobs-reasons-modal__intro">
-            <p className="jobs-reasons-modal__job-meta">{loginContent.eyebrow}</p>
+            <p className="jobs-reasons-modal__job-meta">
+              {loginContent.eyebrow}
+            </p>
 
             <h3 className="jobs-reasons-modal__job-title">
               {loginContent.title}
