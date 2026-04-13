@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import Home from "./pages/Home";
 import Jobs from "./pages/Jobs";
+import Tracker from "./pages/Tracker";
 import LearnMore from "./pages/LearnMore";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
@@ -17,6 +18,7 @@ import SignUp from "./pages/SignUp";
  * Routes currently included:
  * - Home
  * - Jobs
+ * - Tracker
  * - Learn More
  * - Sign In
  * - Sign Up
@@ -33,6 +35,7 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/jobs" element={<Jobs />} />
+            <Route path="/tracker" element={<Tracker />} />
             <Route path="/learn-more" element={<LearnMore />} />
             <Route path="/sign-in" element={<SignIn />} />
             <Route path="/sign-up" element={<SignUp />} />
