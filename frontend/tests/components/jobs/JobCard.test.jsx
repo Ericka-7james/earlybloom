@@ -20,7 +20,7 @@ describe("JobCard", () => {
     url: "https://example.com/job-1",
   };
 
-  it("renders the core job information", () => {
+  it("renders the core compact job information", () => {
     render(<JobCard job={baseJob} />);
 
     expect(screen.getByText("Junior Frontend Engineer")).toBeInTheDocument();
@@ -30,9 +30,7 @@ describe("JobCard", () => {
     expect(screen.getByText("Junior")).toBeInTheDocument();
     expect(screen.getByText("Source: Greenhouse")).toBeInTheDocument();
     expect(screen.getByLabelText("87 percent match")).toBeInTheDocument();
-    expect(
-      screen.getByText("Build polished UI for early-career job seekers.")
-    ).toBeInTheDocument();
+    expect(screen.getByText("View details")).toBeInTheDocument();
   });
 
   it("renders the main surface button with the expected accessible name", () => {
@@ -45,19 +43,25 @@ describe("JobCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the Why preview block using the first reason", () => {
+  it("does not render the summary preview on the card", () => {
     render(<JobCard job={baseJob} />);
 
-    expect(screen.getByText("Why")).toBeInTheDocument();
-    expect(screen.getByText("Entry-level title")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Build polished UI for early-career job seekers.")
+    ).not.toBeInTheDocument();
   });
 
-  it("calls onOpenReasonsModal when the card surface is clicked", () => {
-    const onOpenReasonsModal = vi.fn();
+  it("does not render the old Why preview block", () => {
+    render(<JobCard job={baseJob} />);
 
-    render(
-      <JobCard job={baseJob} onOpenReasonsModal={onOpenReasonsModal} />
-    );
+    expect(screen.queryByText("Why")).not.toBeInTheDocument();
+    expect(screen.queryByText("Entry-level title")).not.toBeInTheDocument();
+  });
+
+  it("calls onOpenDetails when the card surface is clicked", () => {
+    const onOpenDetails = vi.fn();
+
+    render(<JobCard job={baseJob} onOpenDetails={onOpenDetails} />);
 
     fireEvent.click(
       screen.getByRole("button", {
@@ -65,39 +69,34 @@ describe("JobCard", () => {
       })
     );
 
-    expect(onOpenReasonsModal).toHaveBeenCalledTimes(1);
-    expect(onOpenReasonsModal).toHaveBeenCalledWith(baseJob);
+    expect(onOpenDetails).toHaveBeenCalledTimes(1);
+    expect(onOpenDetails).toHaveBeenCalledWith(baseJob);
   });
 
-  it("shows watchout text when there are warning flags even without reasons", () => {
+  it("shows watchout chip when there are warning flags", () => {
     render(
       <JobCard
         job={{
           ...baseJob,
-          reasons: [],
           warningFlags: ["Asks for 3+ years"],
         }}
-        onOpenReasonsModal={() => {}}
       />
     );
 
-    expect(screen.getByText("Includes watchouts")).toBeInTheDocument();
+    expect(screen.getByText("Watchouts")).toBeInTheDocument();
   });
 
-  it("does not show the Why preview block when there are no reasons", () => {
+  it("does not show the watchout chip when there are no warning flags", () => {
     render(
       <JobCard
         job={{
           ...baseJob,
-          reasons: [],
           warningFlags: [],
         }}
-        onOpenReasonsModal={() => {}}
       />
     );
 
-    expect(screen.queryByText("Why")).not.toBeInTheDocument();
-    expect(screen.queryByText("Entry-level title")).not.toBeInTheDocument();
+    expect(screen.queryByText("Watchouts")).not.toBeInTheDocument();
   });
 
   it("falls back to safe defaults for invalid fitTag and matchScore", () => {
@@ -110,7 +109,6 @@ describe("JobCard", () => {
           location: "Remote",
           fitTag: "Not A Real Tag",
           matchScore: 999,
-          reasons: [],
           warningFlags: [],
         }}
       />
@@ -130,7 +128,6 @@ describe("JobCard", () => {
           location: "Remote",
           fitTag: "Stretch Role",
           matchScore: -20,
-          reasons: [],
           warningFlags: [],
         }}
       />
@@ -146,28 +143,12 @@ describe("JobCard", () => {
           company: "Bloom Labs",
           location: "Remote",
           fitTag: "Stretch Role",
-          reasons: [],
           warningFlags: [],
         }}
       />
     );
 
     expect(screen.getByLabelText("0 percent match")).toBeInTheDocument();
-  });
-
-  it("does not render the summary when it is empty", () => {
-    render(
-      <JobCard
-        job={{
-          ...baseJob,
-          summary: "   ",
-        }}
-      />
-    );
-
-    expect(
-      screen.queryByText("Build polished UI for early-career job seekers.")
-    ).not.toBeInTheDocument();
   });
 
   it("renders unknown source labels as-is", () => {
@@ -190,7 +171,6 @@ describe("JobCard", () => {
       <JobCard
         job={{
           id: "job-5",
-          reasons: [],
           warningFlags: [],
         }}
       />
@@ -201,7 +181,37 @@ describe("JobCard", () => {
     expect(screen.getByText("Location not listed")).toBeInTheDocument();
   });
 
-  it("supports snake_case experience level fields", () => {
+  it("renders compensation in compact metadata when provided", () => {
+    render(
+      <JobCard
+        job={{
+          ...baseJob,
+          compensation: "$85,000 - $100,000",
+        }}
+      />
+    );
+
+    expect(screen.getByText("$85,000 - $100,000")).toBeInTheDocument();
+  });
+
+  it("prefers cardLocation over location when provided", () => {
+    render(
+      <JobCard
+        job={{
+          ...baseJob,
+          cardLocation: "Multiple U.S. locations",
+          location: "Atlanta, GA; Remote; Washington, DC",
+        }}
+      />
+    );
+
+    expect(screen.getByText("Multiple U.S. locations")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Atlanta, GA; Remote; Washington, DC")
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not support snake_case experience level fields", () => {
     render(
       <JobCard
         job={{
@@ -212,6 +222,6 @@ describe("JobCard", () => {
       />
     );
 
-    expect(screen.getByText("Mid-level")).toBeInTheDocument();
+    expect(screen.queryByText("Mid-level")).not.toBeInTheDocument();
   });
 });
