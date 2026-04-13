@@ -1,16 +1,21 @@
-cd frontend || exit 1
+#!/usr/bin/env sh
 
-echo "🧹 Verifying clean install..."
-rm -rf node_modules
+echo "🧹 Frontend clean install..."
+cd frontend || exit 1
 npm ci || exit 1
 
-echo "🔍 Running lint..."
+echo "🔍 Frontend lint..."
 npm run lint || exit 1
 
-echo "🧪 Running coverage checks..."
+echo "🧪 Frontend tests + coverage..."
 npm run test:coverage || exit 1
 
-echo "🏗️ Running build..."
+echo "🏗️ Frontend build..."
 npm run build || exit 1
+
+echo "🐍 Backend setup..."
+cd ../backend || exit 1
+
+python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=70 || exit 1
 
 echo "✅ All checks passed. Proceeding with push."
