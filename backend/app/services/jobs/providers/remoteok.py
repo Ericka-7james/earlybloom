@@ -10,19 +10,21 @@ import httpx
 from app.core.config import get_settings
 from app.schemas.jobs import NormalizedJob
 from app.services.jobs.providers.base import BaseJobProvider
-from app.services.jobs.providers.common.experience_rules import (
+from app.services.jobs.common.experience_rules import (
     infer_experience_level_from_text,
 )
-from app.services.jobs.providers.common.role_taxonomy import (
+from app.services.jobs.common.role_taxonomy import (
     infer_role_type_from_text,
 )
-from app.services.jobs.providers.common.skill_hints import (
+from app.services.jobs.common.skill_hints import (
     extract_skill_hints,
 )
-from app.services.jobs.providers.common.text_cleaning import (
+from app.services.jobs.common.text_cleaning import (
+    normalize_paragraph_text,
+    split_bullets,
     strip_html,
 )
-from app.services.jobs.providers.common.title_rules import (
+from app.services.jobs.common.title_rules import (
     is_obviously_senior_title,
     should_keep_title_for_earlybloom,
 )
@@ -60,7 +62,9 @@ class RemoteOKProvider(BaseJobProvider):
             return None
 
         return cls(
-            timeout_seconds=float(getattr(settings, "JOB_PROVIDER_TIMEOUT_SECONDS", 6.0)),
+            timeout_seconds=float(
+                getattr(settings, "JOB_PROVIDER_TIMEOUT_SECONDS", 6.0)
+            ),
             max_jobs=int(getattr(settings, "JOB_PROVIDER_MAX_JOBS_PER_SOURCE", 100)),
         )
 
@@ -84,8 +88,10 @@ class RemoteOKProvider(BaseJobProvider):
 
         for item in items:
             normalized = self._normalize_job(item)
-            if normalized is not None:
-                jobs.append(normalized)
+            if normalized is None:
+                continue
+
+            jobs.append(normalized)
 
             if len(jobs) >= self.max_jobs:
                 return jobs[: self.max_jobs]
@@ -93,11 +99,36 @@ class RemoteOKProvider(BaseJobProvider):
         return jobs[: self.max_jobs]
 
     def _extract_items(self, payload: Any) -> list[dict[str, Any]]:
-        if not isinstance(payload, list) or len(payload) <= 1:
+        """Extract job rows while skipping RemoteOK metadata rows."""
+        if not isinstance(payload, list):
             return []
 
-        # RemoteOK commonly returns metadata as first item.
-        return [item for item in payload[1:] if isinstance(item, dict)]
+        items: list[dict[str, Any]] = []
+
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+
+            if self._is_metadata_row(item):
+                continue
+
+            items.append(item)
+
+        return items
+
+    def _is_metadata_row(self, item: dict[str, Any]) -> bool:
+        """Detect common RemoteOK metadata objects."""
+        return bool(
+            item.get("legal")
+            or item.get("licenses")
+            or item.get("pricing")
+            or (
+                "id" not in item
+                and "position" not in item
+                and "company" not in item
+                and "url" not in item
+            )
+        )
 
     def _normalize_job(self, item: dict[str, Any]) -> NormalizedJob | None:
         title = self._clean_remoteok_text(item.get("position"))
@@ -105,11 +136,12 @@ class RemoteOKProvider(BaseJobProvider):
         location = self._clean_remoteok_text(item.get("location")) or "Remote"
         url = self._safe_str(item.get("url"))
         external_id = self._safe_str(item.get("id"))
+
         raw_description = self._clean_remoteok_text(item.get("description"))
         cleaned_description = strip_html(raw_description)
+        cleaned_description = normalize_paragraph_text(cleaned_description)
 
         tags = self._coerce_string_list(item.get("tags"))
-        employment_type = None
 
         if not title or not company or not url:
             return None
@@ -142,11 +174,17 @@ class RemoteOKProvider(BaseJobProvider):
             )
         )
 
+        responsibilities = self._extract_responsibilities(cleaned_description)
+        qualifications = self._extract_qualifications(cleaned_description)
+        preferred_skills = tags[:8]
+
         combined_skill_text = "\n".join(
             part
             for part in [
                 title,
                 cleaned_description,
+                "\n".join(responsibilities),
+                "\n".join(qualifications),
                 " ".join(tags),
             ]
             if part
@@ -155,6 +193,8 @@ class RemoteOKProvider(BaseJobProvider):
         salary_min = self._extract_salary_min(item)
         salary_max = self._extract_salary_max(item)
         salary_currency = "USD" if salary_min is not None or salary_max is not None else None
+
+        employment_type = self._extract_employment_type(item)
 
         job_id = self.build_stable_job_id(
             external_id=external_id,
@@ -175,14 +215,14 @@ class RemoteOKProvider(BaseJobProvider):
             source=self.source_name,
             summary=self.summarize(cleaned_description or title),
             description=cleaned_description,
-            responsibilities=[],
-            qualifications=[],
+            responsibilities=responsibilities,
+            qualifications=qualifications,
             required_skills=extract_skill_hints(
                 combined_skill_text,
                 role_type=role_type,
                 limit=12,
             ),
-            preferred_skills=tags[:8],
+            preferred_skills=preferred_skills,
             employment_type=employment_type,
             experience_level=experience_level,
             salary_min=salary_min,
@@ -209,6 +249,80 @@ class RemoteOKProvider(BaseJobProvider):
     def _extract_salary_max(self, item: dict[str, Any]) -> int | None:
         return self._coerce_int(item.get("salary_max"))
 
+    def _extract_employment_type(self, item: dict[str, Any]) -> str | None:
+        """Normalize common RemoteOK employment-style fields."""
+        candidate_fields = [
+            item.get("employment_type"),
+            item.get("type"),
+            item.get("job_type"),
+        ]
+
+        for value in candidate_fields:
+            text = self._clean_remoteok_text(value)
+            if text:
+                return text
+
+        return None
+
+    def _extract_responsibilities(self, text: str) -> list[str]:
+        if not text:
+            return []
+
+        section = self._extract_named_section(
+            text,
+            section_names=("responsibilities", "what you'll do", "what you will do"),
+        )
+        if section:
+            return split_bullets(section, max_items=8)
+
+        return split_bullets(text[:1200], max_items=6)
+
+    def _extract_qualifications(self, text: str) -> list[str]:
+        if not text:
+            return []
+
+        section = self._extract_named_section(
+            text,
+            section_names=(
+                "requirements",
+                "qualifications",
+                "what we're looking for",
+                "what we are looking for",
+                "you should have",
+            ),
+        )
+        if section:
+            return split_bullets(section, max_items=8)
+
+        return []
+
+    def _extract_named_section(
+        self,
+        text: str,
+        *,
+        section_names: tuple[str, ...],
+    ) -> str:
+        lowered = text.lower()
+        matched_index = -1
+        matched_name = ""
+
+        for name in section_names:
+            index = lowered.find(f"{name.lower()}:")
+            if index != -1:
+                matched_index = index
+                matched_name = name
+                break
+
+        if matched_index == -1:
+            return ""
+
+        remainder = text[matched_index + len(matched_name) + 1 :]
+        next_header = re.search(r"\n[A-Z][A-Za-z' /&-]+:\n", remainder)
+        if next_header:
+            remainder = remainder[: next_header.start()]
+
+        return remainder[:1500].strip()
+
     def _coerce_int(self, value: Any) -> int | None:
         if value is None or value == "":
             return None
@@ -228,9 +342,11 @@ class RemoteOKProvider(BaseJobProvider):
             text = self._clean_remoteok_text(item)
             if not text:
                 continue
+
             key = text.casefold()
             if key in seen:
                 continue
+
             seen.add(key)
             cleaned.append(text)
 

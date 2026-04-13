@@ -9,19 +9,19 @@ import httpx
 from app.core.config import get_settings
 from app.schemas.jobs import NormalizedJob
 from app.services.jobs.providers.base import BaseJobProvider
-from app.services.jobs.providers.common.experience_rules import (
+from app.services.jobs.common.experience_rules import (
     infer_experience_level_from_text,
 )
-from app.services.jobs.providers.common.role_taxonomy import (
+from app.services.jobs.common.role_taxonomy import (
     infer_role_type_from_text,
 )
-from app.services.jobs.providers.common.skill_hints import (
+from app.services.jobs.common.skill_hints import (
     extract_skill_hints,
 )
-from app.services.jobs.providers.common.text_cleaning import (
+from app.services.jobs.common.text_cleaning import (
     strip_html,
 )
-from app.services.jobs.providers.common.title_rules import (
+from app.services.jobs.common.title_rules import (
     is_obviously_senior_title,
     should_keep_title_for_earlybloom,
 )
@@ -165,7 +165,8 @@ class JSearchProvider(BaseJobProvider):
             title,
             location,
             description,
-            self._safe_str(item.get("job_is_remote")),
+            self._normalize_remote_hint(item.get("job_is_remote")),
+            self._safe_str(item.get("job_location")),
             employment_type or "",
         )
 
@@ -286,6 +287,16 @@ class JSearchProvider(BaseJobProvider):
             or item.get("job_currency")
         )
         return currency or None
+
+    def _normalize_remote_hint(self, value: Any) -> str:
+        if value is True:
+            return "remote"
+        if value is False or value is None:
+            return ""
+        text = self._safe_str(value).lower()
+        if text in {"true", "1", "yes", "remote"}:
+            return "remote"
+        return text
 
     def _coerce_int(self, value: Any) -> int | None:
         if value is None or value == "":

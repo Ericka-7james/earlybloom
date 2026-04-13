@@ -10,21 +10,21 @@ import httpx
 from app.core.config import get_settings
 from app.schemas.jobs import NormalizedJob
 from app.services.jobs.providers.base import BaseJobProvider
-from app.services.jobs.providers.common.experience_rules import (
+from app.services.jobs.common.experience_rules import (
     infer_experience_level_from_text,
 )
-from app.services.jobs.providers.common.role_taxonomy import (
+from app.services.jobs.common.role_taxonomy import (
     infer_role_type_from_text,
 )
-from app.services.jobs.providers.common.skill_hints import (
+from app.services.jobs.common.skill_hints import (
     extract_skill_hints,
 )
-from app.services.jobs.providers.common.text_cleaning import (
+from app.services.jobs.common.text_cleaning import (
     normalize_paragraph_text,
     split_bullets,
     strip_html,
 )
-from app.services.jobs.providers.common.title_rules import (
+from app.services.jobs.common.title_rules import (
     is_obviously_senior_title,
     should_keep_title_for_earlybloom,
 )
