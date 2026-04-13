@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 
 RemoteType = Literal["remote", "hybrid", "onsite", "unknown"]
@@ -15,6 +15,35 @@ ExperienceLevel = Literal[
     "senior",
     "unknown",
 ]
+RoleType = Literal[
+    "frontend",
+    "backend",
+    "full-stack",
+    "software-engineering",
+    "mobile",
+    "data",
+    "data-engineering",
+    "data-analyst",
+    "machine-learning",
+    "ai",
+    "devops",
+    "sre",
+    "cloud",
+    "infrastructure",
+    "cybersecurity",
+    "qa",
+    "test-automation",
+    "product",
+    "product-design",
+    "ux",
+    "solutions-engineering",
+    "technical-support",
+    "it",
+    "business-analyst",
+    "platform",
+    "developer-tools",
+    "unknown",
+]
 
 
 class NormalizedJob(BaseModel):
@@ -23,11 +52,15 @@ class NormalizedJob(BaseModel):
     id: str = Field(..., description="Stable identifier for deduplication and UI use")
     title: str
     company: str
-    location: str
+    location: str = ""
+    location_display: str = ""
+
     remote: bool = False
     remote_type: RemoteType = "unknown"
+
     url: HttpUrl | str
     source: str
+    source_job_id: str | None = None
 
     summary: str = ""
     description: str = ""
@@ -39,10 +72,85 @@ class NormalizedJob(BaseModel):
 
     employment_type: str | None = None
     experience_level: ExperienceLevel = "unknown"
+    role_type: RoleType = "unknown"
 
     salary_min: int | None = None
     salary_max: int | None = None
     salary_currency: str | None = "USD"
+
+    # Internal shared-cache metadata
+    stable_key: str | None = None
+    provider_payload_hash: str | None = None
+
+    @field_validator(
+        "title",
+        "company",
+        "location",
+        "location_display",
+        "summary",
+        "description",
+        mode="before",
+    )
+    @classmethod
+    def normalize_text_fields(cls, value: object) -> str:
+        """Normalize string-like text fields into compact readable text."""
+        return " ".join(str(value or "").strip().split())
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def normalize_source(cls, value: object) -> str:
+        """Normalize source name casing."""
+        return str(value or "unknown").strip().lower()
+
+    @field_validator(
+        "source_job_id",
+        "employment_type",
+        "salary_currency",
+        "stable_key",
+        "provider_payload_hash",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_strings(cls, value: object) -> str | None:
+        """Normalize optional string fields and collapse empty strings to None."""
+        text = str(value or "").strip()
+        return text or None
+
+    @field_validator("responsibilities", "qualifications", "required_skills", "preferred_skills", mode="before")
+    @classmethod
+    def normalize_string_lists(cls, value: object) -> list[str]:
+        """Normalize list fields into cleaned string lists."""
+        if not isinstance(value, list):
+            return []
+
+        cleaned: list[str] = []
+        seen: set[str] = set()
+
+        for item in value:
+            text = " ".join(str(item or "").strip().split())
+            if not text:
+                continue
+
+            key = text.casefold()
+            if key in seen:
+                continue
+
+            seen.add(key)
+            cleaned.append(text)
+
+        return cleaned
+
+    @field_validator("salary_min", "salary_max", mode="before")
+    @classmethod
+    def normalize_salary_numbers(cls, value: object) -> int | None:
+        """Coerce salary-like values to integers when possible."""
+        if value is None or value == "":
+            return None
+
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
 
 
 class JobsResponse(BaseModel):
@@ -50,3 +158,45 @@ class JobsResponse(BaseModel):
 
     jobs: list[NormalizedJob]
     total: int
+
+
+class JobQueryParams(BaseModel):
+    """Normalized query params used to build shared query-cache keys."""
+
+    remote_only: bool = False
+    levels: list[str] = Field(default_factory=list)
+    role_types: list[str] = Field(default_factory=list)
+
+    @field_validator("levels", "role_types", mode="before")
+    @classmethod
+    def normalize_query_lists(cls, value: object) -> list[str]:
+        """Normalize query list params into stripped lowercase values."""
+        if value is None:
+            return []
+
+        if not isinstance(value, list):
+            value = [value]
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+
+        for item in value:
+            text = str(item or "").strip().lower()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+
+        return normalized
+
+
+class JobIngestionSummary(BaseModel):
+    """Optional debug/admin shape for ingestion status visibility."""
+
+    provider: str
+    query_key: str
+    status: str
+    raw_count: int = 0
+    normalized_count: int = 0
+    deduped_count: int = 0
+    error_message: str | None = None
