@@ -14,27 +14,6 @@ function getFitTagClassName(fitTag) {
   }
 }
 
-function formatSourceLabel(source) {
-  switch (source) {
-    case "greenhouse":
-      return "Greenhouse";
-    case "lever":
-      return "Lever";
-    case "adzuna":
-      return "Adzuna";
-    case "usajobs":
-      return "USAJobs";
-    case "remoteok":
-      return "RemoteOK";
-    case "jobicy":
-      return "Jobicy";
-    case "arbeitnow":
-      return "ArbeitNow";
-    default:
-      return source || null;
-  }
-}
-
 function getSafeFitTag(fitTag) {
   switch (fitTag) {
     case "Real Junior":
@@ -55,108 +34,128 @@ function getSafeMatchScore(matchScore) {
   return Math.max(0, Math.min(100, Math.round(matchScore)));
 }
 
-function formatExperienceLevel(experienceLevel) {
-  const normalized = String(experienceLevel || "")
-    .trim()
-    .toLowerCase();
-
-  switch (normalized) {
-    case "entry-level":
-      return "Entry-level";
-    case "junior":
-      return "Junior";
-    case "mid":
-    case "mid-level":
-      return "Mid-level";
-    case "senior":
-      return "Senior";
-    case "unknown":
-    case "":
-      return null;
-    default:
-      return experienceLevel || null;
-  }
+function stopCardEvent(event) {
+  event.preventDefault();
+  event.stopPropagation();
 }
 
-function getCompactMeta({ location, experienceLevel, compensation, sourceLabel }) {
-  return [location, formatExperienceLevel(experienceLevel), compensation, sourceLabel]
-    .filter((value) => typeof value === "string" && value.trim().length > 0)
-    .slice(0, 4);
-}
-
-function JobCard({ job, onOpenDetails }) {
+function JobCard({
+  job,
+  onOpenDetails,
+  onSaveToggle,
+  onHide,
+  isSavePending = false,
+  isHidePending = false,
+  hideLabel,
+}) {
   const id = job.id;
   const title = job.title || "Untitled role";
   const company = job.company || "Unknown company";
   const fitTag = getSafeFitTag(job.fitTag);
   const matchScore = getSafeMatchScore(job.matchScore);
-  const sourceLabel = formatSourceLabel(job.source)
-    ? `Source: ${formatSourceLabel(job.source)}`
-    : null;
-
-  const compactMeta = getCompactMeta({
-    location: job.cardLocation || job.location || "Location not listed",
-    experienceLevel: job.experienceLevel,
-    compensation: job.compensation,
-    sourceLabel,
-  });
-
   const hasWarningFlags =
     Array.isArray(job.warningFlags) && job.warningFlags.length > 0;
 
-  const handleOpen = () => {
+  const metaItems = Array.isArray(job.metadata) ? job.metadata.slice(0, 6) : [];
+  const applyUrl = job.url || job.sourceUrl || null;
+  const resolvedHideLabel =
+    hideLabel || (job.isHidden ? "Hidden" : "Hide");
+
+  function handleOpen() {
     if (typeof onOpenDetails === "function") {
       onOpenDetails(job);
     }
-  };
+  }
+
+  function handleSaveClick(event) {
+    stopCardEvent(event);
+
+    if (typeof onSaveToggle === "function" && !isSavePending) {
+      onSaveToggle(job);
+    }
+  }
+
+  function handleHideClick(event) {
+    stopCardEvent(event);
+
+    if (typeof onHide === "function" && !isHidePending) {
+      onHide(job);
+    }
+  }
 
   return (
     <article
-      className="job-card section-card job-card--compact"
+      className="job-card section-card job-card--tracker-ready"
       aria-labelledby={`job-card-title-${id}`}
     >
+      <div className="job-card__top-row">
+        <div className="job-card__meta-row">
+          <span className={`job-card__fit-tag ${getFitTagClassName(fitTag)}`}>
+            {fitTag}
+          </span>
+
+          <span
+            className="job-card__match-badge"
+            aria-label={`${matchScore} percent match`}
+          >
+            {matchScore}% match
+          </span>
+
+          {hasWarningFlags ? (
+            <span className="job-card__watchout-chip">Watchouts</span>
+          ) : null}
+
+          {job.isSaved ? (
+            <span className="job-card__saved-chip">Saved</span>
+          ) : null}
+        </div>
+
+        <div className="job-card__actions" aria-label="Job actions">
+          <button
+            type="button"
+            className={`job-card__icon-button ${
+              job.isSaved ? "job-card__icon-button--active" : ""
+            }`}
+            onClick={handleSaveClick}
+            disabled={isSavePending}
+            aria-label={job.isSaved ? "Remove saved job" : "Save job"}
+            title={job.isSaved ? "Remove saved job" : "Save job"}
+          >
+            <span aria-hidden="true">{job.isSaved ? "★" : "☆"}</span>
+          </button>
+
+          <button
+            type="button"
+            className={`job-card__icon-button ${
+              job.isHidden ? "job-card__icon-button--danger" : ""
+            }`}
+            onClick={handleHideClick}
+            disabled={isHidePending}
+            aria-label={resolvedHideLabel}
+            title={resolvedHideLabel}
+          >
+            <span aria-hidden="true">{job.isHidden ? "↺" : "✕"}</span>
+          </button>
+        </div>
+      </div>
+
       <button
         type="button"
         className="job-card__surface"
         onClick={handleOpen}
         aria-label={`Open details for ${title} at ${company}`}
       >
-        <div className="job-card__top">
-          <div className="job-card__heading">
-            <div className="job-card__meta-row">
-              <span
-                className={`job-card__fit-tag ${getFitTagClassName(fitTag)}`}
-              >
-                {fitTag}
-              </span>
+        <div className="job-card__heading">
+          <h3 id={`job-card-title-${id}`} className="job-card__title">
+            {title}
+          </h3>
 
-              <span
-                className="job-card__match-badge"
-                aria-label={`${matchScore} percent match`}
-              >
-                {matchScore}% match
-              </span>
-
-              {hasWarningFlags ? (
-                <span className="job-card__watchout-chip">Watchouts</span>
-              ) : null}
-            </div>
-
-            <h3 id={`job-card-title-${id}`} className="job-card__title">
-              {title}
-            </h3>
-
-            <p className="job-card__company">{company}</p>
-          </div>
-
-          <span className="job-card__details-link" aria-hidden="true">
-            View details
-          </span>
+          <p className="job-card__company">{company}</p>
         </div>
 
-        {compactMeta.length > 0 ? (
+        {metaItems.length > 0 ? (
           <div className="job-card__compact-meta" aria-label="Job metadata">
-            {compactMeta.map((item, index) => (
+            {metaItems.map((item, index) => (
               <span key={`${id}-meta-${index}`} className="job-card__tag">
                 {item}
               </span>
@@ -164,6 +163,36 @@ function JobCard({ job, onOpenDetails }) {
           </div>
         ) : null}
       </button>
+
+      <div className="job-card__footer-row">
+        <button
+          type="button"
+          className="jobs-chip job-card__details-button"
+          onClick={handleOpen}
+        >
+          View details
+        </button>
+
+        {applyUrl ? (
+          <a
+            className="button button--primary job-card__apply-button"
+            href={applyUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => event.stopPropagation()}
+          >
+            Apply
+          </a>
+        ) : (
+          <button
+            type="button"
+            className="button button--primary job-card__apply-button"
+            onClick={handleOpen}
+          >
+            Apply
+          </button>
+        )}
+      </div>
     </article>
   );
 }

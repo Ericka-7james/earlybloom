@@ -60,6 +60,7 @@ function cleanText(value) {
 function resolveLocation(job) {
   if (job.location?.display) return cleanText(job.location.display);
   if (typeof job.location === "string") return cleanText(job.location);
+  if (job.location_display) return cleanText(job.location_display);
   if (job.jobLocation) return cleanText(job.jobLocation);
   return "";
 }
@@ -172,6 +173,40 @@ function normalizeExperienceLevel(level) {
   }
 }
 
+function formatWorkplaceType(value) {
+  const normalized = cleanText(value).toLowerCase();
+
+  switch (normalized) {
+    case "remote":
+      return "Remote";
+    case "hybrid":
+      return "Hybrid";
+    case "onsite":
+      return "On-site";
+    default:
+      return value ? cleanText(value) : null;
+  }
+}
+
+function formatEmploymentType(value) {
+  const normalized = cleanText(value).toLowerCase();
+
+  switch (normalized) {
+    case "full-time":
+      return "Full-time";
+    case "part-time":
+      return "Part-time";
+    case "contract":
+      return "Contract";
+    case "internship":
+      return "Internship";
+    case "temporary":
+      return "Temporary";
+    default:
+      return value ? cleanText(value) : null;
+  }
+}
+
 function resolveFitTag(scored) {
   return scored?.bloomVerdict ?? scored?.fitTag ?? "Too Senior";
 }
@@ -234,7 +269,47 @@ function formatSourceLabel(source) {
   }
 }
 
-export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
+function normalizeViewerState(rawJob, overrideState) {
+  const rawViewerState = rawJob.viewer_state ?? rawJob.viewerState ?? {};
+
+  return {
+    isSaved:
+      overrideState?.is_saved ??
+      overrideState?.isSaved ??
+      rawJob.is_saved ??
+      rawViewerState.is_saved ??
+      rawViewerState.isSaved ??
+      false,
+    isHidden:
+      overrideState?.is_hidden ??
+      overrideState?.isHidden ??
+      rawJob.is_hidden ??
+      rawViewerState.is_hidden ??
+      rawViewerState.isHidden ??
+      false,
+    savedAt:
+      overrideState?.saved_at ??
+      overrideState?.savedAt ??
+      rawJob.saved_at ??
+      rawViewerState.saved_at ??
+      rawViewerState.savedAt ??
+      null,
+    hiddenAt:
+      overrideState?.hidden_at ??
+      overrideState?.hiddenAt ??
+      rawJob.hidden_at ??
+      rawViewerState.hidden_at ??
+      rawViewerState.hiddenAt ??
+      null,
+  };
+}
+
+export function mapJobsForDisplay(
+  rawJobs = [],
+  scoredJobs = [],
+  options = {}
+) {
+  const { viewerStateOverrides = {} } = options;
   const scoredMap = new Map(scoredJobs.map((job) => [job.id, job]));
 
   return rawJobs.map((job) => {
@@ -244,6 +319,13 @@ export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
     const source = job.source ?? job.source_name ?? null;
     const fullLocation = resolveLocation(job);
     const modalLocation = formatModalLocation(fullLocation, source);
+    const workplaceType = formatWorkplaceType(resolveWorkplaceType(job));
+    const experienceLevel = normalizeExperienceLevel(resolveExperienceLevel(job));
+    const employmentType = formatEmploymentType(resolveEmploymentType(job));
+    const viewerState = normalizeViewerState(
+      job,
+      viewerStateOverrides?.[job.id] ?? null
+    );
 
     return {
       id: job.id,
@@ -253,12 +335,12 @@ export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
       cardLocation: formatCardLocation(fullLocation, source),
       modalLocation,
       fullLocation,
-      workplaceType: resolveWorkplaceType(job),
+      workplaceType,
       remoteType: resolveWorkplaceType(job),
       remote: resolveRemote(job),
-      employmentType: resolveEmploymentType(job),
+      employmentType,
       roleType: resolveRoleType(job),
-      experienceLevel: normalizeExperienceLevel(resolveExperienceLevel(job)),
+      experienceLevel,
       description: job.description ?? "",
       summary: resolveSummary(job),
       fitTag: resolveFitTag(scored),
@@ -273,6 +355,18 @@ export function mapJobsForDisplay(rawJobs = [], scoredJobs = []) {
       sourceLabel: formatSourceLabel(source),
       sourceUrl,
       url: sourceUrl,
+      isSaved: viewerState.isSaved,
+      isHidden: viewerState.isHidden,
+      savedAt: viewerState.savedAt,
+      hiddenAt: viewerState.hiddenAt,
+      metadata: [
+        formatCardLocation(fullLocation, source),
+        experienceLevel,
+        workplaceType,
+        employmentType,
+        formatCompensation(compensation),
+        formatSourceLabel(source),
+      ].filter((value) => typeof value === "string" && value.trim().length > 0),
     };
   });
 }

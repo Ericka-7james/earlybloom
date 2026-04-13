@@ -33,12 +33,106 @@ function extractJobsArray(payload) {
   return [];
 }
 
+function getStoredSupabaseAccessToken() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return "";
+  }
+
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+
+      if (!key || !key.startsWith("sb-") || !key.endsWith("-auth-token")) {
+        continue;
+      }
+
+      const rawValue = window.localStorage.getItem(key);
+      if (!rawValue) {
+        continue;
+      }
+
+      const parsedValue = JSON.parse(rawValue);
+
+      if (Array.isArray(parsedValue) && parsedValue[0]?.access_token) {
+        return String(parsedValue[0].access_token);
+      }
+
+      if (parsedValue?.access_token) {
+        return String(parsedValue.access_token);
+      }
+
+      if (parsedValue?.currentSession?.access_token) {
+        return String(parsedValue.currentSession.access_token);
+      }
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
+}
+
+function buildAuthHeaders() {
+  const accessToken = getStoredSupabaseAccessToken();
+  if (!accessToken) {
+    return {};
+  }
+
+  return {
+    Authorization: `Bearer ${accessToken}`,
+  };
+}
+
+async function readJsonOrThrow(response, fallbackMessage) {
+  if (response.ok) {
+    if (response.status === 204) {
+      return null;
+    }
+
+    return response.json();
+  }
+
+  let message = fallbackMessage;
+
+  try {
+    const errorPayload = await response.json();
+    message = errorPayload?.detail || errorPayload?.message || message;
+  } catch {
+    // Keep fallback message.
+  }
+
+  throw new Error(message);
+}
+
+async function requestJson(path, options = {}) {
+  if (!API_BASE_URL) {
+    throw new Error("Missing VITE_API_BASE_URL.");
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: "include",
+    ...options,
+    headers: {
+      Accept: "application/json",
+      ...buildAuthHeaders(),
+      ...(options.headers || {}),
+    },
+  });
+
+  return readJsonOrThrow(
+    response,
+    `${options.method || "GET"} ${path} failed (${response.status}).`
+  );
+}
+
 function normalizeBackendJob(job, index) {
   const normalizedRemoteType = job.remote_type ?? job.remoteType ?? null;
   const normalizedCurrency =
     job.salary_currency ?? job.salaryCurrency ?? job.currency ?? "USD";
   const normalizedId =
     job.id ?? job.external_id ?? job.job_id ?? job.jobId ?? `backend-job-${index}`;
+
+  const viewerState = job.viewer_state ?? job.viewerState ?? {};
 
   return {
     id: normalizedId,
@@ -51,10 +145,21 @@ function normalizeBackendJob(job, index) {
     company_name:
       job.company_name ?? job.companyName ?? job.company ?? "Unknown company",
     location: job.location ?? "Location not listed",
+    location_display: job.location_display ?? job.location ?? "Location not listed",
 
     description: job.description ?? "",
     summary: job.summary ?? "",
     requirements: Array.isArray(job.requirements) ? job.requirements : [],
+    responsibilities: Array.isArray(job.responsibilities)
+      ? job.responsibilities
+      : [],
+    qualifications: Array.isArray(job.qualifications) ? job.qualifications : [],
+    required_skills: Array.isArray(job.required_skills)
+      ? job.required_skills
+      : [],
+    preferred_skills: Array.isArray(job.preferred_skills)
+      ? job.preferred_skills
+      : [],
     tags: Array.isArray(job.tags) ? job.tags : [],
 
     workplaceType:
@@ -125,6 +230,18 @@ function normalizeBackendJob(job, index) {
             salaryVisible: true,
           }
         : null),
+
+    stable_key: job.stable_key ?? null,
+    provider_payload_hash: job.provider_payload_hash ?? null,
+
+    is_saved:
+      viewerState.is_saved ?? viewerState.isSaved ?? job.is_saved ?? false,
+    is_hidden:
+      viewerState.is_hidden ?? viewerState.isHidden ?? job.is_hidden ?? false,
+    saved_at:
+      viewerState.saved_at ?? viewerState.savedAt ?? job.saved_at ?? null,
+    hidden_at:
+      viewerState.hidden_at ?? viewerState.hiddenAt ?? job.hidden_at ?? null,
 
     rawBackendJob: job,
   };
@@ -198,6 +315,11 @@ function normalizeMockUserProfile(mockProfile) {
   };
 }
 
+function normalizeJobsPayload(payload) {
+  const jobs = extractJobsArray(payload);
+  return jobs.map(normalizeBackendJob);
+}
+
 export async function fetchJobs(options = {}) {
   const { signal } = options;
 
@@ -205,36 +327,12 @@ export async function fetchJobs(options = {}) {
     return MOCK_RAW_JOBS;
   }
 
-  if (!API_BASE_URL) {
-    throw new Error("Missing VITE_API_BASE_URL.");
-  }
-
-  const response = await fetch(`${API_BASE_URL}/jobs`, {
+  const payload = await requestJson("/jobs", {
     method: "GET",
-    headers: {
-      Accept: "application/json",
-    },
     signal,
-    credentials: "include",
   });
 
-  if (!response.ok) {
-    let message = `Jobs request failed (${response.status}).`;
-
-    try {
-      const errorPayload = await response.json();
-      message = errorPayload?.detail || errorPayload?.message || message;
-    } catch {
-      // Keep fallback message.
-    }
-
-    throw new Error(message);
-  }
-
-  const payload = await response.json();
-  const jobs = extractJobsArray(payload);
-
-  return jobs.map(normalizeBackendJob);
+  return normalizeJobsPayload(payload);
 }
 
 export async function fetchResolvedJobProfile(options = {}) {
@@ -244,32 +342,72 @@ export async function fetchResolvedJobProfile(options = {}) {
     return normalizeMockUserProfile(MOCK_USER_PROFILE);
   }
 
-  if (!API_BASE_URL) {
-    throw new Error("Missing VITE_API_BASE_URL.");
-  }
-
-  const response = await fetch(`${API_BASE_URL}/jobs/profile`, {
+  const payload = await requestJson("/jobs/profile", {
     method: "GET",
-    headers: {
-      Accept: "application/json",
-    },
     signal,
-    credentials: "include",
   });
 
-  if (!response.ok) {
-    let message = `Job profile request failed (${response.status}).`;
+  return normalizeResolvedJobProfile(payload);
+}
 
-    try {
-      const errorPayload = await response.json();
-      message = errorPayload?.detail || errorPayload?.message || message;
-    } catch {
-      // Keep fallback message.
-    }
+export async function saveJob(jobId) {
+  return requestJson("/jobs/saved", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ job_id: jobId }),
+  });
+}
 
-    throw new Error(message);
+export async function unsaveJob(jobId) {
+  return requestJson(`/jobs/saved/${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function hideJob(jobId) {
+  return requestJson("/jobs/hidden", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ job_id: jobId }),
+  });
+}
+
+export async function unhideJob(jobId) {
+  return requestJson(`/jobs/hidden/${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchSavedJobs(options = {}) {
+  const { signal } = options;
+
+  if (USE_MOCK_JOBS) {
+    return [];
   }
 
-  const payload = await response.json();
-  return normalizeResolvedJobProfile(payload);
+  const payload = await requestJson("/jobs/saved", {
+    method: "GET",
+    signal,
+  });
+
+  return normalizeJobsPayload(payload);
+}
+
+export async function fetchHiddenJobs(options = {}) {
+  const { signal } = options;
+
+  if (USE_MOCK_JOBS) {
+    return [];
+  }
+
+  const payload = await requestJson("/jobs/hidden", {
+    method: "GET",
+    signal,
+  });
+
+  return normalizeJobsPayload(payload);
 }

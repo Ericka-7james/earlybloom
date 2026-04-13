@@ -14,7 +14,6 @@ Shared-cache-first strategy:
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import logging
 from typing import Any
@@ -178,7 +177,7 @@ async def get_jobs(
         providers=provider_registry,
     )
 
-    live_jobs = [_map_internal_job_to_response(job) for job in live_normalized_jobs]
+    live_jobs = [map_normalized_job_to_response(job) for job in live_normalized_jobs]
 
     logger.warning(
         "Live provider refresh returned count=%s query_key=%s",
@@ -203,6 +202,42 @@ async def get_jobs(
 
     logger.warning("Returning final jobs count=%s", len(final_jobs))
     return final_jobs
+
+
+def map_normalized_job_to_response(job: NormalizedJob) -> dict[str, Any]:
+    """Map normalized data into the public jobs API response shape."""
+    return {
+        "id": job.id or _build_public_job_id(job),
+        "title": job.title or "Unknown title",
+        "company": job.company or "Unknown company",
+        "location": job.location or "",
+        "location_display": job.location_display or job.location or "",
+        "remote": bool(job.remote),
+        "remote_type": job.remote_type or "unknown",
+        "url": str(job.url or ""),
+        "source": job.source or "unknown",
+        "source_job_id": job.source_job_id,
+        "summary": job.summary or "",
+        "description": job.description or "",
+        "responsibilities": job.responsibilities or [],
+        "qualifications": job.qualifications or [],
+        "required_skills": job.required_skills or [],
+        "preferred_skills": job.preferred_skills or [],
+        "employment_type": job.employment_type,
+        "experience_level": job.experience_level or "unknown",
+        "role_type": job.role_type or "unknown",
+        "salary_min": job.salary_min,
+        "salary_max": job.salary_max,
+        "salary_currency": job.salary_currency,
+        "stable_key": job.stable_key,
+        "provider_payload_hash": job.provider_payload_hash,
+        "viewer_state": {
+            "is_saved": False,
+            "is_hidden": False,
+            "saved_at": None,
+            "hidden_at": None,
+        },
+    }
 
 
 def _get_cached_jobs_from_query_cache(
@@ -252,7 +287,7 @@ def _get_cached_jobs_from_query_cache(
         len(deduped_jobs),
     )
 
-    return [_map_internal_job_to_response(job) for job in deduped_jobs]
+    return [map_normalized_job_to_response(job) for job in deduped_jobs]
 
 
 def _get_cached_jobs_from_db(
@@ -304,7 +339,7 @@ def _get_cached_jobs_from_db(
         len(deduped_jobs),
     )
 
-    return [_map_internal_job_to_response(job) for job in deduped_jobs]
+    return [map_normalized_job_to_response(job) for job in deduped_jobs]
 
 
 def _write_query_cache(
@@ -628,6 +663,12 @@ def _get_mock_jobs() -> list[dict[str, Any]]:
             "preferred_skills": [],
             "stable_key": None,
             "provider_payload_hash": None,
+            "viewer_state": {
+                "is_saved": False,
+                "is_hidden": False,
+                "saved_at": None,
+                "hidden_at": None,
+            },
         }
     ]
 
@@ -645,36 +686,6 @@ def _is_remote_job(job: NormalizedJob) -> bool:
     description = _normalize_text(job.description)
 
     return "remote" in location or "remote" in description or "telework" in description
-
-
-def _map_internal_job_to_response(job: NormalizedJob) -> dict[str, Any]:
-    """Map normalized data into the public jobs API response shape."""
-    return {
-        "id": job.id or _build_public_job_id(job),
-        "title": job.title or "Unknown title",
-        "company": job.company or "Unknown company",
-        "location": job.location or "",
-        "location_display": job.location_display or job.location or "",
-        "remote": bool(job.remote),
-        "remote_type": job.remote_type or "unknown",
-        "url": str(job.url or ""),
-        "source": job.source or "unknown",
-        "source_job_id": job.source_job_id,
-        "summary": job.summary or "",
-        "description": job.description or "",
-        "responsibilities": job.responsibilities or [],
-        "qualifications": job.qualifications or [],
-        "required_skills": job.required_skills or [],
-        "preferred_skills": job.preferred_skills or [],
-        "employment_type": job.employment_type,
-        "experience_level": job.experience_level or "unknown",
-        "role_type": job.role_type or "unknown",
-        "salary_min": job.salary_min,
-        "salary_max": job.salary_max,
-        "salary_currency": job.salary_currency,
-        "stable_key": job.stable_key,
-        "provider_payload_hash": job.provider_payload_hash,
-    }
 
 
 def _build_public_job_id(job: NormalizedJob) -> str:
