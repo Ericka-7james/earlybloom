@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import "../styles/components/auth.css";
-import { signIn } from "../lib/auth/authApi";
+import { getSession, signIn } from "../lib/auth/authApi";
+import { notifyAuthChanged } from "../hooks/useAuth";
 import PetalloMascot from "../assets/bloombug/bloombugFam/Petaloo.png";
 
 const WELCOME_MODAL_PENDING_KEY = "earlybloom_welcome_modal_pending";
@@ -33,6 +34,13 @@ function SignIn() {
         password: form.password,
       });
 
+      const session = await getSession();
+
+      if (!session?.authenticated || !session?.user) {
+        throw new Error("Sign in succeeded, but the session could not be confirmed.");
+      }
+
+      notifyAuthChanged();
       window.sessionStorage.setItem(WELCOME_MODAL_PENDING_KEY, "true");
       navigate("/jobs");
     } catch (submitError) {

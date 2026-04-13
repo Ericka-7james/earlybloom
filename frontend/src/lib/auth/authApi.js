@@ -7,14 +7,6 @@
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
-/**
- * Sends a JSON request to the backend auth API.
- *
- * @param {string} path Relative backend path beginning with "/".
- * @param {RequestInit} [options] Fetch options.
- * @returns {Promise<any>} Parsed JSON response body.
- * @throws {Error} If the request fails.
- */
 async function request(path, options = {}) {
   if (!API_BASE_URL) {
     throw new Error("Missing VITE_API_BASE_URL.");
@@ -40,7 +32,9 @@ async function request(path, options = {}) {
       // Keep fallback message.
     }
 
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
 
   if (response.status === 204) {
@@ -50,16 +44,6 @@ async function request(path, options = {}) {
   return await response.json();
 }
 
-/**
- * Creates a new account through the backend.
- *
- * @param {{
- *   email: string,
- *   password: string,
- *   displayName?: string
- * }} payload Sign-up payload.
- * @returns {Promise<any>} Backend response.
- */
 export async function signUp(payload) {
   return request("/auth/sign-up", {
     method: "POST",
@@ -71,37 +55,32 @@ export async function signUp(payload) {
   });
 }
 
-/**
- * Signs a user in through the backend.
- *
- * @param {{ email: string, password: string }} payload Sign-in payload.
- * @returns {Promise<any>} Backend response.
- */
 export async function signIn(payload) {
   return request("/auth/sign-in", {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      email: payload.email,
+      password: payload.password,
+    }),
   });
 }
 
-/**
- * Signs the current user out through the backend.
- *
- * @returns {Promise<any>} Backend response.
- */
 export async function signOut() {
   return request("/auth/sign-out", {
     method: "POST",
   });
 }
 
-/**
- * Returns the current authenticated session summary from the backend.
- *
- * @returns {Promise<any>} Backend response.
- */
 export async function getSession() {
-  return request("/auth/session", {
-    method: "GET",
-  });
+  try {
+    return await request("/auth/session", {
+      method: "GET",
+    });
+  } catch (error) {
+    if (error?.status === 401) {
+      return null;
+    }
+
+    throw error;
+  }
 }
