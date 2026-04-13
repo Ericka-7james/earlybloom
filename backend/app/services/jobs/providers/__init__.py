@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from app.services.jobs.providers.arbeitnow import ArbeitNowProvider
 from app.services.jobs.providers.base import BaseJobProvider
-from app.services.jobs.providers.jobicy import JobicyProvider
-from app.services.jobs.providers.jsearch import JSearchProvider
-from app.services.jobs.providers.remotive import RemotiveProvider
-from app.services.jobs.providers.usajobs import USAJOBSProvider
 
 logger = logging.getLogger(__name__)
 
@@ -22,17 +17,59 @@ def get_configured_providers() -> dict[str, BaseJobProvider]:
     """
     providers: dict[str, BaseJobProvider] = {}
 
-    provider_classes: tuple[type[BaseJobProvider], ...] = (
-        USAJOBSProvider,
-        JSearchProvider,
-        RemotiveProvider,
-        JobicyProvider,
-        ArbeitNowProvider,
-    )
+    provider_classes: list[type[BaseJobProvider]] = []
+
+    try:
+        from app.services.jobs.providers.usajobs import USAJOBSProvider
+
+        provider_classes.append(USAJOBSProvider)
+    except Exception as exc:
+        logger.exception("Failed to import USAJOBSProvider", exc_info=exc)
+
+    try:
+        from app.services.jobs.providers.greenhouse import GreenhouseJobBoardProvider
+
+        provider_classes.append(GreenhouseJobBoardProvider)
+    except Exception as exc:
+        logger.exception("Failed to import GreenhouseJobBoardProvider", exc_info=exc)
+
+    try:
+        from app.services.jobs.providers.jsearch import JSearchProvider
+
+        provider_classes.append(JSearchProvider)
+    except Exception as exc:
+        logger.exception("Failed to import JSearchProvider", exc_info=exc)
+
+    try:
+        from app.services.jobs.providers.remotive import RemotiveProvider
+
+        provider_classes.append(RemotiveProvider)
+    except Exception as exc:
+        logger.exception("Failed to import RemotiveProvider", exc_info=exc)
+
+    try:
+        from app.services.jobs.providers.jobicy import JobicyProvider
+
+        provider_classes.append(JobicyProvider)
+    except Exception as exc:
+        logger.exception("Failed to import JobicyProvider", exc_info=exc)
+
+    try:
+        from app.services.jobs.providers.arbeitnow import ArbeitNowProvider
+
+        provider_classes.append(ArbeitNowProvider)
+    except Exception as exc:
+        logger.exception("Failed to import ArbeitNowProvider", exc_info=exc)
 
     for provider_cls in provider_classes:
         try:
             provider = provider_cls.from_env()
+
+            logger.warning(
+                "[provider-init] cls=%s provider=%s",
+                provider_cls.__name__,
+                getattr(provider, "source_name", None),
+            )
         except Exception as exc:
             logger.exception(
                 "Provider initialization failed for provider=%s",
@@ -59,11 +96,6 @@ def get_configured_providers() -> dict[str, BaseJobProvider]:
 
 
 __all__ = [
-    "ArbeitNowProvider",
     "BaseJobProvider",
-    "JSearchProvider",
-    "JobicyProvider",
-    "RemotiveProvider",
-    "USAJOBSProvider",
     "get_configured_providers",
 ]

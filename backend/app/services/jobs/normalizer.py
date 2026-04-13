@@ -18,7 +18,7 @@ from app.services.jobs.parsing import (
     extract_summary,
     split_required_and_preferred_skills,
 )
-from app.services.jobs.providers.common.title_rules import (
+from app.services.jobs.common.title_rules import (
     is_early_career_title,
     is_obviously_senior_title,
 )
