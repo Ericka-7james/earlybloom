@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, UTC
 from types import SimpleNamespace
 
 import pytest
 
-from app.api.routes import resume as resume_routes
+import app.api.routes.resume as resume_routes
 
 
 class FakeResponseModel:
@@ -22,37 +23,65 @@ class FakeRepository:
 
     def __init__(self):
         self.calls = []
+        now = datetime.now(UTC)
+
         self.resume_record = {
-            "resume_id": "resume-123",
+            "id": "resume-123",
             "user_id": "user-123",
+            "original_filename": "resume.pdf",
+            "file_size_bytes": 2048,
+            "file_type": "application/pdf",
+            "upload_source": "manual",
+            "storage_path": "resumes/user-123/resume-123.pdf",
             "parse_status": "uploaded",
             "raw_text": None,
             "parsed_json": None,
+            "ats_tags": [],
             "parse_warnings": [],
             "latest_error": None,
+            "created_at": now,
+            "updated_at": now,
         }
+
         self.logs = [
             {
+                "id": "log-1",
+                "resume_id": "resume-123",
+                "user_id": "user-123",
                 "event_type": "parse_started",
                 "event_status": "info",
                 "message": "Resume parse started.",
                 "metadata": {"file_type": "pdf"},
+                "created_at": now,
             },
             {
+                "id": "log-2",
+                "resume_id": "resume-123",
+                "user_id": "user-123",
                 "event_type": "parse_completed",
                 "event_status": "success",
                 "message": "Resume parsed successfully.",
                 "metadata": {"warning_count": 1},
+                "created_at": now,
             },
         ]
+
         self.updated_record = {
-            "resume_id": "resume-123",
+            "id": "resume-123",
             "user_id": "user-123",
+            "original_filename": "resume.pdf",
+            "file_size_bytes": 2048,
+            "file_type": "application/pdf",
+            "upload_source": "manual",
+            "storage_path": "resumes/user-123/resume-123.pdf",
             "parse_status": "parsed",
             "raw_text": "Updated raw text",
             "parsed_json": {"meta": {"confidence": 0.92}},
+            "ats_tags": ["react", "python"],
             "parse_warnings": ["minor warning"],
             "latest_error": None,
+            "created_at": now,
+            "updated_at": now,
         }
 
     def get_resume_for_user(self, *, resume_id: str, user_id: str):
@@ -101,6 +130,7 @@ class FakeRepository:
         parsed_json: dict,
         parse_warnings: list[str],
         latest_error,
+        ats_tags: list[str],
     ):
         self.calls.append(
             (
@@ -113,6 +143,7 @@ class FakeRepository:
                     "parsed_json": parsed_json,
                     "parse_warnings": parse_warnings,
                     "latest_error": latest_error,
+                    "ats_tags": ats_tags,
                 },
             )
         )
@@ -158,9 +189,10 @@ def test_get_resume_returns_resume_record_response(fake_repo, patch_response_mod
     )
 
     assert isinstance(result, FakeResponseModel)
-    assert result.resume_id == "resume-123"
+    assert result.id == "resume-123"
     assert result.user_id == "user-123"
     assert result.parse_status == "uploaded"
+
     assert fake_repo.calls == [
         ("get_resume_for_user", {"resume_id": "resume-123", "user_id": "user-123"})
     ]
@@ -178,8 +210,10 @@ def test_get_resume_logs_validates_resume_then_returns_log_models(
 
     assert len(result) == 2
     assert all(isinstance(item, FakeResponseModel) for item in result)
+    assert result[0].id == "log-1"
     assert result[0].event_type == "parse_started"
     assert result[0].event_status == "info"
+    assert result[1].id == "log-2"
     assert result[1].event_type == "parse_completed"
     assert result[1].event_status == "success"
 
@@ -199,6 +233,7 @@ def test_parse_resume_creates_logs_updates_record_and_returns_response(
         "meta": {"confidence": 0.92},
     }
     warnings = ["minor warning"]
+    ats_tags = ["react", "python"]
 
     def fake_parse_resume_text(raw_text, *, file_type, extraction_method):
         assert raw_text == "A" * 400
@@ -206,7 +241,12 @@ def test_parse_resume_creates_logs_updates_record_and_returns_response(
         assert extraction_method == "plaintext"
         return parsed_json, warnings
 
+    def fake_extract_ats_tags(data):
+        assert data == parsed_json
+        return ats_tags
+
     monkeypatch.setattr(resume_routes, "parse_resume_text", fake_parse_resume_text)
+    monkeypatch.setattr(resume_routes, "extract_ats_tags", fake_extract_ats_tags)
 
     payload = SimpleNamespace(
         raw_text="A" * 400,
@@ -227,6 +267,7 @@ def test_parse_resume_creates_logs_updates_record_and_returns_response(
     assert result.warnings == warnings
     assert result.parsed_json == parsed_json
     assert result.raw_text_preview == "A" * 280
+    assert result.ats_tags == ats_tags
 
     assert fake_repo.calls[0] == (
         "get_resume_for_user",
@@ -258,6 +299,7 @@ def test_parse_resume_creates_logs_updates_record_and_returns_response(
             "parsed_json": parsed_json,
             "parse_warnings": warnings,
             "latest_error": None,
+            "ats_tags": ats_tags,
         },
     )
 
@@ -272,6 +314,7 @@ def test_parse_resume_creates_logs_updates_record_and_returns_response(
             "metadata": {
                 "warning_count": 1,
                 "confidence": 0.92,
+                "ats_tag_count": 2,
             },
         },
     )
