@@ -91,6 +91,21 @@ function Jobs() {
     selectedRoleTypes,
   ]);
 
+  const isUsingDefaultExperiencePreset = useMemo(() => {
+    return arraysEqualAsSets(
+      selectedExperienceLevels,
+      DEFAULT_SELECTED_EXPERIENCE_LEVELS
+    );
+  }, [selectedExperienceLevels]);
+
+  const hasMeaningfulExperienceFilter =
+    selectedExperienceLevels.length > 0 && !isUsingDefaultExperiencePreset;
+
+  const hasActiveFilters =
+    hasMeaningfulExperienceFilter ||
+    selectedWorkplaces.length > 0 ||
+    selectedRoleTypes.length > 0;
+
   const filtersSummary = useMemo(() => {
     return getFilterSummary({
       selectedExperienceLevels,
@@ -98,18 +113,6 @@ function Jobs() {
       selectedRoleTypes,
     });
   }, [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]);
-
-  const hasActiveFilters =
-    selectedExperienceLevels.length > 0 ||
-    selectedWorkplaces.length > 0 ||
-    selectedRoleTypes.length > 0;
-
-  const isUsingDefaultExperiencePreset = useMemo(() => {
-    return arraysEqualAsSets(
-      selectedExperienceLevels,
-      DEFAULT_SELECTED_EXPERIENCE_LEVELS
-    );
-  }, [selectedExperienceLevels]);
 
   const activeFilterTags = useMemo(() => {
     return getActiveFilterTags({
@@ -175,16 +178,19 @@ function Jobs() {
   }
 
   function clearAllFilters() {
-    setSelectedExperienceLevels([]);
+    setSelectedExperienceLevels(DEFAULT_SELECTED_EXPERIENCE_LEVELS);
     setSelectedWorkplaces([]);
     setSelectedRoleTypes([]);
   }
 
   function removeActiveFilterTag(tag) {
     if (tag.type === "experience") {
-      setSelectedExperienceLevels((currentValues) =>
-        currentValues.filter((value) => value !== tag.value)
-      );
+      setSelectedExperienceLevels((currentValues) => {
+        const nextValues = currentValues.filter((value) => value !== tag.value);
+        return nextValues.length === 0
+          ? DEFAULT_SELECTED_EXPERIENCE_LEVELS
+          : nextValues;
+      });
       return;
     }
 
@@ -248,6 +254,7 @@ function Jobs() {
           <aside
             className="jobs-filters section-card jobs-filters--desktop"
             aria-label="Job filters"
+            tabIndex={-1}
           >
             <JobsFiltersPanel
               hasActiveFilters={hasActiveFilters}
@@ -357,7 +364,7 @@ function Jobs() {
                       className="jobs-chip"
                       onClick={clearAllFilters}
                     >
-                      Clear filters
+                      Reset filters
                     </button>
                   </div>
                 ) : null}
