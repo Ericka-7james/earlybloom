@@ -404,10 +404,20 @@ export async function fetchHiddenJobs(options = {}) {
     return [];
   }
 
-  const payload = await requestJson("/jobs/hidden", {
-    method: "GET",
-    signal,
-  });
+  try {
+    const payload = await requestJson("/jobs/hidden", {
+      method: "GET",
+      signal,
+    });
 
-  return normalizeJobsPayload(payload);
+    return normalizeJobsPayload(payload);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(
+        error.message || "Unable to load hidden jobs right now."
+      );
+    }
+
+    throw new Error("Unable to load hidden jobs right now.");
+  }
 }
