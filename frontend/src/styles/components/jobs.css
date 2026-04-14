@@ -1,3 +1,10 @@
+/**
+ * EarlyBloom jobs styling.
+ *
+ * This file keeps jobs-specific layout, filters, job cards, and modal behavior.
+ * Shared card personality is delegated to the global design system where possible.
+ */
+
 .jobs-page {
   width: 100%;
 }
@@ -7,7 +14,8 @@
 }
 
 .jobs-hero {
-  padding: 1.25rem;
+  display: grid;
+  gap: var(--space-4);
 }
 
 .jobs-hero__content {
@@ -31,6 +39,7 @@
 }
 
 /* Layout */
+
 .jobs-layout {
   display: grid;
   gap: 1rem;
@@ -38,11 +47,12 @@
 }
 
 .jobs-filters {
-  padding: 1rem;
+  display: grid;
+  gap: var(--space-4);
 }
 
 .jobs-filters__header {
-  margin-bottom: 1rem;
+  margin-bottom: 0;
 }
 
 .jobs-filters__title,
@@ -236,11 +246,9 @@
 }
 
 /* Active filter summary */
+
 .jobs-active-filters {
   padding: 1rem 1.05rem;
-  border: 1px solid rgba(124, 92, 255, 0.14);
-  border-radius: 1.2rem;
-  background: rgba(255, 255, 255, 0.78);
 }
 
 .jobs-active-filters--empty {
@@ -298,46 +306,13 @@
 }
 
 /* Mobile filter trigger */
+
 .jobs-mobile-filters {
   display: block;
 }
 
 .jobs-mobile-filters__trigger {
   width: 100%;
-  border: 1px solid var(--color-border);
-  background: rgba(255, 255, 255, 0.72);
-  border-radius: 999px;
-  padding: 0.9rem 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    transform 180ms ease,
-    box-shadow 180ms ease,
-    border-color 180ms ease,
-    background-color 180ms ease;
-}
-
-.jobs-mobile-filters__trigger:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-soft);
-}
-
-.jobs-mobile-filters__label {
-  color: var(--color-heading);
-  font-size: 0.95rem;
-  font-weight: 800;
-  line-height: 1.2;
-}
-
-.jobs-mobile-filters__summary {
-  color: var(--color-text-soft);
-  font-size: 0.88rem;
-  line-height: 1.4;
-  text-align: right;
 }
 
 .jobs-filters--desktop {
@@ -351,6 +326,7 @@
 }
 
 /* Results */
+
 .jobs-results {
   display: grid;
   gap: 1rem;
@@ -364,23 +340,13 @@
   gap: 1rem;
 }
 
-.jobs-results__title {
-  margin: 0;
-  color: var(--color-heading);
-}
-
-.jobs-results__text {
-  margin: 0.4rem 0 0;
-  color: var(--color-text-soft);
-  line-height: 1.6;
-}
-
 .jobs-list {
   display: grid;
   gap: 0.9rem;
 }
 
 /* Job cards */
+
 .job-card {
   position: relative;
   padding: 0;
@@ -595,7 +561,40 @@
   text-decoration: none;
 }
 
+.job-card__quick-take {
+  margin: 0;
+  color: var(--color-heading);
+  font-size: 0.94rem;
+  line-height: 1.5;
+  font-weight: 700;
+}
+
+.job-card__preview-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.job-card__preview-item {
+  padding: 0.72rem 0.8rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  line-height: 1.45;
+  font-size: 0.92rem;
+}
+
+.job-card__preview-item--warning {
+  background: rgba(255, 240, 168, 0.16);
+  border-color: rgba(138, 90, 18, 0.14);
+  color: #7a4b13;
+}
+
 /* Hide old card preview content */
+
 .job-card__preview-block,
 .job-card__preview-label,
 .job-card__preview-text,
@@ -624,6 +623,7 @@
 }
 
 /* Common modal */
+
 .common-modal {
   position: fixed;
   inset: 0;
@@ -718,7 +718,8 @@
   color: var(--color-text);
 }
 
-/* Existing shared modal styles */
+/* Reasons and details modal content */
+
 .jobs-reasons-modal {
   display: flex;
   flex-direction: column;
@@ -839,7 +840,8 @@
   margin-top: 1rem;
 }
 
-/* New quick-scan job modal */
+/* Job detail modal */
+
 .job-details-modal {
   display: grid;
   gap: 1rem;
@@ -1094,11 +1096,7 @@
   justify-content: center;
 }
 
-.eyebrow-pill {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-}
+/* Resume upload */
 
 .resume-upload-modal {
   display: grid;
@@ -1107,13 +1105,13 @@
 
 .resume-upload-modal__text {
   margin: 0;
-  color: var(--muted-text-color, #58627a);
+  color: var(--color-text-soft);
 }
 
 .resume-upload-dropzone {
   width: 100%;
   min-height: 180px;
-  border: 2px dashed var(--border-color, #d7dce5);
+  border: 2px dashed var(--color-border);
   border-radius: 1rem;
   background: #fafbff;
   padding: 1.5rem;
@@ -1129,7 +1127,7 @@
 }
 
 .resume-upload-dropzone:hover {
-  border-color: var(--brand-color, #7c5cff);
+  border-color: var(--color-primary);
   background: #f7f5ff;
   transform: translateY(-1px);
 }
@@ -1141,7 +1139,7 @@
 
 .resume-upload-dropzone__hint {
   font-size: 0.95rem;
-  color: var(--muted-text-color, #58627a);
+  color: var(--color-text-soft);
 }
 
 .resume-upload-modal__input {
@@ -1161,6 +1159,7 @@
 }
 
 /* Hero upload box */
+
 .jobs-hero--with-upload {
   display: flex;
   flex-direction: column;
@@ -1213,38 +1212,6 @@
   line-height: 1.3;
 }
 
-.job-card__quick-take {
-  margin: 0;
-  color: var(--color-heading);
-  font-size: 0.94rem;
-  line-height: 1.5;
-  font-weight: 700;
-}
-
-.job-card__preview-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: grid;
-  gap: 0.5rem;
-}
-
-.job-card__preview-item {
-  padding: 0.72rem 0.8rem;
-  border-radius: 0.9rem;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid var(--color-border);
-  color: var(--color-text);
-  line-height: 1.45;
-  font-size: 0.92rem;
-}
-
-.job-card__preview-item--warning {
-  background: rgba(255, 240, 168, 0.16);
-  border-color: rgba(138, 90, 18, 0.14);
-  color: #7a4b13;
-}
-
 .jobs-hero__upload-subtext {
   margin: 0;
   color: var(--color-text-soft);
@@ -1252,6 +1219,8 @@
   line-height: 1.5;
   word-break: break-word;
 }
+
+/* Pagination */
 
 .jobs-pagination {
   padding: 0.85rem 1rem;
@@ -1300,6 +1269,7 @@
 }
 
 /* Responsive */
+
 @media (min-width: 640px) {
   .job-card__title {
     font-size: 1.08rem;

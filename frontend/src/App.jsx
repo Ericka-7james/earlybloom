@@ -13,7 +13,7 @@ import SignUp from "./pages/SignUp";
  * This component is responsible for:
  * - configuring client-side routing
  * - rendering the shared navigation bar
- * - providing a consistent page container for all screens
+ * - providing a consistent product-page shell
  *
  * Routes currently included:
  * - Home
@@ -23,6 +23,9 @@ import SignUp from "./pages/SignUp";
  * - Sign In
  * - Sign Up
  *
+ * Future-ready:
+ * - shell supports adding /profile later without restructuring
+ *
  * @returns {JSX.Element} The full application router and shell.
  */
 function App() {
@@ -31,15 +34,17 @@ function App() {
       <div className="app-shell">
         <Navbar />
 
-        <main className="page-shell">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/jobs" element={<Jobs />} />
-            <Route path="/tracker" element={<Tracker />} />
-            <Route path="/learn-more" element={<LearnMore />} />
-            <Route path="/sign-in" element={<SignIn />} />
-            <Route path="/sign-up" element={<SignUp />} />
-          </Routes>
+        <main className="page-shell app-page-shell">
+          <div className="app-page-frame">
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/jobs" element={<Jobs />} />
+              <Route path="/tracker" element={<Tracker />} />
+              <Route path="/learn-more" element={<LearnMore />} />
+              <Route path="/sign-in" element={<SignIn />} />
+              <Route path="/sign-up" element={<SignUp />} />
+            </Routes>
+          </div>
         </main>
       </div>
     </BrowserRouter>

@@ -1,32 +1,32 @@
 /**
  * EarlyBloom auth styling.
  *
- * Mobile-first, clean layout, mascot as a subtle accent.
- * This file extends the global design system from index.css.
+ * Extends shared primitives from index.css.
+ * This file keeps auth-specific layout, form structure, and small visual polish.
  */
 
 .auth-page {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-6);
+  width: 100%;
 }
 
 .auth-stage {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-6);
   align-items: start;
 }
 
 .auth-side,
 .auth-form-card {
-  border-radius: var(--radius-xl);
+  min-width: 0;
 }
 
-/* ---------------- LEFT PANEL ---------------- */
+/* Left panel */
 
 .auth-side {
   position: relative;
   overflow: hidden;
-  padding: 1.1rem;
 }
 
 .auth-side::before {
@@ -34,13 +34,15 @@
   position: absolute;
   inset: 0;
   background: var(--gradient-brand);
-  opacity: 0.24;
+  opacity: 0.22;
   pointer-events: none;
 }
 
 .auth-side__inner {
   position: relative;
   z-index: 1;
+  display: grid;
+  gap: var(--space-5);
 }
 
 .auth-side__title {
@@ -54,7 +56,7 @@
 }
 
 .auth-side__copy {
-  margin: 1rem 0 0;
+  margin: 0;
   max-width: 58ch;
   color: var(--color-text-soft);
   font-size: 1rem;
@@ -65,21 +67,20 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.65rem;
-  margin-top: 1rem;
 }
 
-/* ---------------- RIGHT FORM CARD ---------------- */
+/* Right form card */
 
 .auth-form-card {
-  padding: 1.1rem;
+  display: grid;
+  gap: var(--space-6);
 }
 
 .auth-form-card__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  gap: var(--space-4);
 }
 
 .auth-form-card__header-copy {
@@ -112,9 +113,10 @@
   margin: 0.45rem 0 0;
   color: var(--color-text-soft);
   line-height: 1.65;
+  max-width: 38ch;
 }
 
-/* ---------------- FORM ---------------- */
+/* Form */
 
 .auth-form {
   display: grid;
@@ -181,22 +183,7 @@
 }
 
 .auth-form__message {
-  border-radius: var(--radius-md);
-  padding: 0.85rem;
-  font-size: 0.94rem;
-  line-height: 1.5;
-}
-
-.auth-form__message--error {
-  background: rgba(255, 142, 182, 0.12);
-  border: 1px solid rgba(255, 142, 182, 0.35);
-  color: var(--color-heading);
-}
-
-.auth-form__message--success {
-  background: rgba(117, 197, 111, 0.14);
-  border: 1px solid rgba(117, 197, 111, 0.35);
-  color: var(--color-heading);
+  margin: 0;
 }
 
 .auth-form__requirements {
@@ -214,10 +201,10 @@
   width: 100%;
 }
 
-/* ---------------- FOOTER ---------------- */
+/* Footer */
 
 .auth-form-card__footer {
-  margin-top: 1rem;
+  margin-top: 0.5rem;
   color: var(--color-text-soft);
   line-height: 1.6;
 }
@@ -231,19 +218,7 @@
   text-decoration: underline;
 }
 
-/* ---------------- SHARED AUTH PAGE POLISH ---------------- */
-
-.auth-page--signin .auth-side__title,
-.auth-page--signup .auth-side__title {
-  text-wrap: balance;
-}
-
-.auth-page--signin .auth-form-card__text,
-.auth-page--signup .auth-form-card__text {
-  max-width: 38ch;
-}
-
-/* ---------------- SIGN-IN PAGE ---------------- */
+/* Page-specific polish */
 
 .auth-page--signin .auth-side__title {
   max-width: 12ch;
@@ -253,15 +228,14 @@
   transform: scale(0.96);
 }
 
-/* ---------------- MOBILE FIXES ---------------- */
+.auth-page--signin .auth-side__title,
+.auth-page--signup .auth-side__title {
+  text-wrap: balance;
+}
+
+/* Mobile */
 
 @media (max-width: 480px) {
-  .auth-side,
-  .auth-form-card {
-    padding: 1rem;
-    border-radius: var(--radius-lg);
-  }
-
   .auth-form-card__header {
     align-items: center;
     gap: 0.7rem;
@@ -282,21 +256,21 @@
   }
 }
 
-/* ---------------- TABLET ---------------- */
+/* Tablet */
 
 @media (min-width: 640px) {
   .auth-form__grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-/* ---------------- DESKTOP (FIXED HEIGHT ALIGNMENT) ---------------- */
+/* Desktop */
 
 @media (min-width: 860px) {
   .auth-stage {
     grid-template-columns: minmax(0, 1.02fr) minmax(22rem, 0.98fr);
     gap: 1.25rem;
-    align-items: stretch; /* key fix */
+    align-items: stretch;
   }
 
   .auth-side,
@@ -314,7 +288,7 @@
   }
 
   .auth-form-card__footer {
-    margin-top: auto; /* pushes footer down */
+    margin-top: auto;
   }
 
   .auth-form-card__icon {
