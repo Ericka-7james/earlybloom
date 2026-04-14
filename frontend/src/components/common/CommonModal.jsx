@@ -1,10 +1,12 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useId } from "react";
+import "../../styles/common/common-modal.css";
 
 /**
  * Renders a reusable modal dialog with an overlay.
  *
- * This component is intentionally presentation-focused and can be reused for
- * multiple modal use cases across EarlyBloom.
+ * This component is intentionally presentation-focused and reusable across
+ * product surfaces such as tracker preferences, resume upload, profile editing,
+ * and job details.
  *
  * @param {{
  *   isOpen: boolean,
@@ -26,6 +28,8 @@ function CommonModal({
   iconImage = null,
   iconAlt = "",
 }) {
+  const titleId = useId();
+
   useEffect(() => {
     if (!isOpen) {
       return undefined;
@@ -62,7 +66,7 @@ function CommonModal({
       className="common-modal"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="common-modal-title"
+      aria-labelledby={titleId}
     >
       <button
         type="button"
@@ -82,7 +86,7 @@ function CommonModal({
               />
             ) : null}
 
-            <h2 id="common-modal-title" className="common-modal__title">
+            <h2 id={titleId} className="common-modal__title">
               {title}
             </h2>
           </div>

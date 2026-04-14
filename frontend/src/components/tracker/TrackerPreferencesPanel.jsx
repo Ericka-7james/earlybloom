@@ -11,9 +11,14 @@ const LOCATION_OPTIONS = [
   { value: "united states", label: "United States" },
 ];
 
-function renderPreferenceChips(options, selectedValues, onToggle) {
+function renderPreferenceChips(
+  options,
+  selectedValues,
+  onToggle,
+  listClassName = ""
+) {
   return (
-    <div className="tracker-chip-list">
+    <div className={`tracker-chip-list ${listClassName}`.trim()}>
       {options.map((option) => {
         const isSelected = selectedValues.includes(option.value);
 
@@ -21,13 +26,13 @@ function renderPreferenceChips(options, selectedValues, onToggle) {
           <button
             key={option.value}
             type="button"
-            className={`tracker-chip ${
+            className={`chip-button tracker-chip ${
               isSelected ? "tracker-chip--active" : ""
             }`}
             aria-pressed={isSelected}
             onClick={() => onToggle(option.value)}
           >
-            <span className="tracker-chip__label">{option.label}</span>
+            <span>{option.label}</span>
             {isSelected ? (
               <span className="tracker-chip__check" aria-hidden="true">
                 ✓
@@ -45,11 +50,12 @@ function PreferenceSection({
   selectedCount,
   isOpen,
   onToggleOpen,
+  sectionKey,
   children,
 }) {
   return (
     <section
-      className={`tracker-filter-group ${
+      className={`tracker-filter-group tracker-filter-group--${sectionKey} ${
         isOpen ? "tracker-filter-group--open" : ""
       }`}
     >
@@ -69,10 +75,7 @@ function PreferenceSection({
               </span>
             ) : null}
 
-            <span
-              className="tracker-filter-group__chevron"
-              aria-hidden="true"
-            >
+            <span className="tracker-filter-group__chevron" aria-hidden="true">
               {isOpen ? "−" : "+"}
             </span>
           </div>
@@ -95,8 +98,8 @@ function TrackerPreferencesPanel({
 }) {
   const [openSections, setOpenSections] = useState({
     levels: true,
-    workplace: true,
-    roleType: true,
+    workplace: false,
+    roleType: false,
     location: false,
   });
 
@@ -125,18 +128,18 @@ function TrackerPreferencesPanel({
   }
 
   return (
-    <div className="tracker-preferences-panel">
+    <div className="app-panel-card tracker-preferences-panel">
       <div className="tracker-preferences-panel__header">
         <div className="tracker-preferences-panel__title-row">
           <div>
-            <p className="tracker-stat__label">Preferences</p>
-            <h2 className="tracker-empty__title">Your default search setup</h2>
+            <p className="section-label">Preferences</p>
+            <h2 className="card-title">Your default search setup</h2>
           </div>
 
           <div className="tracker-preferences-panel__actions">
             <button
               type="button"
-              className="tracker-chip tracker-chip--muted"
+              className="chip-button tracker-chip tracker-chip--muted"
               onClick={onResetPreferences}
             >
               Reset
@@ -144,13 +147,13 @@ function TrackerPreferencesPanel({
           </div>
         </div>
 
-        <p className="tracker-empty__text">
+        <p className="card-copy">
           These set your steady default search shape. Jobs page filters can still
           drift around freely without rewriting this setup.
         </p>
 
         {totalSelectedCount > 0 ? (
-          <p className="tracker-preferences-panel__summary">
+          <p className="card-meta">
             {totalSelectedCount} preference
             {totalSelectedCount === 1 ? "" : "s"} selected
           </p>
@@ -158,6 +161,7 @@ function TrackerPreferencesPanel({
       </div>
 
       <PreferenceSection
+        sectionKey="levels"
         title="Experience level"
         selectedCount={preferencesDraft.desired_levels?.length || 0}
         isOpen={openSections.levels}
@@ -171,6 +175,7 @@ function TrackerPreferencesPanel({
       </PreferenceSection>
 
       <PreferenceSection
+        sectionKey="workplace"
         title="Workplace"
         selectedCount={preferencesDraft.preferred_workplace_types?.length || 0}
         isOpen={openSections.workplace}
@@ -184,6 +189,7 @@ function TrackerPreferencesPanel({
       </PreferenceSection>
 
       <PreferenceSection
+        sectionKey="role-type"
         title="Role type"
         selectedCount={preferencesDraft.preferred_role_types?.length || 0}
         isOpen={openSections.roleType}
@@ -192,11 +198,13 @@ function TrackerPreferencesPanel({
         {renderPreferenceChips(
           FILTER_GROUPS.roleType,
           preferencesDraft.preferred_role_types || [],
-          (value) => togglePreferenceValue("preferred_role_types", value)
+          (value) => togglePreferenceValue("preferred_role_types", value),
+          "tracker-chip-list--scrollable"
         )}
       </PreferenceSection>
 
       <PreferenceSection
+        sectionKey="location"
         title="Location"
         selectedCount={preferencesDraft.preferred_locations?.length || 0}
         isOpen={openSections.location}
@@ -212,7 +220,7 @@ function TrackerPreferencesPanel({
       <div className="tracker-preferences-panel__toggle-row">
         <button
           type="button"
-          className={`tracker-chip tracker-chip--toggle ${
+          className={`chip-button tracker-chip tracker-chip--toggle ${
             preferencesDraft.is_lgbt_friendly_only
               ? "tracker-chip--active"
               : ""
@@ -225,7 +233,7 @@ function TrackerPreferencesPanel({
             }))
           }
         >
-          <span className="tracker-chip__label">LGBTQ-friendly only</span>
+          <span>LGBTQ-friendly only</span>
           {preferencesDraft.is_lgbt_friendly_only ? (
             <span className="tracker-chip__check" aria-hidden="true">
               ✓

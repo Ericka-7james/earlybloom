@@ -73,13 +73,10 @@ function JobCard({
   const company = job.company || "Unknown company";
   const fitTag = getSafeFitTag(job.fitTag);
   const matchScore = getSafeMatchScore(job.matchScore);
-
   const metaItems = Array.isArray(job.cardMeta) ? job.cardMeta : [];
   const quickTake = getQuickTake(job);
   const applyUrl = job.url || job.sourceUrl || null;
-
-  const resolvedHideLabel =
-    hideLabel || (job.isHidden ? "Hidden" : "Hide");
+  const resolvedHideLabel = hideLabel || (job.isHidden ? "Restore job" : "Hide job");
 
   function handleOpen() {
     if (typeof onOpenDetails === "function") {
@@ -161,31 +158,33 @@ function JobCard({
         onClick={handleOpen}
         aria-label={`Open details for ${title} at ${company}`}
       >
-        <div className="job-card__heading">
-          <h3 id={`job-card-title-${id}`} className="job-card__title">
-            {title}
-          </h3>
+        <div className="job-card__content">
+          <div className="job-card__heading">
+            <h3 id={`job-card-title-${id}`} className="job-card__title">
+              {title}
+            </h3>
 
-          <p className="job-card__company">{company}</p>
-        </div>
-
-        <p className="job-card__quick-take">{quickTake}</p>
-
-        {metaItems.length > 0 ? (
-          <div className="job-card__compact-meta" aria-label="Job metadata">
-            {metaItems.map((item, index) => (
-              <span key={`${id}-meta-${index}`} className="job-card__tag">
-                {item}
-              </span>
-            ))}
+            <p className="job-card__company">{company}</p>
           </div>
-        ) : null}
+
+          <p className="job-card__quick-take">{quickTake}</p>
+
+          {metaItems.length > 0 ? (
+            <div className="job-card__compact-meta" aria-label="Job metadata">
+              {metaItems.map((item, index) => (
+                <span key={`${id}-meta-${index}`} className="job-card__tag">
+                  {item}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </button>
 
       <div className="job-card__footer-row">
         <button
           type="button"
-          className="jobs-chip job-card__details-button"
+          className="jobs-chip jobs-chip--muted job-card__details-button"
           onClick={handleOpen}
         >
           Quick view

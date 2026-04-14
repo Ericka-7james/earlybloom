@@ -213,7 +213,6 @@ function Tracker() {
       setPreferencesDraft(nextPreferences);
       setResolvedUserProfile(nextResolvedProfile);
       setError(loadErrors.join(" "));
-
       setIsLoading(false);
     }
 
@@ -567,7 +566,7 @@ function Tracker() {
                   Sign in
                 </button>
 
-                <Link to="/jobs" className="jobs-chip">
+                <Link to="/jobs" className="button button--secondary">
                   Keep browsing
                 </Link>
               </div>
@@ -582,20 +581,9 @@ function Tracker() {
     <main className="tracker-page">
       <section className="section-pad">
         <div className="container tracker-stack">
-          <div className="tracker-hero section-card">
-            <span className="eyebrow-pill">Your Job Tracker</span>
-            <h1 className="tracker-hero__title">
-              Your realistic search home base
-            </h1>
-            <p className="tracker-hero__text">
-              Keep long-term preferences here, check what your resume is
-              signaling, and revisit saved leads without losing the thread.
-            </p>
-          </div>
-
           <div className="tracker-main-layout">
             {!isMobile ? (
-              <aside className="tracker-sidebar section-card">
+              <aside className="tracker-sidebar">
                 <TrackerPreferencesPanel
                   preferencesDraft={preferencesDraft}
                   setPreferencesDraft={setPreferencesDraft}
@@ -608,21 +596,21 @@ function Tracker() {
 
             <div className="tracker-content">
               <div className="tracker-stats">
-                <article className="tracker-stat section-card">
+                <article className="tracker-stat tracker-stat--saved section-card">
                   <span className="tracker-stat__label">Saved</span>
                   <strong className="tracker-stat__value">
                     {trackerData?.stats?.saved_jobs_count ?? savedJobs.length}
                   </strong>
                 </article>
 
-                <article className="tracker-stat section-card">
+                <article className="tracker-stat tracker-stat--hidden section-card">
                   <span className="tracker-stat__label">Hidden</span>
                   <strong className="tracker-stat__value">
                     {trackerData?.stats?.hidden_jobs_count ?? hiddenJobs.length}
                   </strong>
                 </article>
 
-                <article className="tracker-stat section-card">
+                <article className="tracker-stat tracker-stat--resume section-card">
                   <span className="tracker-stat__label">Resume status</span>
                   <strong className="tracker-stat__value">
                     {latestResume?.parse_status
@@ -649,7 +637,7 @@ function Tracker() {
                 </div>
               ) : null}
 
-              <section className="section-card">
+              <section className="section-card tracker-resume-card">
                 <div className="tracker-section-head">
                   <div>
                     <p className="tracker-stat__label">Latest resume</p>
@@ -660,7 +648,7 @@ function Tracker() {
 
                   <button
                     type="button"
-                    className="jobs-chip"
+                    className="button button--secondary tracker-resume-card__button"
                     onClick={() => setIsResumeModalOpen(true)}
                   >
                     {latestResume ? "Replace resume" : "Upload resume"}
@@ -676,7 +664,7 @@ function Tracker() {
                 </p>
               </section>
 
-              <section className="section-card">
+              <section className="section-card tracker-signals-card">
                 <div className="tracker-section-head">
                   <div>
                     <p className="tracker-stat__label">Resume signals</p>
