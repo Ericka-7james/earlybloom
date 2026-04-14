@@ -39,6 +39,38 @@ function stopCardEvent(event) {
   event.stopPropagation();
 }
 
+function getQuickTake(job) {
+  if (job?.qualificationSignal?.text) {
+    return job.qualificationSignal.text;
+  }
+
+  if (job.fitTag === "Real Junior") {
+    return "Looks realistically junior-friendly.";
+  }
+
+  if (job.fitTag === "Stretch Role") {
+    return "Possible fit, but double-check requirements.";
+  }
+
+  if (job.fitTag === "Misleading Junior") {
+    return "Labeled junior, but parts may lean more experienced.";
+  }
+
+  return "This may be more experienced than it first appears.";
+}
+
+function getPreviewPoints(job) {
+  const reasons = Array.isArray(job.reasons) ? job.reasons : [];
+  const warnings = Array.isArray(job.warningFlags) ? job.warningFlags : [];
+
+  const combined = [
+    ...reasons.slice(0, 2).map((text) => ({ tone: "positive", text })),
+    ...warnings.slice(0, 1).map((text) => ({ tone: "warning", text })),
+  ];
+
+  return combined.slice(0, 3);
+}
+
 function JobCard({
   job,
   onOpenDetails,
@@ -56,7 +88,9 @@ function JobCard({
   const hasWarningFlags =
     Array.isArray(job.warningFlags) && job.warningFlags.length > 0;
 
-  const metaItems = Array.isArray(job.metadata) ? job.metadata.slice(0, 6) : [];
+  const metaItems = Array.isArray(job.metadata) ? job.metadata.slice(0, 4) : [];
+  const previewPoints = getPreviewPoints(job);
+  const quickTake = getQuickTake(job);
   const applyUrl = job.url || job.sourceUrl || null;
   const resolvedHideLabel =
     hideLabel || (job.isHidden ? "Hidden" : "Hide");
@@ -153,6 +187,8 @@ function JobCard({
           <p className="job-card__company">{company}</p>
         </div>
 
+        <p className="job-card__quick-take">{quickTake}</p>
+
         {metaItems.length > 0 ? (
           <div className="job-card__compact-meta" aria-label="Job metadata">
             {metaItems.map((item, index) => (
@@ -162,6 +198,23 @@ function JobCard({
             ))}
           </div>
         ) : null}
+
+        {previewPoints.length > 0 ? (
+          <ul className="job-card__preview-list" aria-label="Quick highlights">
+            {previewPoints.map((point, index) => (
+              <li
+                key={`${id}-preview-${index}`}
+                className={`job-card__preview-item ${
+                  point.tone === "warning"
+                    ? "job-card__preview-item--warning"
+                    : ""
+                }`}
+              >
+                {point.text}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </button>
 
       <div className="job-card__footer-row">
@@ -170,7 +223,7 @@ function JobCard({
           className="jobs-chip job-card__details-button"
           onClick={handleOpen}
         >
-          View details
+          Quick view
         </button>
 
         {applyUrl ? (

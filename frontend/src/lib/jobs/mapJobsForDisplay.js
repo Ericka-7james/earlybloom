@@ -304,6 +304,76 @@ function normalizeViewerState(rawJob, overrideState) {
   };
 }
 
+function toSentenceCase(value) {
+  const cleaned = cleanText(value);
+  if (!cleaned) {
+    return null;
+  }
+
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+function createQualificationSignal(job) {
+  const fitTag = cleanText(job.fitTag).toLowerCase();
+  const score = Number(job.matchScore ?? 0);
+
+  if (fitTag === "real junior" && score >= 70) {
+    return {
+      tone: "strong",
+      label: "Strong fit",
+      text: "This looks realistically junior-friendly and worth a closer look.",
+    };
+  }
+
+  if (fitTag === "stretch role" || score >= 55) {
+    return {
+      tone: "medium",
+      label: "Possible fit",
+      text: "You may qualify, but review the requirements before spending time applying.",
+    };
+  }
+
+  if (fitTag === "misleading junior") {
+    return {
+      tone: "warning",
+      label: "Proceed carefully",
+      text: "This may be labeled junior, but parts of the listing suggest otherwise.",
+    };
+  }
+
+  return {
+    tone: "warning",
+    label: "Probably not ideal",
+    text: "This role may lean more experienced than it first appears.",
+  };
+}
+
+function createQuickFacts({
+  experienceLevel,
+  workplaceType,
+  employmentType,
+  compensation,
+  sourceLabel,
+}) {
+  return [
+    { label: "Level", value: experienceLevel || "Not listed" },
+    { label: "Workplace", value: workplaceType || "Not listed" },
+    { label: "Type", value: employmentType || "Not listed" },
+    { label: "Pay", value: compensation || "Not listed" },
+    { label: "Source", value: sourceLabel || "Not listed" },
+  ];
+}
+
+function createRequirementsSnapshot(job) {
+  const reasons = Array.isArray(job.reasons) ? job.reasons : [];
+  return reasons.slice(0, 4);
+}
+
+function createBlockersSnapshot(job) {
+  const warnings = Array.isArray(job.warningFlags) ? job.warningFlags : [];
+  return warnings.slice(0, 4);
+}
+
 export function mapJobsForDisplay(
   rawJobs = [],
   scoredJobs = [],
@@ -315,8 +385,10 @@ export function mapJobsForDisplay(
   return rawJobs.map((job) => {
     const scored = scoredMap.get(job.id);
     const compensation = buildCompensation(job);
+    const formattedCompensation = formatCompensation(compensation);
     const sourceUrl = resolveSourceUrl(job);
     const source = job.source ?? job.source_name ?? null;
+    const sourceLabel = formatSourceLabel(source);
     const fullLocation = resolveLocation(job);
     const modalLocation = formatModalLocation(fullLocation, source);
     const workplaceType = formatWorkplaceType(resolveWorkplaceType(job));
@@ -327,7 +399,7 @@ export function mapJobsForDisplay(
       viewerStateOverrides?.[job.id] ?? null
     );
 
-    return {
+    const mappedJob = {
       id: job.id,
       title: job.title ?? "Untitled role",
       company: resolveCompany(job),
@@ -349,10 +421,10 @@ export function mapJobsForDisplay(
       warningFlags: resolveWarnings(job, scored),
       scoreBreakdown: normalizeScoreBreakdown(scored?.scoreBreakdown),
       confidence: scored?.confidence ?? null,
-      compensation: formatCompensation(compensation),
+      compensation: formattedCompensation,
       postedAt: resolvePostedAt(job),
       source,
-      sourceLabel: formatSourceLabel(source),
+      sourceLabel,
       sourceUrl,
       url: sourceUrl,
       isSaved: viewerState.isSaved,
@@ -364,9 +436,24 @@ export function mapJobsForDisplay(
         experienceLevel,
         workplaceType,
         employmentType,
-        formatCompensation(compensation),
-        formatSourceLabel(source),
+        formattedCompensation,
+        sourceLabel,
       ].filter((value) => typeof value === "string" && value.trim().length > 0),
+    };
+
+    return {
+      ...mappedJob,
+      qualificationSignal: createQualificationSignal(mappedJob),
+      quickFacts: createQuickFacts({
+        experienceLevel,
+        workplaceType,
+        employmentType,
+        compensation: formattedCompensation,
+        sourceLabel,
+      }),
+      requirementsSnapshot: createRequirementsSnapshot(mappedJob),
+      blockersSnapshot: createBlockersSnapshot(mappedJob),
+      fitSummary: toSentenceCase(resolveFitTag(scored)),
     };
   });
 }

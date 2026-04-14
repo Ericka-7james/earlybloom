@@ -12,24 +12,39 @@ async function request(path, options = {}) {
     throw new Error("Missing VITE_API_BASE_URL.");
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(options.headers || {}),
+      },
+      ...options,
+    });
+  } catch {
+    throw new Error(
+      "Unable to reach the server. Check that the backend is running and try again.",
+    );
+  }
 
   if (!response.ok) {
-    let message = "Request failed.";
+    let message = `Request failed with status ${response.status}.`;
 
     try {
       const payload = await response.json();
       message = payload?.detail || payload?.message || message;
     } catch {
-      // Keep fallback message.
+      try {
+        const text = await response.text();
+        if (text?.trim()) {
+          message = text;
+        }
+      } catch {
+        // Keep fallback message.
+      }
     }
 
     const error = new Error(message);
@@ -38,6 +53,11 @@ async function request(path, options = {}) {
   }
 
   if (response.status === 204) {
+    return null;
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
     return null;
   }
 
