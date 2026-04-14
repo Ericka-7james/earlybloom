@@ -59,18 +59,6 @@ function getQuickTake(job) {
   return "This may be more experienced than it first appears.";
 }
 
-function getPreviewPoints(job) {
-  const reasons = Array.isArray(job.reasons) ? job.reasons : [];
-  const warnings = Array.isArray(job.warningFlags) ? job.warningFlags : [];
-
-  const combined = [
-    ...reasons.slice(0, 2).map((text) => ({ tone: "positive", text })),
-    ...warnings.slice(0, 1).map((text) => ({ tone: "warning", text })),
-  ];
-
-  return combined.slice(0, 3);
-}
-
 function JobCard({
   job,
   onOpenDetails,
@@ -85,13 +73,11 @@ function JobCard({
   const company = job.company || "Unknown company";
   const fitTag = getSafeFitTag(job.fitTag);
   const matchScore = getSafeMatchScore(job.matchScore);
-  const hasWarningFlags =
-    Array.isArray(job.warningFlags) && job.warningFlags.length > 0;
 
-  const metaItems = Array.isArray(job.metadata) ? job.metadata.slice(0, 4) : [];
-  const previewPoints = getPreviewPoints(job);
+  const metaItems = Array.isArray(job.cardMeta) ? job.cardMeta : [];
   const quickTake = getQuickTake(job);
   const applyUrl = job.url || job.sourceUrl || null;
+
   const resolvedHideLabel =
     hideLabel || (job.isHidden ? "Hidden" : "Hide");
 
@@ -134,10 +120,6 @@ function JobCard({
           >
             {matchScore}% match
           </span>
-
-          {hasWarningFlags ? (
-            <span className="job-card__watchout-chip">Watchouts</span>
-          ) : null}
 
           {job.isSaved ? (
             <span className="job-card__saved-chip">Saved</span>
@@ -197,23 +179,6 @@ function JobCard({
               </span>
             ))}
           </div>
-        ) : null}
-
-        {previewPoints.length > 0 ? (
-          <ul className="job-card__preview-list" aria-label="Quick highlights">
-            {previewPoints.map((point, index) => (
-              <li
-                key={`${id}-preview-${index}`}
-                className={`job-card__preview-item ${
-                  point.tone === "warning"
-                    ? "job-card__preview-item--warning"
-                    : ""
-                }`}
-              >
-                {point.text}
-              </li>
-            ))}
-          </ul>
         ) : null}
       </button>
 

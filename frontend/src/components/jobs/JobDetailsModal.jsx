@@ -25,58 +25,38 @@ function renderParagraphs(text) {
     .filter(Boolean);
 }
 
-function DescriptionSection({ jobId, descriptionParagraphs }) {
-  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
-
-  const previewDescription = descriptionParagraphs.slice(0, 2);
-  const hasMoreDescription = descriptionParagraphs.length > 2;
-
-  if (descriptionParagraphs.length === 0) {
-    return null;
-  }
-
-  return (
-    <section className="job-details-modal__section">
-      <div className="job-details-modal__section-heading">
-        <h4 className="job-details-modal__section-title">Full description</h4>
-        <p className="job-details-modal__section-subtext">
-          Expand only if the quick read still looks promising.
-        </p>
-      </div>
-
-      <div className="job-details-modal__text-card">
-        {(isDescriptionExpanded
-          ? descriptionParagraphs
-          : previewDescription
-        ).map((paragraph, index) => (
-          <p
-            key={`${jobId}-description-${index}`}
-            className="jobs-results__text"
-          >
-            {paragraph}
-          </p>
-        ))}
-
-        {hasMoreDescription ? (
-          <button
-            type="button"
-            className="job-details-modal__expand-button"
-            onClick={() => setIsDescriptionExpanded((currentValue) => !currentValue)}
-          >
-            {isDescriptionExpanded ? "Show less" : "Read full listing details"}
-          </button>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
 function JobDetailsModal({ job, isOpen, onClose }) {
+  const [copyState, setCopyState] = useState("idle");
+
   const summaryParagraphs = useMemo(() => renderParagraphs(job?.summary), [job]);
-  const descriptionParagraphs = useMemo(
-    () => renderParagraphs(job?.description),
-    [job]
-  );
+
+  async function handleCopySearchText() {
+    const fallbackSearchText = [job?.title, job?.company]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
+    const textToCopy = job?.searchQuery || fallbackSearchText;
+
+    if (!textToCopy) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setCopyState("copied");
+
+      window.setTimeout(() => {
+        setCopyState("idle");
+      }, 1800);
+    } catch {
+      setCopyState("error");
+
+      window.setTimeout(() => {
+        setCopyState("idle");
+      }, 1800);
+    }
+  }
 
   if (!job) {
     return (
@@ -218,7 +198,7 @@ function JobDetailsModal({ job, isOpen, onClose }) {
             <div className="job-details-modal__section-heading">
               <h4 className="job-details-modal__section-title">Quick summary</h4>
               <p className="job-details-modal__section-subtext">
-                The short version before the full listing.
+                The short version before you jump to the listing.
               </p>
             </div>
 
@@ -235,14 +215,8 @@ function JobDetailsModal({ job, isOpen, onClose }) {
           </section>
         ) : null}
 
-        <DescriptionSection
-          key={`${job.id}-${isOpen ? "open" : "closed"}`}
-          jobId={job.id}
-          descriptionParagraphs={descriptionParagraphs}
-        />
-
-        {job.url ? (
-          <div className="job-details-modal__actions">
+        <div className="job-details-modal__actions">
+          {job.url ? (
             <a
               href={job.url}
               target="_blank"
@@ -251,8 +225,20 @@ function JobDetailsModal({ job, isOpen, onClose }) {
             >
               View listing
             </a>
-          </div>
-        ) : null}
+          ) : (
+            <button
+              type="button"
+              className="button button--primary"
+              onClick={handleCopySearchText}
+            >
+              {copyState === "copied"
+                ? "Copied search text"
+                : copyState === "error"
+                ? "Copy failed"
+                : "Copy search text"}
+            </button>
+          )}
+        </div>
       </div>
     </CommonModal>
   );

@@ -304,15 +304,6 @@ function normalizeViewerState(rawJob, overrideState) {
   };
 }
 
-function toSentenceCase(value) {
-  const cleaned = cleanText(value);
-  if (!cleaned) {
-    return null;
-  }
-
-  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-}
-
 function createQualificationSignal(job) {
   const fitTag = cleanText(job.fitTag).toLowerCase();
   const score = Number(job.matchScore ?? 0);
@@ -369,9 +360,30 @@ function createRequirementsSnapshot(job) {
   return reasons.slice(0, 4);
 }
 
-function createBlockersSnapshot(job) {
-  const warnings = Array.isArray(job.warningFlags) ? job.warningFlags : [];
-  return warnings.slice(0, 4);
+function createCompensationSignal(compensation) {
+  if (!compensation) {
+    return null;
+  }
+
+  return `Compensation: ${compensation}`;
+}
+
+function createCardMeta({
+  cardLocation,
+  experienceLevel,
+  workplaceType,
+  compensation,
+}) {
+  return [
+    cardLocation,
+    experienceLevel,
+    workplaceType,
+    compensation,
+  ].filter((value) => typeof value === "string" && value.trim().length > 0);
+}
+
+function createSearchQuery(title, company) {
+  return [title, company].filter(Boolean).join(" ");
 }
 
 export function mapJobsForDisplay(
@@ -390,10 +402,12 @@ export function mapJobsForDisplay(
     const source = job.source ?? job.source_name ?? null;
     const sourceLabel = formatSourceLabel(source);
     const fullLocation = resolveLocation(job);
+    const cardLocation = formatCardLocation(fullLocation, source);
     const modalLocation = formatModalLocation(fullLocation, source);
     const workplaceType = formatWorkplaceType(resolveWorkplaceType(job));
     const experienceLevel = normalizeExperienceLevel(resolveExperienceLevel(job));
     const employmentType = formatEmploymentType(resolveEmploymentType(job));
+
     const viewerState = normalizeViewerState(
       job,
       viewerStateOverrides?.[job.id] ?? null
@@ -404,7 +418,7 @@ export function mapJobsForDisplay(
       title: job.title ?? "Untitled role",
       company: resolveCompany(job),
       location: fullLocation || "Location not listed",
-      cardLocation: formatCardLocation(fullLocation, source),
+      cardLocation,
       modalLocation,
       fullLocation,
       workplaceType,
@@ -432,7 +446,7 @@ export function mapJobsForDisplay(
       savedAt: viewerState.savedAt,
       hiddenAt: viewerState.hiddenAt,
       metadata: [
-        formatCardLocation(fullLocation, source),
+        cardLocation,
         experienceLevel,
         workplaceType,
         employmentType,
@@ -440,6 +454,8 @@ export function mapJobsForDisplay(
         sourceLabel,
       ].filter((value) => typeof value === "string" && value.trim().length > 0),
     };
+
+    const compensationSignal = createCompensationSignal(formattedCompensation);
 
     return {
       ...mappedJob,
@@ -452,8 +468,15 @@ export function mapJobsForDisplay(
         sourceLabel,
       }),
       requirementsSnapshot: createRequirementsSnapshot(mappedJob),
-      blockersSnapshot: createBlockersSnapshot(mappedJob),
-      fitSummary: toSentenceCase(resolveFitTag(scored)),
+      compensationSignal,
+      cardMeta: createCardMeta({
+        cardLocation,
+        experienceLevel,
+        workplaceType,
+        compensation: formattedCompensation,
+      }),
+      searchQuery: createSearchQuery(mappedJob.title, mappedJob.company),
+      fitSummary: resolveFitTag(scored),
     };
   });
 }
