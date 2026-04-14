@@ -4,7 +4,6 @@ import JobCard from "../components/jobs/JobCard.jsx";
 import { useAuth } from "../hooks/useAuth";
 import {
   fetchHiddenJobs,
-  fetchResolvedJobProfile,
   fetchSavedJobs,
   hideJob,
   saveJob,
@@ -13,12 +12,48 @@ import {
 } from "../lib/jobs/jobsApi";
 import scoreJobsForUser from "../lib/jobs/scoreJobsForUser";
 import mapJobsForDisplay from "../lib/jobs/mapJobsForDisplay";
+import { fetchTracker, updateTrackerPreferences } from "../lib/tracker/trackerApi";
+import ResumeUploadModal from "../components/jobs/ResumeUploadModal.jsx";
 import "../styles/components/tracker.css";
 
 const TRACKER_TABS = {
   SAVED: "saved",
   HIDDEN: "hidden",
 };
+
+const DEFAULT_PREFERENCES = {
+  desired_levels: ["entry-level", "junior"],
+  preferred_role_types: [],
+  preferred_workplace_types: [],
+  preferred_locations: [],
+  is_lgbt_friendly_only: false,
+};
+
+function titleCase(value) {
+  return String(value || "")
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatDate(value) {
+  if (!value) {
+    return "Not available";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Not available";
+  }
+
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
 
 function Tracker() {
   const navigate = useNavigate();
@@ -31,9 +66,23 @@ function Tracker() {
     desiredLevels: ["entry-level", "junior"],
     preferredRoleTypes: [],
     preferredWorkplaceTypes: [],
+    preferredLocations: [],
     skills: [],
     isLgbtFriendlyOnly: false,
   });
+
+  const [trackerData, setTrackerData] = useState({
+    preferences: DEFAULT_PREFERENCES,
+    resume: null,
+    stats: {
+      saved_jobs_count: 0,
+      hidden_jobs_count: 0,
+    },
+  });
+
+  const [preferencesDraft, setPreferencesDraft] = useState(DEFAULT_PREFERENCES);
+  const [isSavingPreferences, setIsSavingPreferences] = useState(false);
+  const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [pendingActions, setPendingActions] = useState({});
@@ -47,6 +96,15 @@ function Tracker() {
       if (!user) {
         setSavedJobsRaw([]);
         setHiddenJobsRaw([]);
+        setTrackerData({
+          preferences: DEFAULT_PREFERENCES,
+          resume: null,
+          stats: {
+            saved_jobs_count: 0,
+            hidden_jobs_count: 0,
+          },
+        });
+        setPreferencesDraft(DEFAULT_PREFERENCES);
         setIsLoading(false);
         setError("");
         return;
@@ -56,36 +114,47 @@ function Tracker() {
       setError("");
 
       try {
-        const [savedJobs, hiddenJobs, profile] = await Promise.all([
+        const [savedJobs, hiddenJobs, tracker] = await Promise.all([
           fetchSavedJobs({ signal: controller.signal }),
           fetchHiddenJobs({ signal: controller.signal }),
-          fetchResolvedJobProfile({ signal: controller.signal }),
+          fetchTracker(),
         ]);
 
         if (!isMounted || controller.signal.aborted) {
           return;
         }
 
+        const nextPreferences = tracker?.preferences || DEFAULT_PREFERENCES;
+        const nextResolvedProfile = {
+          desiredLevels: nextPreferences.desired_levels?.length
+            ? nextPreferences.desired_levels
+            : ["entry-level", "junior"],
+          preferredRoleTypes: nextPreferences.preferred_role_types || [],
+          preferredWorkplaceTypes: nextPreferences.preferred_workplace_types || [],
+          preferredLocations: nextPreferences.preferred_locations || [],
+          skills:
+            tracker?.resume?.parsed_json?.skills?.normalized ||
+            tracker?.resume?.parsed_json?.summary?.top_skill_keywords ||
+            [],
+          isLgbtFriendlyOnly: Boolean(nextPreferences.is_lgbt_friendly_only),
+        };
+
         setSavedJobsRaw(Array.isArray(savedJobs) ? savedJobs : []);
         setHiddenJobsRaw(Array.isArray(hiddenJobs) ? hiddenJobs : []);
-        setResolvedUserProfile(
-          profile && typeof profile === "object"
-            ? {
-                desiredLevels: ["entry-level", "junior"],
-                preferredRoleTypes: [],
-                preferredWorkplaceTypes: [],
-                skills: [],
-                isLgbtFriendlyOnly: false,
-                ...profile,
-              }
+        setTrackerData(
+          tracker && typeof tracker === "object"
+            ? tracker
             : {
-                desiredLevels: ["entry-level", "junior"],
-                preferredRoleTypes: [],
-                preferredWorkplaceTypes: [],
-                skills: [],
-                isLgbtFriendlyOnly: false,
+                preferences: DEFAULT_PREFERENCES,
+                resume: null,
+                stats: {
+                  saved_jobs_count: 0,
+                  hidden_jobs_count: 0,
+                },
               }
         );
+        setPreferencesDraft(nextPreferences);
+        setResolvedUserProfile(nextResolvedProfile);
       } catch (err) {
         if (!isMounted || err?.name === "AbortError") {
           return;
@@ -179,6 +248,11 @@ function Tracker() {
   }, [hiddenJobsRaw, hiddenScoredJobs, viewerOverrides]);
 
   const visibleJobs = activeTab === TRACKER_TABS.SAVED ? savedJobs : hiddenJobs;
+  const latestResume = trackerData?.resume || null;
+  const parsedResume = latestResume?.parsed_json || null;
+  const resumeSummary = parsedResume?.summary || {};
+  const resumeSkills = parsedResume?.skills?.normalized || [];
+  const resumeWarnings = latestResume?.parse_warnings || [];
 
   async function handleToggleSave(job) {
     const jobId = job.id;
@@ -265,14 +339,124 @@ function Tracker() {
     }
   }
 
+  async function handleSavePreferences() {
+    setIsSavingPreferences(true);
+    setError("");
+
+    try {
+      const result = await updateTrackerPreferences(preferencesDraft);
+      const nextPreferences = result?.preferences || preferencesDraft;
+
+      setTrackerData((current) => ({
+        ...current,
+        preferences: nextPreferences,
+      }));
+
+      setResolvedUserProfile((current) => ({
+        ...current,
+        desiredLevels: nextPreferences.desired_levels?.length
+          ? nextPreferences.desired_levels
+          : ["entry-level", "junior"],
+        preferredRoleTypes: nextPreferences.preferred_role_types || [],
+        preferredWorkplaceTypes: nextPreferences.preferred_workplace_types || [],
+        preferredLocations: nextPreferences.preferred_locations || [],
+        isLgbtFriendlyOnly: Boolean(nextPreferences.is_lgbt_friendly_only),
+      }));
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "We could not save your tracker preferences right now."
+      );
+    } finally {
+      setIsSavingPreferences(false);
+    }
+  }
+
+  function handleMultiValueInputChange(field, value) {
+    const items = value
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+
+    setPreferencesDraft((current) => ({
+      ...current,
+      [field]: items,
+    }));
+  }
+
+  async function handleResumeSaved(savedResumeUiState) {
+    setIsResumeModalOpen(false);
+    setError("");
+
+    try {
+      const freshTracker = await fetchTracker();
+      const nextPreferences = freshTracker?.preferences || DEFAULT_PREFERENCES;
+
+      setTrackerData(
+        freshTracker && typeof freshTracker === "object"
+          ? freshTracker
+          : {
+              preferences: DEFAULT_PREFERENCES,
+              resume: null,
+              stats: {
+                saved_jobs_count: 0,
+                hidden_jobs_count: 0,
+              },
+            }
+      );
+
+      setPreferencesDraft(nextPreferences);
+      setResolvedUserProfile((current) => ({
+        ...current,
+        desiredLevels: nextPreferences.desired_levels?.length
+          ? nextPreferences.desired_levels
+          : ["entry-level", "junior"],
+        preferredRoleTypes: nextPreferences.preferred_role_types || [],
+        preferredWorkplaceTypes: nextPreferences.preferred_workplace_types || [],
+        preferredLocations: nextPreferences.preferred_locations || [],
+        skills:
+          freshTracker?.resume?.parsed_json?.skills?.normalized ||
+          freshTracker?.resume?.parsed_json?.summary?.top_skill_keywords ||
+          current.skills ||
+          [],
+        isLgbtFriendlyOnly: Boolean(nextPreferences.is_lgbt_friendly_only),
+      }));
+    } catch (err) {
+      setTrackerData((current) => ({
+        ...current,
+        resume: {
+          ...(current.resume || {}),
+          id: savedResumeUiState?.id || current.resume?.id || null,
+          original_filename:
+            savedResumeUiState?.name || current.resume?.original_filename,
+          file_type:
+            savedResumeUiState?.type ||
+            current.resume?.file_type ||
+            "application/pdf",
+          parse_status: savedResumeUiState?.parseStatus || "pending",
+          updated_at: savedResumeUiState?.uploadedAt || new Date().toISOString(),
+          ats_tags: savedResumeUiState?.atsTags || current.resume?.ats_tags || [],
+          parse_warnings: current.resume?.parse_warnings || [],
+          parsed_json: current.resume?.parsed_json || null,
+        },
+      }));
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Your resume uploaded, but we could not refresh tracker details yet."
+      );
+    }
+  }
+
   function renderEmptyState() {
     if (activeTab === TRACKER_TABS.SAVED) {
       return (
         <div className="tracker-empty section-card">
           <h3 className="tracker-empty__title">No saved jobs yet</h3>
           <p className="tracker-empty__text">
-            When you find a role worth circling back to, save it and it will
-            land here.
+            When you find a role worth circling back to, save it and it will land here.
           </p>
           <div className="tracker-empty__actions">
             <Link to="/jobs" className="button button--primary">
@@ -287,8 +471,7 @@ function Tracker() {
       <div className="tracker-empty section-card">
         <h3 className="tracker-empty__title">No hidden jobs right now</h3>
         <p className="tracker-empty__text">
-          Hidden roles live here so your main feed stays cleaner and less
-          repetitive.
+          Hidden roles live here so your main feed stays cleaner and less repetitive.
         </p>
         <div className="tracker-empty__actions">
           <Link to="/jobs" className="button button--primary">
@@ -322,8 +505,7 @@ function Tracker() {
               <span className="eyebrow-pill">Your Job Tracker</span>
               <h1 className="tracker-gate__title">Sign in to use your tracker</h1>
               <p className="tracker-gate__text">
-                Saved jobs and hidden jobs are tied to your account, so they are
-                ready when you come back.
+                Saved jobs, preferences, and your latest resume all live here.
               </p>
 
               <div className="tracker-gate__actions">
@@ -352,29 +534,228 @@ function Tracker() {
         <div className="container tracker-stack">
           <div className="tracker-hero section-card">
             <span className="eyebrow-pill">Your Job Tracker</span>
-            <h1 className="tracker-hero__title">Keep the promising ones close</h1>
+            <h1 className="tracker-hero__title">Your realistic search home base</h1>
             <p className="tracker-hero__text">
-              Saved jobs help you revisit strong leads. Hidden jobs keep your
-              feed from turning into wallpaper.
+              Keep long-term preferences here, check what your resume is signaling,
+              and revisit saved leads without losing the thread.
             </p>
           </div>
 
           <div className="tracker-stats">
             <article className="tracker-stat section-card">
               <span className="tracker-stat__label">Saved</span>
-              <strong className="tracker-stat__value">{savedJobs.length}</strong>
+              <strong className="tracker-stat__value">
+                {trackerData?.stats?.saved_jobs_count ?? savedJobs.length}
+              </strong>
             </article>
 
             <article className="tracker-stat section-card">
               <span className="tracker-stat__label">Hidden</span>
-              <strong className="tracker-stat__value">{hiddenJobs.length}</strong>
+              <strong className="tracker-stat__value">
+                {trackerData?.stats?.hidden_jobs_count ?? hiddenJobs.length}
+              </strong>
             </article>
 
             <article className="tracker-stat section-card">
-              <span className="tracker-stat__label">Tracker status</span>
-              <strong className="tracker-stat__value">Growing</strong>
+              <span className="tracker-stat__label">Resume status</span>
+              <strong className="tracker-stat__value">
+                {latestResume?.parse_status ? titleCase(latestResume.parse_status) : "None"}
+              </strong>
             </article>
           </div>
+
+          <section className="section-card">
+            <div className="tracker-section-head">
+              <div>
+                <p className="tracker-stat__label">Preferences</p>
+                <h2 className="tracker-empty__title">Your default search setup</h2>
+              </div>
+            </div>
+
+            <div className="tracker-preferences-grid">
+              <label className="tracker-field">
+                <span className="tracker-field__label">Preferred levels</span>
+                <input
+                  type="text"
+                  className="tracker-field__input"
+                  value={(preferencesDraft.desired_levels || []).join(", ")}
+                  onChange={(event) =>
+                    handleMultiValueInputChange("desired_levels", event.target.value)
+                  }
+                  placeholder="entry-level, junior"
+                />
+              </label>
+
+              <label className="tracker-field">
+                <span className="tracker-field__label">Preferred role types</span>
+                <input
+                  type="text"
+                  className="tracker-field__input"
+                  value={(preferencesDraft.preferred_role_types || []).join(", ")}
+                  onChange={(event) =>
+                    handleMultiValueInputChange("preferred_role_types", event.target.value)
+                  }
+                  placeholder="frontend, backend, data"
+                />
+              </label>
+
+              <label className="tracker-field">
+                <span className="tracker-field__label">Preferred workplace types</span>
+                <input
+                  type="text"
+                  className="tracker-field__input"
+                  value={(preferencesDraft.preferred_workplace_types || []).join(", ")}
+                  onChange={(event) =>
+                    handleMultiValueInputChange(
+                      "preferred_workplace_types",
+                      event.target.value
+                    )
+                  }
+                  placeholder="remote, hybrid, onsite"
+                />
+              </label>
+
+              <label className="tracker-field">
+                <span className="tracker-field__label">Preferred locations</span>
+                <input
+                  type="text"
+                  className="tracker-field__input"
+                  value={(preferencesDraft.preferred_locations || []).join(", ")}
+                  onChange={(event) =>
+                    handleMultiValueInputChange("preferred_locations", event.target.value)
+                  }
+                  placeholder="atlanta, georgia, remote"
+                />
+              </label>
+
+              <label className="tracker-checkbox">
+                <input
+                  type="checkbox"
+                  checked={Boolean(preferencesDraft.is_lgbt_friendly_only)}
+                  onChange={(event) =>
+                    setPreferencesDraft((current) => ({
+                      ...current,
+                      is_lgbt_friendly_only: event.target.checked,
+                    }))
+                  }
+                />
+                <span>LGBTQ-friendly only</span>
+              </label>
+            </div>
+
+            <div className="tracker-empty__actions" style={{ marginTop: "1rem" }}>
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={handleSavePreferences}
+                disabled={isSavingPreferences}
+              >
+                {isSavingPreferences ? "Saving..." : "Save preferences"}
+              </button>
+            </div>
+          </section>
+
+          <section className="section-card">
+            <div className="tracker-section-head">
+              <div>
+                <p className="tracker-stat__label">Latest resume</p>
+                <h2 className="tracker-empty__title">
+                  {latestResume?.original_filename || "No resume uploaded yet"}
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                className="jobs-chip"
+                onClick={() => setIsResumeModalOpen(true)}
+              >
+                {latestResume ? "Replace resume" : "Upload resume"}
+              </button>
+            </div>
+
+            <p className="tracker-empty__text">
+              {latestResume
+                ? `Last updated ${formatDate(latestResume.updated_at)} • ${titleCase(
+                    latestResume.parse_status || "pending"
+                  )}`
+                : "Upload a resume so EarlyBloom can explain what your current resume is signaling."}
+            </p>
+          </section>
+
+          <section className="section-card">
+            <div className="tracker-section-head">
+              <div>
+                <p className="tracker-stat__label">Resume signals</p>
+                <h2 className="tracker-empty__title">What your resume is currently displaying</h2>
+              </div>
+            </div>
+
+            {parsedResume ? (
+              <div className="tracker-signals">
+                <div className="tracker-signals__row">
+                  <span className="tracker-stat__label">Seniority</span>
+                  <strong>{titleCase(resumeSummary.seniority || "unknown")}</strong>
+                </div>
+
+                <div className="tracker-signals__row">
+                  <span className="tracker-stat__label">Estimated experience</span>
+                  <strong>
+                    {typeof resumeSummary.estimated_years_experience === "number"
+                      ? `${resumeSummary.estimated_years_experience} years`
+                      : "Not detected"}
+                  </strong>
+                </div>
+
+                <div className="tracker-signals__row">
+                  <span className="tracker-stat__label">Likely role signals</span>
+                  <strong>
+                    {(resumeSummary.primary_role_signals || [])
+                      .map(titleCase)
+                      .join(", ") || "Not detected"}
+                  </strong>
+                </div>
+
+                <div className="tracker-signals__row">
+                  <span className="tracker-stat__label">Top skills</span>
+                  <strong>
+                    {resumeSkills.length > 0
+                      ? resumeSkills.slice(0, 12).map(titleCase).join(", ")
+                      : "Not detected"}
+                  </strong>
+                </div>
+
+                <div className="tracker-signals__row">
+                  <span className="tracker-stat__label">Inferred location</span>
+                  <strong>
+                    {parsedResume?.basics?.location?.raw ||
+                      [
+                        parsedResume?.basics?.location?.city,
+                        parsedResume?.basics?.location?.region,
+                      ]
+                        .filter(Boolean)
+                        .join(", ") ||
+                      "Not detected"}
+                  </strong>
+                </div>
+
+                {resumeWarnings.length > 0 ? (
+                  <div className="tracker-signals__warnings">
+                    <span className="tracker-stat__label">Parser notes</span>
+                    <ul>
+                      {resumeWarnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="tracker-empty__text">
+                No parsed resume data yet. Once you upload a resume, this section will
+                explain what EarlyBloom is seeing instead of making users manually choose ATS tags.
+              </p>
+            )}
+          </section>
 
           <div className="tracker-tabs section-card" role="tablist" aria-label="Tracker sections">
             <button
@@ -432,6 +813,24 @@ function Tracker() {
           )}
         </div>
       </section>
+
+      <ResumeUploadModal
+        isOpen={isResumeModalOpen}
+        onClose={() => setIsResumeModalOpen(false)}
+        onResumeSaved={handleResumeSaved}
+        resumeFile={
+          latestResume
+            ? {
+                id: latestResume.id,
+                name: latestResume.original_filename,
+                type: latestResume.file_type,
+                parseStatus: latestResume.parse_status,
+                uploadedAt: latestResume.updated_at,
+                atsTags: latestResume.ats_tags || [],
+              }
+            : null
+        }
+      />
     </main>
   );
 }

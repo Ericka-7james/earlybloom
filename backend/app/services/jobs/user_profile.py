@@ -13,6 +13,7 @@ DEFAULT_RESOLVED_JOB_PROFILE: dict[str, Any] = {
     "desiredLevels": ["entry-level", "junior"],
     "preferredRoleTypes": [],
     "preferredWorkplaceTypes": [],
+    "preferredLocations": [],
     "skills": [],
     "isLgbtFriendlyOnly": False,
 }
@@ -33,12 +34,25 @@ def resolve_job_profile_for_user_id(user_id: str) -> dict[str, Any]:
         profile_row.get("desired_levels") if profile_row else None
     ) or list(DEFAULT_RESOLVED_JOB_PROFILE["desiredLevels"])
 
+    preferred_role_types = _normalize_string_list(
+        profile_row.get("preferred_role_types") if profile_row else None
+    )
+
+    preferred_workplace_types = _normalize_string_list(
+        profile_row.get("preferred_workplace_types") if profile_row else None
+    )
+
+    preferred_locations = _normalize_string_list(
+        profile_row.get("preferred_locations") if profile_row else None
+    )
+
     skills = _extract_resume_skills(parsed_json)
 
     return {
         "desiredLevels": desired_levels,
-        "preferredRoleTypes": [],
-        "preferredWorkplaceTypes": [],
+        "preferredRoleTypes": preferred_role_types,
+        "preferredWorkplaceTypes": preferred_workplace_types,
+        "preferredLocations": preferred_locations,
         "skills": skills,
         "isLgbtFriendlyOnly": bool(
             profile_row.get("is_lgbt_friendly_only") if profile_row else False
@@ -76,6 +90,15 @@ def _extract_resume_skills(parsed_json: Any) -> list[str]:
         value = parsed_json.get(key)
         candidates.extend(_coerce_strings(value))
 
+    skills_block = parsed_json.get("skills")
+    if isinstance(skills_block, dict):
+        candidates.extend(_coerce_strings(skills_block.get("normalized")))
+        candidates.extend(_coerce_strings(skills_block.get("raw")))
+
+    summary_block = parsed_json.get("summary")
+    if isinstance(summary_block, dict):
+        candidates.extend(_coerce_strings(summary_block.get("top_skill_keywords")))
+
     sections = parsed_json.get("sections")
     if isinstance(sections, list):
         for section in sections:
@@ -93,6 +116,7 @@ def _extract_resume_skills(parsed_json: Any) -> list[str]:
                 continue
             candidates.extend(_coerce_strings(item.get("technologies")))
             candidates.extend(_coerce_strings(item.get("skills")))
+            candidates.extend(_coerce_strings(item.get("normalized_skills")))
 
     ats_tags = parsed_json.get("ats_tags")
     candidates.extend(_coerce_strings(ats_tags))

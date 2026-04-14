@@ -4,10 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes.auth import router as auth_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.resume import router as resume_router
+from app.api.routes.tracker import router as tracker_router
 from app.core.auth_settings import auth_settings
-
-# Temp rm - will add back when tracker is ready
-# from app.api.routes.tracker import router as tracker_router
 
 
 def _build_allowed_origins() -> list[str]:
@@ -30,9 +28,9 @@ def _build_allowed_origins() -> list[str]:
         ]
     )
 
-    # dedupe while preserving order
     seen: set[str] = set()
     deduped: list[str] = []
+
     for origin in origins:
         if origin not in seen:
             seen.add(origin)
@@ -58,7 +56,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(jobs_router)
 app.include_router(resume_router)
-# app.include_router(tracker_router)
+app.include_router(tracker_router)
 
 
 @app.get("/")
