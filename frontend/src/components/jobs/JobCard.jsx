@@ -1,5 +1,11 @@
-import React from "react";
+import React, { memo, useMemo, useCallback } from "react";
 
+/**
+ * Returns the modifier class used for the fit tag badge.
+ *
+ * @param {string} fitTag Fit verdict label.
+ * @returns {string} CSS class name.
+ */
 function getFitTagClassName(fitTag) {
   switch (fitTag) {
     case "Real Junior":
@@ -14,6 +20,12 @@ function getFitTagClassName(fitTag) {
   }
 }
 
+/**
+ * Normalizes incoming fit tags into the supported UI set.
+ *
+ * @param {string} fitTag Raw fit tag.
+ * @returns {string} Safe fit tag.
+ */
 function getSafeFitTag(fitTag) {
   switch (fitTag) {
     case "Real Junior":
@@ -26,6 +38,12 @@ function getSafeFitTag(fitTag) {
   }
 }
 
+/**
+ * Normalizes match score into a safe 0-100 integer.
+ *
+ * @param {number} matchScore Raw match score.
+ * @returns {number} Safe score.
+ */
 function getSafeMatchScore(matchScore) {
   if (!Number.isFinite(matchScore)) {
     return 0;
@@ -34,11 +52,23 @@ function getSafeMatchScore(matchScore) {
   return Math.max(0, Math.min(100, Math.round(matchScore)));
 }
 
+/**
+ * Stops a nested button click from bubbling through the card surface.
+ *
+ * @param {React.SyntheticEvent} event React event.
+ * @returns {void}
+ */
 function stopCardEvent(event) {
   event.preventDefault();
   event.stopPropagation();
 }
 
+/**
+ * Returns the quick-take copy shown near the top of the card.
+ *
+ * @param {object} job Display job.
+ * @returns {string} Short quick-take text.
+ */
 function getQuickTake(job) {
   if (job?.qualificationSignal?.text) {
     return job.qualificationSignal.text;
@@ -59,7 +89,33 @@ function getQuickTake(job) {
   return "This may be more experienced than it first appears.";
 }
 
-function JobCard({
+/**
+ * Returns a capped list of matched skills for compact card display.
+ *
+ * @param {string[] | undefined} matchedSkills Matched skills.
+ * @returns {string[]} Up to three matched skills.
+ */
+function getVisibleMatchedSkills(matchedSkills) {
+  return Array.isArray(matchedSkills)
+    ? matchedSkills.filter(Boolean).slice(0, 3)
+    : [];
+}
+
+/**
+ * EarlyBloom job result card.
+ *
+ * @param {{
+ *   job: object,
+ *   onOpenDetails?: (job: object) => void,
+ *   onSaveToggle?: (job: object) => void,
+ *   onHide?: (job: object) => void,
+ *   isSavePending?: boolean,
+ *   isHidePending?: boolean,
+ *   hideLabel?: string,
+ * }} props Card props.
+ * @returns {JSX.Element} Job card.
+ */
+function JobCardComponent({
   job,
   onOpenDetails,
   onSaveToggle,
@@ -69,36 +125,63 @@ function JobCard({
   hideLabel,
 }) {
   const id = job.id;
+
   const title = job.title || "Untitled role";
   const company = job.company || "Unknown company";
-  const fitTag = getSafeFitTag(job.fitTag);
-  const matchScore = getSafeMatchScore(job.matchScore);
-  const metaItems = Array.isArray(job.cardMeta) ? job.cardMeta : [];
-  const quickTake = getQuickTake(job);
-  const applyUrl = job.url || job.sourceUrl || null;
-  const resolvedHideLabel = hideLabel || (job.isHidden ? "Restore job" : "Hide job");
 
-  function handleOpen() {
+  const fitTag = useMemo(() => getSafeFitTag(job.fitTag), [job.fitTag]);
+  const fitTagClassName = useMemo(
+    () => getFitTagClassName(fitTag),
+    [fitTag]
+  );
+  const matchScore = useMemo(
+    () => getSafeMatchScore(job.matchScore),
+    [job.matchScore]
+  );
+  const metaItems = useMemo(
+    () => (Array.isArray(job.cardMeta) ? job.cardMeta : []),
+    [job.cardMeta]
+  );
+  const quickTake = useMemo(() => getQuickTake(job), [job]);
+  const applyUrl = job.url || job.sourceUrl || null;
+  const resolvedHideLabel =
+    hideLabel || (job.isHidden ? "Restore job" : "Hide job");
+  const visibleMatchedSkills = useMemo(
+    () => getVisibleMatchedSkills(job.matchedSkills),
+    [job.matchedSkills]
+  );
+
+  const handleOpen = useCallback(() => {
     if (typeof onOpenDetails === "function") {
       onOpenDetails(job);
     }
-  }
+  }, [job, onOpenDetails]);
 
-  function handleSaveClick(event) {
-    stopCardEvent(event);
+  const handleSaveClick = useCallback(
+    (event) => {
+      stopCardEvent(event);
 
-    if (typeof onSaveToggle === "function" && !isSavePending) {
-      onSaveToggle(job);
-    }
-  }
+      if (typeof onSaveToggle === "function" && !isSavePending) {
+        onSaveToggle(job);
+      }
+    },
+    [job, onSaveToggle, isSavePending]
+  );
 
-  function handleHideClick(event) {
-    stopCardEvent(event);
+  const handleHideClick = useCallback(
+    (event) => {
+      stopCardEvent(event);
 
-    if (typeof onHide === "function" && !isHidePending) {
-      onHide(job);
-    }
-  }
+      if (typeof onHide === "function" && !isHidePending) {
+        onHide(job);
+      }
+    },
+    [job, onHide, isHidePending]
+  );
+
+  const handleApplyClick = useCallback((event) => {
+    event.stopPropagation();
+  }, []);
 
   return (
     <article
@@ -107,7 +190,7 @@ function JobCard({
     >
       <div className="job-card__top-row">
         <div className="job-card__meta-row">
-          <span className={`job-card__fit-tag ${getFitTagClassName(fitTag)}`}>
+          <span className={`job-card__fit-tag ${fitTagClassName}`}>
             {fitTag}
           </span>
 
@@ -169,6 +252,26 @@ function JobCard({
 
           <p className="job-card__quick-take">{quickTake}</p>
 
+          {visibleMatchedSkills.length > 0 ? (
+            <div
+              className="job-card__matched-skills"
+              aria-label="Matched skills"
+            >
+              <p className="job-card__matched-skills-label">Matched skills</p>
+
+              <div className="job-card__matched-skills-list">
+                {visibleMatchedSkills.map((skill) => (
+                  <span
+                    key={`${id}-matched-skill-${skill}`}
+                    className="job-card__matched-skill-chip"
+                  >
+                    {skill}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {metaItems.length > 0 ? (
             <div className="job-card__compact-meta" aria-label="Job metadata">
               {metaItems.map((item, index) => (
@@ -196,7 +299,7 @@ function JobCard({
             href={applyUrl}
             target="_blank"
             rel="noreferrer"
-            onClick={(event) => event.stopPropagation()}
+            onClick={handleApplyClick}
           >
             Apply
           </a>
@@ -213,5 +316,7 @@ function JobCard({
     </article>
   );
 }
+
+const JobCard = memo(JobCardComponent);
 
 export default JobCard;
