@@ -151,19 +151,28 @@ function Tracker() {
       }
 
       const nextSavedJobs =
-        savedJobsResult.status === "fulfilled" && Array.isArray(savedJobsResult.value)
+        savedJobsResult.status === "fulfilled" &&
+        Array.isArray(savedJobsResult.value)
           ? savedJobsResult.value
           : [];
 
       const nextHiddenJobs =
-        hiddenJobsResult.status === "fulfilled" && Array.isArray(hiddenJobsResult.value)
+        hiddenJobsResult.status === "fulfilled" &&
+        Array.isArray(hiddenJobsResult.value)
           ? hiddenJobsResult.value
           : [];
 
       const tracker =
         trackerResult.status === "fulfilled" && trackerResult.value
           ? trackerResult.value
-          : null;
+          : {
+              preferences: DEFAULT_PREFERENCES,
+              resume: null,
+              stats: {
+                saved_jobs_count: nextSavedJobs.length,
+                hidden_jobs_count: nextHiddenJobs.length,
+              },
+            };
 
       const nextPreferences = tracker?.preferences || DEFAULT_PREFERENCES;
 
@@ -192,24 +201,9 @@ function Tracker() {
         loadErrors.push("Hidden jobs could not be loaded.");
       }
 
-      if (trackerResult.status === "rejected") {
-        loadErrors.push("Tracker preferences could not be loaded.");
-      }
-
       setSavedJobsRaw(nextSavedJobs);
       setHiddenJobsRaw(nextHiddenJobs);
-      setTrackerData(
-        tracker && typeof tracker === "object"
-          ? tracker
-          : {
-              preferences: DEFAULT_PREFERENCES,
-              resume: null,
-              stats: {
-                saved_jobs_count: nextSavedJobs.length,
-                hidden_jobs_count: nextHiddenJobs.length,
-              },
-            }
-      );
+      setTrackerData(tracker);
       setPreferencesDraft(nextPreferences);
       setResolvedUserProfile(nextResolvedProfile);
       setError(loadErrors.join(" "));
@@ -618,24 +612,16 @@ function Tracker() {
                       : "None"}
                   </strong>
                 </article>
-              </div>
 
-              {isMobile ? (
-                <div className="tracker-mobile-actions">
-                  <button
-                    type="button"
-                    className="tracker-mobile-actions__trigger section-card"
-                    onClick={() => setIsPreferencesModalOpen(true)}
-                  >
-                    <span className="tracker-mobile-actions__label">
-                      Preferences
-                    </span>
-                    <span className="tracker-mobile-actions__summary">
-                      Tap to edit your default search setup
-                    </span>
-                  </button>
-                </div>
-              ) : null}
+                <button
+                  type="button"
+                  className="tracker-stat tracker-stat--preferences section-card"
+                  onClick={() => setIsPreferencesModalOpen(true)}
+                >
+                  <span className="tracker-stat__label">Preferences</span>
+                  <strong className="tracker-stat__value">Edit</strong>
+                </button>
+              </div>
 
               <section className="section-card tracker-resume-card">
                 <div className="tracker-section-head">
