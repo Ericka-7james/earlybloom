@@ -56,6 +56,9 @@ export function normalizeJob(rawJob = {}) {
 
   const extractedYears = extractYearsExperience(`${title} ${description}`);
 
+  const canonicalSkills = extractCanonicalJobSkills(rawJob);
+  const normalizedSkills = canonicalSkills.map(normalizeText);
+
   return {
     raw: rawJob,
     title,
@@ -81,7 +84,8 @@ export function normalizeJob(rawJob = {}) {
     minYearsRequired: structuredMinYears ?? 0,
     maxYearsRequired: structuredMaxYears ?? extractedYears,
     yearsExperienceRequired: structuredMaxYears ?? extractedYears,
-    skills: extractJobSkills(rawJob, description),
+    canonicalSkills,
+    skills: new Set(normalizedSkills),
     requiredSkills: normalizeSkillList(requirements.requiredSkills),
     preferredSkills: normalizeSkillList(requirements.preferredSkills),
     signals: {
@@ -109,29 +113,32 @@ export function normalizeUserProfile(userProfile = {}) {
   const skills = Array.isArray(userProfile.skills)
     ? userProfile.skills
     : Array.isArray(userProfile.topSkills)
-    ? userProfile.topSkills
-    : [];
+      ? userProfile.topSkills
+      : [];
 
   const targetTitles = Array.isArray(userProfile.targetTitles)
     ? userProfile.targetTitles
     : Array.isArray(userProfile.roles)
-    ? userProfile.roles
-    : [];
+      ? userProfile.roles
+      : [];
 
   const preferredLocations = Array.isArray(userProfile.preferredLocations)
     ? userProfile.preferredLocations
     : userProfile.location
-    ? [userProfile.location]
-    : [];
+      ? [userProfile.location]
+      : [];
+
+  const canonicalSkills = dedupeCanonicalSkills(skills);
 
   return {
     raw: userProfile,
     experienceYears: Number.isFinite(userProfile.experienceYears)
       ? userProfile.experienceYears
       : Number.isFinite(userProfile.yearsOfExperience)
-      ? userProfile.yearsOfExperience
-      : 0,
-    skills: skills.map(normalizeText).filter(Boolean),
+        ? userProfile.yearsOfExperience
+        : 0,
+    canonicalSkills,
+    skills: canonicalSkills.map(normalizeText).filter(Boolean),
     targetTitles: targetTitles.map(normalizeText).filter(Boolean),
     preferredLocations: preferredLocations.map(normalizeText).filter(Boolean),
     remotePreference:
@@ -141,43 +148,80 @@ export function normalizeUserProfile(userProfile = {}) {
 }
 
 /**
- * Extracts a normalized set of job skills.
+ * Extracts canonical job skills from available raw fields.
+ *
+ * This prefers backend-provided normalized `skills` arrays when present,
+ * then falls back to requirement lists and lightweight known-skill scanning.
  *
  * @param {Object} rawJob Raw job listing.
- * @param {string} description Description text.
- * @returns {Set<string>} Normalized skill set.
+ * @returns {string[]} Canonical job skills.
  */
-function extractJobSkills(rawJob, description = "") {
+function extractCanonicalJobSkills(rawJob = {}) {
   const requirements = rawJob.requirements ?? {};
 
-  const rawSkills = [
+  const explicitSkills = [
+    ...(Array.isArray(rawJob.skills) ? rawJob.skills : []),
+    ...(Array.isArray(rawJob.required_skills) ? rawJob.required_skills : []),
+    ...(Array.isArray(rawJob.preferred_skills) ? rawJob.preferred_skills : []),
     ...(Array.isArray(requirements.requiredSkills)
       ? requirements.requiredSkills
       : []),
     ...(Array.isArray(requirements.preferredSkills)
       ? requirements.preferredSkills
       : []),
-    ...(Array.isArray(rawJob.skills) ? rawJob.skills : []),
   ];
 
-  const combinedText = normalizeText(`${description} ${rawSkills.join(" ")}`);
-  const found = new Set();
+  const canonicalExplicitSkills = dedupeCanonicalSkills(explicitSkills);
 
-  KNOWN_SKILLS.forEach((skill) => {
-    const normalizedSkill = normalizeText(skill);
-    if (combinedText.includes(normalizedSkill)) {
-      found.add(normalizedSkill);
+  if (canonicalExplicitSkills.length > 0) {
+    return canonicalExplicitSkills;
+  }
+
+  const description = [
+    rawJob.title,
+    rawJob.summary,
+    rawJob.description,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const normalizedDescription = normalizeText(description);
+
+  return KNOWN_SKILLS.filter((skill) =>
+    normalizedDescription.includes(normalizeText(skill))
+  );
+}
+
+/**
+ * Deduplicates a skill list while preserving canonical casing from input.
+ *
+ * @param {string[] | undefined} skills Raw skills.
+ * @returns {string[]} Deduplicated canonical skills.
+ */
+function dedupeCanonicalSkills(skills = []) {
+  if (!Array.isArray(skills)) {
+    return [];
+  }
+
+  const result = [];
+  const seen = new Set();
+
+  skills.forEach((skill) => {
+    const text = String(skill || "").trim();
+    if (!text) {
+      return;
     }
+
+    const key = normalizeText(text);
+    if (!key || seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    result.push(text);
   });
 
-  rawSkills.forEach((skill) => {
-    const normalizedSkill = normalizeText(skill);
-    if (normalizedSkill) {
-      found.add(normalizedSkill);
-    }
-  });
-
-  return found;
+  return result;
 }
 
 /**
