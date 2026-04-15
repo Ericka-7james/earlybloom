@@ -8,6 +8,11 @@
  * - resume-to-job skill overlap matching
  * - small additive overlap bonus
  * - matched skill metadata returned for UI use
+ *
+ * Phase 9 hardening:
+ * - safe fallbacks for missing resume/profile skills
+ * - safe fallbacks for jobs with no normalized skills
+ * - predictable empty arrays for UI consumers
  */
 
 import {
@@ -37,7 +42,7 @@ import {
  * @returns {Array<Object>} Scored job objects.
  */
 export function scoreJobsForUser(rawJobs = [], userProfile = {}) {
-  if (!Array.isArray(rawJobs)) {
+  if (!Array.isArray(rawJobs) || rawJobs.length === 0) {
     return [];
   }
 
@@ -61,7 +66,7 @@ export function scoreJobsForUser(rawJobs = [], userProfile = {}) {
  * @param {Object} userProfile User profile.
  * @returns {Object} Scored job object.
  */
-function scoreSingleJob(rawJob, userProfile) {
+function scoreSingleJob(rawJob = {}, userProfile = {}) {
   const normalizedJob = normalizeJob(rawJob);
   const normalizedUser = normalizeUserProfile(userProfile);
 
@@ -71,11 +76,14 @@ function scoreSingleJob(rawJob, userProfile) {
   const trustResult = scoreTrust(normalizedJob);
   const preferenceResult = scorePreferenceFit(normalizedJob, normalizedUser);
 
-  const matchedSkills = getMatchedSkills(
-    normalizedJob.canonicalSkills,
-    normalizedUser.canonicalSkills
-  );
+  const jobSkills = Array.isArray(normalizedJob?.canonicalSkills)
+    ? normalizedJob.canonicalSkills
+    : [];
+  const userSkills = Array.isArray(normalizedUser?.canonicalSkills)
+    ? normalizedUser.canonicalSkills
+    : [];
 
+  const matchedSkills = getMatchedSkills(jobSkills, userSkills);
   const matchedSkillBonus = calculateMatchedSkillBonus(matchedSkills);
 
   const bloomFitScore = clamp(
@@ -107,11 +115,17 @@ function scoreSingleJob(rawJob, userProfile) {
   const bloomReasons = dedupeStrings(
     prioritizeReasonsForVerdict(
       {
-        seniority: seniorityResult.reasons,
-        skills: addMatchedSkillReason(skillsResult.reasons, matchedSkills),
-        accessibility: accessibilityResult.reasons,
-        trust: trustResult.reasons,
-        preference: preferenceResult.reasons,
+        seniority: Array.isArray(seniorityResult?.reasons)
+          ? seniorityResult.reasons
+          : [],
+        skills: addMatchedSkillReason(skillsResult?.reasons, matchedSkills),
+        accessibility: Array.isArray(accessibilityResult?.reasons)
+          ? accessibilityResult.reasons
+          : [],
+        trust: Array.isArray(trustResult?.reasons) ? trustResult.reasons : [],
+        preference: Array.isArray(preferenceResult?.reasons)
+          ? preferenceResult.reasons
+          : [],
       },
       bloomVerdict
     )
@@ -122,16 +136,16 @@ function scoreSingleJob(rawJob, userProfile) {
     bloomFitScore,
     bloomVerdict,
     bloomReasons,
-    matchedSkills,
+    matchedSkills: Array.isArray(matchedSkills) ? matchedSkills : [],
     scoreBreakdown: {
-      seniorityFit: seniorityResult.score,
-      skillsFit: skillsResult.score,
-      skillOverlapBonus: matchedSkillBonus,
-      accessibility: accessibilityResult.score,
-      trust: trustResult.score,
-      preferenceFit: preferenceResult.score,
+      seniorityFit: Number(seniorityResult?.score || 0),
+      skillsFit: Number(skillsResult?.score || 0),
+      skillOverlapBonus: Number(matchedSkillBonus || 0),
+      accessibility: Number(accessibilityResult?.score || 0),
+      trust: Number(trustResult?.score || 0),
+      preferenceFit: Number(preferenceResult?.score || 0),
     },
-    warningFlags,
+    warningFlags: Array.isArray(warningFlags) ? warningFlags : [],
 
     // Legacy aliases for current UI compatibility.
     matchScore: bloomFitScore,
@@ -146,27 +160,25 @@ function scoreSingleJob(rawJob, userProfile) {
  * This keeps the existing skills scoring language intact while allowing
  * the UI and reason prioritization flow to surface concrete overlap.
  *
- * @param {string[]} reasons Existing skills-related reasons.
- * @param {string[]} matchedSkills Canonical matched skills.
+ * @param {string[] | undefined} reasons Existing skills-related reasons.
+ * @param {string[] | undefined} matchedSkills Canonical matched skills.
  * @returns {string[]} Updated reasons list.
  */
 function addMatchedSkillReason(reasons, matchedSkills) {
   const safeReasons = Array.isArray(reasons) ? reasons : [];
+  const safeMatchedSkills = Array.isArray(matchedSkills) ? matchedSkills : [];
 
-  if (!Array.isArray(matchedSkills) || matchedSkills.length === 0) {
+  if (safeMatchedSkills.length === 0) {
     return safeReasons;
   }
 
-  const preview = matchedSkills.slice(0, 3).join(", ");
+  const preview = safeMatchedSkills.slice(0, 3).join(", ");
   const suffix =
-    matchedSkills.length > 3
-      ? `, and ${matchedSkills.length - 3} more`
+    safeMatchedSkills.length > 3
+      ? `, and ${safeMatchedSkills.length - 3} more`
       : "";
 
-  return [
-    ...safeReasons,
-    `Matched skills include ${preview}${suffix}.`,
-  ];
+  return [...safeReasons, `Matched skills include ${preview}${suffix}.`];
 }
 
 /**
@@ -184,11 +196,13 @@ function addMatchedSkillReason(reasons, matchedSkills) {
  */
 function prioritizeReasonsForVerdict(groupedReasons, verdict) {
   const allReasons = [
-    ...groupedReasons.seniority,
-    ...groupedReasons.skills,
-    ...groupedReasons.accessibility,
-    ...groupedReasons.preference,
-    ...groupedReasons.trust,
+    ...(Array.isArray(groupedReasons?.seniority) ? groupedReasons.seniority : []),
+    ...(Array.isArray(groupedReasons?.skills) ? groupedReasons.skills : []),
+    ...(Array.isArray(groupedReasons?.accessibility)
+      ? groupedReasons.accessibility
+      : []),
+    ...(Array.isArray(groupedReasons?.preference) ? groupedReasons.preference : []),
+    ...(Array.isArray(groupedReasons?.trust) ? groupedReasons.trust : []),
   ];
 
   const negativeLikeReasons = allReasons.filter((reason) =>
