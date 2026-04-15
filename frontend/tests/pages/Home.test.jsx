@@ -16,7 +16,7 @@ describe("Home", () => {
     renderHome();
 
     expect(
-      screen.getByText("Mobile-first job matching for early careers")
+      screen.getByText("Mobile-first job matching for people building careers in tech")
     ).toBeInTheDocument();
 
     expect(
@@ -28,7 +28,7 @@ describe("Home", () => {
 
     expect(
       screen.getByText(
-        /earlybloom helps entry-level and junior candidates cut through fake/i
+        /earlybloom is tailored for people trying to break into or grow within the tech field/i
       )
     ).toBeInTheDocument();
   });
@@ -55,9 +55,9 @@ describe("Home", () => {
 
     const highlights = screen.getByLabelText(/product highlights/i);
 
-    expect(within(highlights).getByText(/real fit scoring/i)).toBeInTheDocument();
+    expect(within(highlights).getByText(/fit scoring/i)).toBeInTheDocument();
     expect(
-      within(highlights).getByText(/junior-friendly filtering/i)
+      within(highlights).getByText(/early-career filtering/i)
     ).toBeInTheDocument();
     expect(
       within(highlights).getByText(/application tracking/i)
@@ -82,13 +82,13 @@ describe("Home", () => {
     expect(
       screen.getByRole("heading", {
         level: 2,
-        name: /entry-level should mean entry-level/i,
+        name: /early-career tech roles should feel easier to find/i,
       })
     ).toBeInTheDocument();
 
     expect(
       screen.getByText(
-        /too many job boards flood early-career candidates with listings/i
+        /too many job boards overwhelm people in the tech field with roles/i
       )
     ).toBeInTheDocument();
   });
@@ -101,7 +101,7 @@ describe("Home", () => {
     expect(
       screen.getByRole("heading", {
         level: 2,
-        name: /a simpler path through the job mess/i,
+        name: /a simpler path through the job search/i,
       })
     ).toBeInTheDocument();
 
@@ -128,14 +128,14 @@ describe("Home", () => {
     expect(
       screen.getByRole("heading", {
         level: 2,
-        name: /a growing toolkit for job seekers/i,
+        name: /built for tech careers now, with room to grow over time/i,
       })
     ).toBeInTheDocument();
 
     const upcomingFeatures = screen.getByLabelText(/upcoming features/i);
 
     expect(
-      within(upcomingFeatures).getByText(/jobs page with fit labels and filters/i)
+      within(upcomingFeatures).getByText(/job search with fit labels and filters/i)
     ).toBeInTheDocument();
     expect(
       within(upcomingFeatures).getByText(/resume upload and skill extraction/i)
