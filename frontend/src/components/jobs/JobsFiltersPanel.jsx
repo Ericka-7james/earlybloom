@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import {
   FILTER_GROUPS,
   toggleSelectedValue,
@@ -33,7 +33,6 @@ function renderFilterChips(options, selectedValues, onToggle) {
 
 function FilterSection({
   title,
-  selectedCount,
   isOpen,
   onToggleOpen,
   children,
@@ -52,12 +51,6 @@ function FilterSection({
           <h3 className="jobs-filter-group__title">{title}</h3>
 
           <div className="jobs-filter-group__header-meta">
-            {selectedCount > 0 ? (
-              <span className="jobs-filter-group__count">
-                {selectedCount} selected
-              </span>
-            ) : null}
-
             <span className="jobs-filter-group__chevron" aria-hidden="true">
               {isOpen ? "−" : "+"}
             </span>
@@ -85,14 +78,6 @@ function JobsFiltersPanel({
     workplace: false,
     roleType: false,
   });
-
-  const totalSelectedCount = useMemo(
-    () =>
-      selectedExperienceLevels.length +
-      selectedWorkplaces.length +
-      selectedRoleTypes.length,
-    [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]
-  );
 
   function toggleSection(sectionKey) {
     setOpenSections((current) => ({
@@ -124,18 +109,11 @@ function JobsFiltersPanel({
           Entry-level and junior start selected by default so the feed stays
           early-career focused, but you can widen it whenever you want.
         </p>
-
-        {totalSelectedCount > 0 ? (
-          <p className="jobs-filters__summary">
-            {totalSelectedCount} filter{totalSelectedCount === 1 ? "" : "s"} selected
-          </p>
-        ) : null}
       </div>
 
       <div className="jobs-filters-panel__groups">
         <FilterSection
           title="Experience level"
-          selectedCount={selectedExperienceLevels.length}
           isOpen={openSections.experience}
           onToggleOpen={() => toggleSection("experience")}
         >
@@ -151,7 +129,6 @@ function JobsFiltersPanel({
 
         <FilterSection
           title="Workplace"
-          selectedCount={selectedWorkplaces.length}
           isOpen={openSections.workplace}
           onToggleOpen={() => toggleSection("workplace")}
         >
@@ -167,7 +144,6 @@ function JobsFiltersPanel({
 
         <FilterSection
           title="Role type"
-          selectedCount={selectedRoleTypes.length}
           isOpen={openSections.roleType}
           onToggleOpen={() => toggleSection("roleType")}
         >
