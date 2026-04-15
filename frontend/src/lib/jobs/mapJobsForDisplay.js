@@ -216,11 +216,19 @@ function resolveMatchScore(scored) {
 }
 
 function resolveReasons(scored) {
-  return scored?.bloomReasons ?? scored?.reasons ?? [];
+  return Array.isArray(scored?.bloomReasons)
+    ? scored.bloomReasons
+    : Array.isArray(scored?.reasons)
+      ? scored.reasons
+      : [];
 }
 
 function resolveWarnings(raw, scored) {
-  return scored?.warningFlags ?? raw?.warnings ?? [];
+  return Array.isArray(scored?.warningFlags)
+    ? scored.warningFlags
+    : Array.isArray(raw?.warnings)
+      ? raw.warnings
+      : [];
 }
 
 function resolveCompany(job) {
@@ -239,13 +247,12 @@ function resolveSummary(job) {
   return job.summary ?? job.short_summary ?? "";
 }
 
-function resolveRemote(job) {
+function resolveRemote(job, resolvedWorkplaceType) {
   if (typeof job.remote === "boolean") {
     return job.remote;
   }
 
-  const remoteType = resolveWorkplaceType(job);
-  return remoteType === "remote";
+  return resolvedWorkplaceType === "remote";
 }
 
 function formatSourceLabel(source) {
@@ -355,8 +362,7 @@ function createQuickFacts({
   ];
 }
 
-function createRequirementsSnapshot(job) {
-  const reasons = Array.isArray(job.reasons) ? job.reasons : [];
+function createRequirementsSnapshot(reasons) {
   return reasons.slice(0, 4);
 }
 
@@ -391,23 +397,36 @@ export function mapJobsForDisplay(
   scoredJobs = [],
   options = {}
 ) {
+  if (!Array.isArray(rawJobs) || rawJobs.length === 0) {
+    return [];
+  }
+
   const { viewerStateOverrides = {} } = options;
-  const scoredMap = new Map(scoredJobs.map((job) => [job.id, job]));
+  const scoredMap = new Map(
+    Array.isArray(scoredJobs) ? scoredJobs.map((job) => [job.id, job]) : []
+  );
 
   return rawJobs.map((job) => {
     const scored = scoredMap.get(job.id);
-    const compensation = buildCompensation(job);
-    const formattedCompensation = formatCompensation(compensation);
-    const sourceUrl = resolveSourceUrl(job);
     const source = job.source ?? job.source_name ?? null;
     const sourceLabel = formatSourceLabel(source);
+    const sourceUrl = resolveSourceUrl(job);
+    const company = resolveCompany(job);
+    const title = job.title ?? "Untitled role";
     const fullLocation = resolveLocation(job);
     const cardLocation = formatCardLocation(fullLocation, source);
     const modalLocation = formatModalLocation(fullLocation, source);
-    const workplaceType = formatWorkplaceType(resolveWorkplaceType(job));
+
+    const resolvedWorkplaceType = resolveWorkplaceType(job);
+    const workplaceType = formatWorkplaceType(resolvedWorkplaceType);
     const experienceLevel = normalizeExperienceLevel(resolveExperienceLevel(job));
     const employmentType = formatEmploymentType(resolveEmploymentType(job));
-
+    const compensation = buildCompensation(job);
+    const formattedCompensation = formatCompensation(compensation);
+    const fitTag = resolveFitTag(scored);
+    const matchScore = resolveMatchScore(scored);
+    const reasons = resolveReasons(scored);
+    const warningFlags = resolveWarnings(job, scored);
     const viewerState = normalizeViewerState(
       job,
       viewerStateOverrides?.[job.id] ?? null
@@ -415,24 +434,24 @@ export function mapJobsForDisplay(
 
     const mappedJob = {
       id: job.id,
-      title: job.title ?? "Untitled role",
-      company: resolveCompany(job),
+      title,
+      company,
       location: fullLocation || "Location not listed",
       cardLocation,
       modalLocation,
       fullLocation,
       workplaceType,
-      remoteType: resolveWorkplaceType(job),
-      remote: resolveRemote(job),
+      remoteType: resolvedWorkplaceType,
+      remote: resolveRemote(job, resolvedWorkplaceType),
       employmentType,
       roleType: resolveRoleType(job),
       experienceLevel,
       description: job.description ?? "",
       summary: resolveSummary(job),
-      fitTag: resolveFitTag(scored),
-      matchScore: resolveMatchScore(scored),
-      reasons: resolveReasons(scored),
-      warningFlags: resolveWarnings(job, scored),
+      fitTag,
+      matchScore,
+      reasons,
+      warningFlags,
       scoreBreakdown: normalizeScoreBreakdown(scored?.scoreBreakdown),
       confidence: scored?.confidence ?? null,
       compensation: formattedCompensation,
@@ -445,6 +464,9 @@ export function mapJobsForDisplay(
       isHidden: viewerState.isHidden,
       savedAt: viewerState.savedAt,
       hiddenAt: viewerState.hiddenAt,
+      matchedSkills: Array.isArray(scored?.matchedSkills)
+        ? scored.matchedSkills
+        : [],
       metadata: [
         cardLocation,
         experienceLevel,
@@ -455,11 +477,11 @@ export function mapJobsForDisplay(
       ].filter((value) => typeof value === "string" && value.trim().length > 0),
     };
 
-    const compensationSignal = createCompensationSignal(formattedCompensation);
+    const qualificationSignal = createQualificationSignal(mappedJob);
 
     return {
       ...mappedJob,
-      qualificationSignal: createQualificationSignal(mappedJob),
+      qualificationSignal,
       quickFacts: createQuickFacts({
         experienceLevel,
         workplaceType,
@@ -467,16 +489,16 @@ export function mapJobsForDisplay(
         compensation: formattedCompensation,
         sourceLabel,
       }),
-      requirementsSnapshot: createRequirementsSnapshot(mappedJob),
-      compensationSignal,
+      requirementsSnapshot: createRequirementsSnapshot(reasons),
+      compensationSignal: createCompensationSignal(formattedCompensation),
       cardMeta: createCardMeta({
         cardLocation,
         experienceLevel,
         workplaceType,
         compensation: formattedCompensation,
       }),
-      searchQuery: createSearchQuery(mappedJob.title, mappedJob.company),
-      fitSummary: resolveFitTag(scored),
+      searchQuery: createSearchQuery(title, company),
+      fitSummary: fitTag,
     };
   });
 }

@@ -88,14 +88,16 @@ class Settings:
         # ========================
         # Shared provider settings
         # ========================
+        # Slightly faster than the old baseline, but not so aggressive that
+        # good providers get chopped down too hard.
         self.JOB_PROVIDER_TIMEOUT_SECONDS: float = max(
-            0.5, _get_float("JOB_PROVIDER_TIMEOUT_SECONDS", 3.5)
+            0.5, _get_float("JOB_PROVIDER_TIMEOUT_SECONDS", 3.0)
         )
         self.JOB_PROVIDER_MAX_JOBS_PER_SOURCE: int = max(
             1, _get_int("JOB_PROVIDER_MAX_JOBS_PER_SOURCE", 100)
         )
         self.JOB_CACHE_TTL_SECONDS: int = max(
-            1, _get_int("JOB_CACHE_TTL_SECONDS", 300)
+            1, _get_int("JOB_CACHE_TTL_SECONDS", 180)
         )
 
         # Lightweight provider pagination controls for serverless execution
@@ -118,6 +120,11 @@ class Settings:
         self.JOBS_SHARED_CACHE_MIN_RESULTS: int = max(
             1, _get_int("JOBS_SHARED_CACHE_MIN_RESULTS", 20)
         )
+        # Return shared jobs immediately when the cache is "good enough",
+        # but don't make this so low that the feed gets thin too often.
+        self.JOBS_MIN_IMMEDIATE_RESULTS: int = max(
+            1, _get_int("JOBS_MIN_IMMEDIATE_RESULTS", 20)
+        )
         self.JOBS_SHARED_CACHE_TTL_DAYS: int = max(
             1, _get_int("JOBS_SHARED_CACHE_TTL_DAYS", 14)
         )
@@ -130,8 +137,25 @@ class Settings:
         self.JOBS_INGESTION_RUNNING_TTL_SECONDS: int = max(
             1, _get_int("JOBS_INGESTION_RUNNING_TTL_SECONDS", 300)
         )
+        # Restore a wider scan so the shared cache can actually surface more roles.
         self.JOBS_MAX_DB_SCAN_ROWS: int = max(
-            1, _get_int("JOBS_MAX_DB_SCAN_ROWS", 500)
+            1, _get_int("JOBS_MAX_DB_SCAN_ROWS", 400)
+        )
+        # Keep bounded concurrency, but not too low.
+        self.JOBS_PROVIDER_MAX_CONCURRENCY: int = max(
+            1, _get_int("JOBS_PROVIDER_MAX_CONCURRENCY", 3)
+        )
+        # Let the public jobs API return a fuller feed again.
+        self.JOBS_MAX_RESPONSE_JOBS: int = max(
+            1, _get_int("JOBS_MAX_RESPONSE_JOBS", 160)
+        )
+        # Keep the aggregate cap above the returned cap to preserve variety pre-dedupe/sort.
+        self.JOBS_MAX_LIVE_AGGREGATE_JOBS: int = max(
+            1, _get_int("JOBS_MAX_LIVE_AGGREGATE_JOBS", 300)
+        )
+        # Cleanup should stay throttled.
+        self.JOBS_CACHE_CLEANUP_INTERVAL_SECONDS: int = max(
+            30, _get_int("JOBS_CACHE_CLEANUP_INTERVAL_SECONDS", 900)
         )
 
         # ========================
