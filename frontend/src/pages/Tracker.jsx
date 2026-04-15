@@ -61,6 +61,51 @@ function formatDate(value) {
   });
 }
 
+function formatResumeLocation(location) {
+  if (!location || typeof location !== "object") {
+    return "Not detected";
+  }
+
+  const cityRegion = [location.city, location.region]
+    .filter(Boolean)
+    .join(", ")
+    .trim();
+
+  if (cityRegion) {
+    return cityRegion;
+  }
+
+  const raw = String(location.raw || "").trim();
+
+  if (!raw) {
+    return "Not detected";
+  }
+
+  if (raw.length > 40) {
+    return "Not detected";
+  }
+
+  if (
+    /\b[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+,\s*[A-Z]{2}\b/.test(
+      raw
+    )
+  ) {
+    return "Not detected";
+  }
+
+  return raw;
+}
+
+function normalizeWarnings(warnings) {
+  if (!Array.isArray(warnings)) {
+    return [];
+  }
+
+  return warnings
+    .map((warning) => String(warning || "").trim())
+    .filter(Boolean);
+}
+
 function useViewportWidth() {
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window === "undefined" ? 1280 : window.innerWidth
@@ -290,6 +335,10 @@ function Tracker() {
   const resumeSummary = parsedResume?.summary || {};
   const resumeSkills = parsedResume?.skills?.normalized || [];
   const resumeWarnings = latestResume?.parse_warnings || [];
+  const cleanResumeWarnings = normalizeWarnings(resumeWarnings);
+  const displayedResumeLocation = formatResumeLocation(
+    parsedResume?.basics?.location
+  );
 
   function resetPreferencesDraft() {
     setPreferencesDraft(DEFAULT_PREFERENCES);
@@ -708,23 +757,14 @@ function Tracker() {
                       <span className="tracker-stat__label">
                         Inferred location
                       </span>
-                      <strong>
-                        {parsedResume?.basics?.location?.raw ||
-                          [
-                            parsedResume?.basics?.location?.city,
-                            parsedResume?.basics?.location?.region,
-                          ]
-                            .filter(Boolean)
-                            .join(", ") ||
-                          "Not detected"}
-                      </strong>
+                      <strong>{displayedResumeLocation}</strong>
                     </div>
 
-                    {resumeWarnings.length > 0 ? (
+                    {cleanResumeWarnings.length > 0 ? (
                       <div className="tracker-signals__warnings">
                         <span className="tracker-stat__label">Parser notes</span>
                         <ul>
-                          {resumeWarnings.map((warning) => (
+                          {cleanResumeWarnings.map((warning) => (
                             <li key={warning}>{warning}</li>
                           ))}
                         </ul>
