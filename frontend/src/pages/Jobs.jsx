@@ -40,6 +40,7 @@ import {
   filterJobs,
   getFilterSummary,
   getActiveFilterTags,
+  getAvailableSkillOptions,
 } from "../lib/jobs/jobFilters";
 
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
@@ -267,6 +268,7 @@ function Jobs() {
   );
   const [selectedWorkplaces, setSelectedWorkplaces] = useState([]);
   const [selectedRoleTypes, setSelectedRoleTypes] = useState([]);
+  const [selectedSkills, setSelectedSkills] = useState([]);
   const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
   const [jobViewerOverrides, setJobViewerOverrides] = useState({});
   const [pendingActions, setPendingActions] = useState({});
@@ -375,6 +377,14 @@ function Jobs() {
     }).sort((a, b) => b.matchScore - a.matchScore);
   }, [hasRawJobs, rawJobs, scoredJobs, jobViewerOverrides]);
 
+  const availableSkillOptions = useMemo(() => {
+    const profileSkills = Array.isArray(resolvedUserProfile?.skills)
+      ? resolvedUserProfile.skills
+      : [];
+
+    return getAvailableSkillOptions(mappedJobs, profileSkills);
+  }, [mappedJobs, resolvedUserProfile]);
+
   const jobs = useMemo(() => {
     if (!mappedJobs.length) {
       return [];
@@ -384,17 +394,24 @@ function Jobs() {
       selectedExperienceLevels,
       selectedWorkplaces,
       selectedRoleTypes,
+      selectedSkills,
     }).filter((job) => !job.isHidden);
   }, [
     mappedJobs,
     selectedExperienceLevels,
     selectedWorkplaces,
     selectedRoleTypes,
+    selectedSkills,
   ]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]);
+  }, [
+    selectedExperienceLevels,
+    selectedWorkplaces,
+    selectedRoleTypes,
+    selectedSkills,
+  ]);
 
   const totalPages = useMemo(() => {
     return Math.max(1, Math.ceil(jobs.length / JOBS_PER_PAGE));
@@ -422,13 +439,20 @@ function Jobs() {
       selectedExperienceLevels,
       selectedWorkplaces,
       selectedRoleTypes,
+      selectedSkills,
     });
-  }, [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]);
+  }, [
+    selectedExperienceLevels,
+    selectedWorkplaces,
+    selectedRoleTypes,
+    selectedSkills,
+  ]);
 
   const hasActiveFilters =
     selectedExperienceLevels.length > 0 ||
     selectedWorkplaces.length > 0 ||
-    selectedRoleTypes.length > 0;
+    selectedRoleTypes.length > 0 ||
+    selectedSkills.length > 0;
 
   const isUsingDefaultExperiencePreset = useMemo(() => {
     return arraysEqualAsSets(
@@ -442,8 +466,14 @@ function Jobs() {
       selectedExperienceLevels,
       selectedWorkplaces,
       selectedRoleTypes,
+      selectedSkills,
     });
-  }, [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]);
+  }, [
+    selectedExperienceLevels,
+    selectedWorkplaces,
+    selectedRoleTypes,
+    selectedSkills,
+  ]);
 
   const loginContent = getLoginRequiredContent(loginRequiredIntent);
 
@@ -512,6 +542,7 @@ function Jobs() {
     setSelectedExperienceLevels([]);
     setSelectedWorkplaces([]);
     setSelectedRoleTypes([]);
+    setSelectedSkills([]);
   }
 
   function removeActiveFilterTag(tag) {
@@ -529,9 +560,18 @@ function Jobs() {
       return;
     }
 
-    setSelectedRoleTypes((currentValues) =>
-      currentValues.filter((value) => value !== tag.value)
-    );
+    if (tag.type === "role") {
+      setSelectedRoleTypes((currentValues) =>
+        currentValues.filter((value) => value !== tag.value)
+      );
+      return;
+    }
+
+    if (tag.type === "skill") {
+      setSelectedSkills((currentValues) =>
+        currentValues.filter((value) => value !== tag.value)
+      );
+    }
   }
 
   function updatePendingAction(jobId, nextState) {
@@ -743,9 +783,12 @@ function Jobs() {
               selectedExperienceLevels={selectedExperienceLevels}
               selectedWorkplaces={selectedWorkplaces}
               selectedRoleTypes={selectedRoleTypes}
+              selectedSkills={selectedSkills}
+              availableSkills={availableSkillOptions}
               setSelectedExperienceLevels={setSelectedExperienceLevels}
               setSelectedWorkplaces={setSelectedWorkplaces}
               setSelectedRoleTypes={setSelectedRoleTypes}
+              setSelectedSkills={setSelectedSkills}
               onClearAll={clearAllFilters}
             />
           </aside>
@@ -968,9 +1011,12 @@ function Jobs() {
             selectedExperienceLevels={selectedExperienceLevels}
             selectedWorkplaces={selectedWorkplaces}
             selectedRoleTypes={selectedRoleTypes}
+            selectedSkills={selectedSkills}
+            availableSkills={availableSkillOptions}
             setSelectedExperienceLevels={setSelectedExperienceLevels}
             setSelectedWorkplaces={setSelectedWorkplaces}
             setSelectedRoleTypes={setSelectedRoleTypes}
+            setSelectedSkills={setSelectedSkills}
             onClearAll={clearAllFilters}
           />
         </div>

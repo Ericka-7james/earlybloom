@@ -70,6 +70,8 @@ class NormalizedJob(BaseModel):
     required_skills: list[str] = Field(default_factory=list)
     preferred_skills: list[str] = Field(default_factory=list)
 
+    skills: list[str] = Field(default_factory=list)
+
     employment_type: str | None = None
     experience_level: ExperienceLevel = "unknown"
     role_type: RoleType = "unknown"
@@ -117,6 +119,7 @@ class NormalizedJob(BaseModel):
         "qualifications",
         "required_skills",
         "preferred_skills",
+        "skills",
         mode="before",
     )
     @classmethod
