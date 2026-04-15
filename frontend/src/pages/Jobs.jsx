@@ -285,6 +285,8 @@ function Jobs() {
     jobs: rawJobs,
     resolvedUserProfile,
     isLoading,
+    isRefreshing,
+    hasLoadedOnce,
     error,
     isMockMode,
     retry,
@@ -353,17 +355,31 @@ function Jobs() {
     setCurrentPage(1);
   }, [viewerKey, rawJobs]);
 
+  const hasRawJobs = Array.isArray(rawJobs) && rawJobs.length > 0;
+
   const scoredJobs = useMemo(() => {
+    if (!hasRawJobs) {
+      return [];
+    }
+
     return scoreJobsForUser(rawJobs, resolvedUserProfile);
-  }, [rawJobs, resolvedUserProfile]);
+  }, [hasRawJobs, rawJobs, resolvedUserProfile]);
 
   const mappedJobs = useMemo(() => {
+    if (!hasRawJobs) {
+      return [];
+    }
+
     return mapJobsForDisplay(rawJobs, scoredJobs, {
       viewerStateOverrides: jobViewerOverrides,
     }).sort((a, b) => b.matchScore - a.matchScore);
-  }, [rawJobs, scoredJobs, jobViewerOverrides]);
+  }, [hasRawJobs, rawJobs, scoredJobs, jobViewerOverrides]);
 
   const jobs = useMemo(() => {
+    if (!mappedJobs.length) {
+      return [];
+    }
+
     return filterJobs(mappedJobs, {
       selectedExperienceLevels,
       selectedWorkplaces,
@@ -666,6 +682,13 @@ function Jobs() {
     }
   }
 
+  const showInitialLoadingState = isLoading && !hasLoadedOnce && !hasRawJobs;
+  const showRefreshState = isRefreshing && hasRawJobs;
+  const showLoadErrorCard = !showInitialLoadingState && !!error && !hasRawJobs;
+  const showJobsEmptyState =
+    !showInitialLoadingState && !error && jobs.length === 0;
+  const showJobsList = jobs.length > 0;
+
   return (
     <main className="jobs-page">
       <section className="section-pad">
@@ -756,14 +779,18 @@ function Jobs() {
               <div>
                 <h2 className="jobs-results__title">Open roles</h2>
                 <p className="jobs-results__text">
-                  {isLoading
+                  {showInitialLoadingState
                     ? "Loading roles..."
-                    : error
+                    : error && !hasRawJobs
                     ? "We could not load jobs right now."
                     : `${jobs.length} roles matched to your profile.`}
                 </p>
 
-                {!isLoading && !error && jobs.length > 0 ? (
+                {showRefreshState ? (
+                  <p className="jobs-results__text">Refreshing jobs...</p>
+                ) : null}
+
+                {!showInitialLoadingState && jobs.length > 0 ? (
                   <p className="jobs-results__text">
                     Showing {pageStartCount} to {pageEndCount} on page{" "}
                     {currentPage} of {totalPages}.
@@ -771,16 +798,15 @@ function Jobs() {
                 ) : null}
               </div>
 
-              {!isLoading ? (
-                <button
-                  type="button"
-                  className="jobs-chip"
-                  onClick={retry}
-                  aria-label="Refresh jobs"
-                >
-                  Refresh
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className="jobs-chip"
+                onClick={retry}
+                aria-label="Refresh jobs"
+                disabled={isLoading || isRefreshing}
+              >
+                {isRefreshing ? "Refreshing..." : "Refresh"}
+              </button>
             </div>
 
             {actionError ? (
@@ -789,13 +815,13 @@ function Jobs() {
               </div>
             ) : null}
 
-            {isLoading ? (
+            {showInitialLoadingState ? (
               <div className="section-card" role="status" aria-live="polite">
                 <p className="jobs-results__text">Loading jobs...</p>
               </div>
             ) : null}
 
-            {!isLoading && error ? (
+            {showLoadErrorCard ? (
               <div className="section-card" role="alert" aria-live="polite">
                 <h3 className="jobs-results__title">Unable to load jobs</h3>
                 <p
@@ -812,7 +838,7 @@ function Jobs() {
               </div>
             ) : null}
 
-            {!isLoading && !error && jobs.length === 0 ? (
+            {showJobsEmptyState ? (
               <div className="section-card" aria-live="polite">
                 <h3 className="jobs-results__title">
                   {hasActiveFilters
@@ -843,9 +869,9 @@ function Jobs() {
               </div>
             ) : null}
 
-            {!isLoading && !error && jobs.length > 0 ? (
+            {showJobsList ? (
               <>
-                <div className="jobs-list">
+                <div className="jobs-list" aria-busy={showRefreshState}>
                   {paginatedJobs.map((job) => (
                     <JobCard
                       key={job.id}

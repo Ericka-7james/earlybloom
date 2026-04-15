@@ -2,20 +2,22 @@
 
 This module orchestrates provider ingestion for the jobs API.
 
-Shared-cache-first strategy:
-- Read from Supabase query cache first
-- Fall back to shared jobs cache
-- Clean up expired jobs before serving cache
-- If the shared cache is stale or too thin, fetch live providers
-- Upsert fresh jobs into Supabase for reuse across users
-- Guard provider refreshes with job_ingestion_runs cooldown + running checks
-- Deduplicate and map into the public response shape
+Latency-oriented strategy:
+- Prefer fast in-process memory cache first
+- Prefer cached query/shared jobs before live refresh
+- Do not run shared-cache cleanup on every request
+- Return decent shared results immediately when available
+- Refresh live providers in parallel with bounded concurrency
+- Cap final response size to avoid overfilling payloads
+- Treat Supabase as an accelerator, not the sole dependency
 """
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -35,8 +37,11 @@ from app.services.jobs.job_filters import (
 from app.services.jobs.normalizer import normalize_provider_job
 from app.services.jobs.providers import get_configured_providers
 from app.services.jobs.us_filters import should_keep_us_focused_job
+from app.services.jobs.common.skill_extractor import attach_normalized_skills
 
 logger = logging.getLogger(__name__)
+
+_LAST_SHARED_CACHE_CLEANUP_AT = 0.0
 
 
 class JobIngestionService:
@@ -97,7 +102,7 @@ async def get_jobs(
                 "Returning jobs from memory cache. count=%s",
                 len(cached_memory_jobs),
             )
-            return cached_memory_jobs
+            return _cap_jobs_for_response(cached_memory_jobs)
 
     query_key = repository.build_query_cache_key(
         remote_only=remote_only,
@@ -115,9 +120,10 @@ async def get_jobs(
             len(cached_query_jobs),
             query_key,
         )
+        capped_query_jobs = _cap_jobs_for_response(cached_query_jobs)
         if use_memory_cache and memory_cache_key is not None:
-            set_cached_value(memory_cache_key, cached_query_jobs)
-        return cached_query_jobs
+            set_cached_value(memory_cache_key, capped_query_jobs)
+        return capped_query_jobs
 
     shared_jobs = _get_cached_jobs_from_db(
         repository=repository,
@@ -134,33 +140,37 @@ async def get_jobs(
     )
 
     if shared_jobs:
+        capped_shared_jobs = _cap_jobs_for_response(shared_jobs)
+
         _write_query_cache(
             repository=repository,
             query_key=query_key,
-            jobs=shared_jobs,
+            jobs=capped_shared_jobs,
             remote_only=remote_only,
             levels=levels,
             role_types=role_types,
         )
 
-        if len(shared_jobs) >= settings.JOBS_SHARED_CACHE_MIN_RESULTS:
+        if _should_return_shared_jobs_immediately(shared_jobs):
             logger.warning(
-                "Returning jobs from shared DB cache. count=%s threshold=%s",
+                "Returning jobs from shared DB cache immediately. count=%s threshold=%s immediate_min=%s",
                 len(shared_jobs),
                 settings.JOBS_SHARED_CACHE_MIN_RESULTS,
+                settings.JOBS_MIN_IMMEDIATE_RESULTS,
             )
             if use_memory_cache and memory_cache_key is not None:
-                set_cached_value(memory_cache_key, shared_jobs)
-            return shared_jobs
+                set_cached_value(memory_cache_key, capped_shared_jobs)
+            return capped_shared_jobs
 
     if settings.JOBS_DB_ONLY_READS:
         logger.warning(
             "JOBS_DB_ONLY_READS enabled. Returning shared jobs without live refresh. count=%s",
             len(shared_jobs),
         )
+        capped_shared_jobs = _cap_jobs_for_response(shared_jobs)
         if use_memory_cache and memory_cache_key is not None:
-            set_cached_value(memory_cache_key, shared_jobs)
-        return shared_jobs
+            set_cached_value(memory_cache_key, capped_shared_jobs)
+        return capped_shared_jobs
 
     logger.warning(
         "Shared cache below threshold or empty. Triggering live refresh. cached_count=%s threshold=%s",
@@ -178,6 +188,7 @@ async def get_jobs(
     )
 
     live_jobs = [map_normalized_job_to_response(job) for job in live_normalized_jobs]
+    live_jobs = _cap_jobs_for_response(live_jobs)
 
     logger.warning(
         "Live provider refresh returned count=%s query_key=%s",
@@ -185,7 +196,7 @@ async def get_jobs(
         query_key,
     )
 
-    final_jobs = live_jobs or shared_jobs
+    final_jobs = live_jobs or _cap_jobs_for_response(shared_jobs)
 
     if live_jobs:
         _write_query_cache(
@@ -231,6 +242,7 @@ def map_normalized_job_to_response(job: NormalizedJob) -> dict[str, Any]:
         "salary_currency": job.salary_currency,
         "stable_key": job.stable_key,
         "provider_payload_hash": job.provider_payload_hash,
+        "skills": job.skills or [],
         "viewer_state": {
             "is_saved": False,
             "is_hidden": False,
@@ -249,7 +261,11 @@ def _get_cached_jobs_from_query_cache(
     try:
         row = repository.get_query_cache(cache_key=query_key)
     except Exception as exc:
-        logger.exception("Failed to read query cache. query_key=%s", query_key, exc_info=exc)
+        logger.exception(
+            "Failed to read query cache. query_key=%s",
+            query_key,
+            exc_info=exc,
+        )
         return []
 
     if not row:
@@ -300,13 +316,7 @@ def _get_cached_jobs_from_db(
 ) -> list[dict[str, Any]]:
     """Read jobs from Supabase cache and apply the same filtering pipeline."""
     try:
-        cleanup_result = repository.cleanup_expired_jobs(grace_hours=48)
-        logger.warning(
-            "Jobs cache cleanup complete. marked_inactive=%s deleted=%s",
-            cleanup_result["marked_inactive"],
-            cleanup_result["deleted"],
-        )
-
+        _cleanup_shared_cache_if_due(repository)
         rows = repository.list_active_jobs(limit=limit)
     except Exception as exc:
         logger.exception("Failed to read jobs from Supabase cache.", exc_info=exc)
@@ -377,7 +387,11 @@ def _write_query_cache(
             len(job_ids),
         )
     except Exception as exc:
-        logger.exception("Failed to write query cache. query_key=%s", query_key, exc_info=exc)
+        logger.exception(
+            "Failed to write query cache. query_key=%s",
+            query_key,
+            exc_info=exc,
+        )
 
 
 def _write_jobs_to_db_cache(
@@ -422,7 +436,7 @@ async def _refresh_jobs_from_providers_if_allowed(
         logger.warning("No job providers are configured.")
         return []
 
-    all_jobs: list[NormalizedJob] = []
+    eligible_runs: list[tuple[str, Any, str | None]] = []
 
     for provider_name, provider in providers.items():
         if repository.has_running_ingestion(
@@ -460,11 +474,68 @@ async def _refresh_jobs_from_providers_if_allowed(
             },
         )
         run_id = str(run.get("id") or "").strip() or None
+        eligible_runs.append((provider_name, provider, run_id))
 
-        raw_count = 0
-        normalized_count = 0
-        deduped_count = 0
+    if not eligible_runs:
+        logger.warning("No eligible providers available for live refresh.")
+        return []
 
+    semaphore = asyncio.Semaphore(max(1, settings.JOBS_PROVIDER_MAX_CONCURRENCY))
+    tasks = [
+        _refresh_single_provider(
+            semaphore=semaphore,
+            repository=repository,
+            provider_name=provider_name,
+            provider=provider,
+            run_id=run_id,
+            remote_only=remote_only,
+            levels=levels,
+            role_types=role_types,
+        )
+        for provider_name, provider, run_id in eligible_runs
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    all_jobs: list[NormalizedJob] = []
+
+    for result in results:
+        if isinstance(result, Exception):
+            logger.exception("Parallel provider refresh task failed.", exc_info=result)
+            continue
+
+        all_jobs.extend(result)
+
+    deduped_all_jobs = dedupe_jobs(all_jobs)
+    capped_jobs = deduped_all_jobs[: settings.JOBS_MAX_LIVE_AGGREGATE_JOBS]
+
+    logger.warning(
+        "Live refresh complete. aggregated=%s deduped=%s capped=%s",
+        len(all_jobs),
+        len(deduped_all_jobs),
+        len(capped_jobs),
+    )
+
+    return capped_jobs
+
+
+async def _refresh_single_provider(
+    *,
+    semaphore: asyncio.Semaphore,
+    repository: JobCacheRepository,
+    provider_name: str,
+    provider: Any,
+    run_id: str | None,
+    remote_only: bool,
+    levels: list[str] | None,
+    role_types: list[str] | None,
+) -> list[NormalizedJob]:
+    """Fetch, filter, dedupe, and persist a single provider result."""
+    raw_count = 0
+    normalized_count = 0
+    deduped_count = 0
+
+    async with semaphore:
         try:
             provider_jobs = await _fetch_provider_jobs(provider_name, provider)
             raw_count = len(provider_jobs)
@@ -496,7 +567,6 @@ async def _refresh_jobs_from_providers_if_allowed(
                     jobs=deduped_provider_jobs,
                     ingestion_run_id=run_id,
                 )
-                all_jobs.extend(deduped_provider_jobs)
 
             if run_id:
                 repository.complete_ingestion_run(
@@ -517,6 +587,8 @@ async def _refresh_jobs_from_providers_if_allowed(
                 deduped_count,
             )
 
+            return deduped_provider_jobs
+
         except Exception as exc:
             logger.exception(
                 "Provider refresh failed. provider=%s error=%s",
@@ -533,16 +605,7 @@ async def _refresh_jobs_from_providers_if_allowed(
                     error_message=str(exc),
                     metadata={"provider": provider_name},
                 )
-
-    deduped_all_jobs = dedupe_jobs(all_jobs)
-
-    logger.warning(
-        "Live refresh complete. aggregated=%s deduped=%s",
-        len(all_jobs),
-        len(deduped_all_jobs),
-    )
-
-    return deduped_all_jobs
+            return []
 
 
 def _apply_job_filters(
@@ -613,7 +676,7 @@ def _coerce_to_normalized_job(
 ) -> NormalizedJob | None:
     """Accept both already-normalized jobs and legacy dict payloads."""
     if isinstance(provider_job, NormalizedJob):
-        return provider_job
+        return attach_normalized_skills(provider_job)
 
     if isinstance(provider_job, dict):
         normalized = normalize_provider_job(
@@ -621,7 +684,7 @@ def _coerce_to_normalized_job(
             source=source,
         )
         if normalized is not None:
-            return normalized
+            return attach_normalized_skills(normalized)
 
         try:
             return NormalizedJob.model_validate(provider_job)
@@ -633,6 +696,45 @@ def _coerce_to_normalized_job(
             return None
 
     return None
+
+
+def _should_return_shared_jobs_immediately(shared_jobs: list[dict[str, Any]]) -> bool:
+    """Return shared jobs immediately when they are good enough for fast UX."""
+    settings = get_settings()
+    count = len(shared_jobs)
+
+    return (
+        count >= settings.JOBS_SHARED_CACHE_MIN_RESULTS
+        or count >= settings.JOBS_MIN_IMMEDIATE_RESULTS
+    )
+
+
+def _cap_jobs_for_response(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Cap jobs list size for faster serialization and frontend work."""
+    settings = get_settings()
+    return jobs[: settings.JOBS_MAX_RESPONSE_JOBS]
+
+
+def _cleanup_shared_cache_if_due(repository: JobCacheRepository) -> None:
+    """Throttle shared-cache cleanup so it does not run on every request."""
+    global _LAST_SHARED_CACHE_CLEANUP_AT
+
+    settings = get_settings()
+    now = time.time()
+
+    if (now - _LAST_SHARED_CACHE_CLEANUP_AT) < settings.JOBS_CACHE_CLEANUP_INTERVAL_SECONDS:
+        return
+
+    try:
+        cleanup_result = repository.cleanup_expired_jobs(grace_hours=48)
+        _LAST_SHARED_CACHE_CLEANUP_AT = now
+        logger.warning(
+            "Jobs cache cleanup complete. marked_inactive=%s deleted=%s",
+            cleanup_result["marked_inactive"],
+            cleanup_result["deleted"],
+        )
+    except Exception as exc:
+        logger.exception("Failed during jobs cache cleanup.", exc_info=exc)
 
 
 def _get_mock_jobs() -> list[dict[str, Any]]:
