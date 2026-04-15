@@ -81,10 +81,9 @@ class ResumeProject(BaseModel):
 class ResumeSkills(BaseModel):
     """Represents extracted resume skills."""
 
-    model_config = ConfigDict(extra="forbid")
-
     raw: List[str] = Field(default_factory=list)
     normalized: List[str] = Field(default_factory=list)
+    categorized: Dict[str, List[str]] = Field(default_factory=dict)
 
 
 class ResumeSummary(BaseModel):

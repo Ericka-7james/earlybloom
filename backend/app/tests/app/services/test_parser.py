@@ -17,6 +17,7 @@ def test_preprocess_resume_text_splits_header_tokens_and_inline_sections():
     assert "PROFESSIONAL\nSUMMARY\nSoftware Engineer with 2+ years of\nexperience" in result
     assert "SKILLS\nPython, React" in result
 
+
 def test_infer_name_extracts_name_from_header_with_trailing_location():
     header_lines = [
         "Ericka Smiley James Atlanta, GA",
@@ -119,7 +120,7 @@ def test_parse_experience_extracts_role_company_dates_and_skills():
         "- Worked with SQL APIs",
     ]
 
-    result = parser.parse_experience(section_lines, ["react", "python", "sql"])
+    result = parser.parse_experience(section_lines, ["React", "Python", "SQL"])
 
     assert len(result) == 1
     assert result[0].role == "Software Engineer"
@@ -128,7 +129,7 @@ def test_parse_experience_extracts_role_company_dates_and_skills():
     assert result[0].end_date is None
     assert result[0].is_current is True
     assert "Built React and Python features" in result[0].bullet_points
-    assert result[0].normalized_skills == ["react", "python", "sql"]
+    assert result[0].normalized_skills == ["React", "Python", "SQL"]
 
 
 def test_parse_projects_extracts_project_and_tech_stack():
@@ -138,12 +139,12 @@ def test_parse_projects_extracts_project_and_tech_stack():
         "- github.com/ericka-7james/earlybloom",
     ]
 
-    result = parser.parse_projects(section_lines, ["react", "python", "supabase"])
+    result = parser.parse_projects(section_lines, ["React", "Python", "Supabase"])
 
     assert len(result) == 1
     assert result[0].title == "EarlyBloom"
     assert "Built with React, Python, and Supabase" in result[0].description
-    assert result[0].tech_stack == ["react", "python", "supabase"]
+    assert result[0].tech_stack == ["React", "Python", "Supabase"]
     assert len(result[0].links) == 1
     assert result[0].links[0].label == "GitHub"
 
@@ -191,7 +192,7 @@ def test_infer_years_experience_from_text_extracts_numeric_years():
 
 
 def test_infer_primary_role_signals_returns_general_software_when_no_matches():
-    result = parser.infer_primary_role_signals(["figma"])
+    result = parser.infer_primary_role_signals(["Figma"])
 
     assert result == ["general_software"]
 
@@ -206,7 +207,7 @@ def test_compute_confidence_scores_populated_resume():
         education=[parser.ResumeEducation(school="Spelman College")],
         experience=[parser.ResumeExperience(role="Software Engineer")],
         projects=[parser.ResumeProject(title="EarlyBloom")],
-        skills=parser.ResumeSkills(normalized=["python", "react"]),
+        skills=parser.ResumeSkills(normalized=["Python", "React"]),
         summary=parser.ResumeSummary(),
         meta=parser.ResumeMeta(parsed_at=parser.datetime.now(parser.UTC)),
     )
@@ -216,12 +217,41 @@ def test_compute_confidence_scores_populated_resume():
     assert result == 1.0
 
 
-def test_parse_resume_text_uses_fallback_years_and_extracts_location_and_skills():
+def test_extract_skills_uses_shared_taxonomy_and_returns_canonical_values():
+    raw_text = """
+    Built projects with js, react.js, Amazon Web Services, Postgres, PowerBI, and ServiceNow.
+    """
+
+    skill_lines = [
+        "js, react.js, Amazon Web Services, Postgres, PowerBI, ServiceNow",
+    ]
+
+    result = parser.extract_skills(raw_text, skill_lines)
+
+    assert result.normalized == [
+        "JavaScript",
+        "React",
+        "AWS",
+        "PostgreSQL",
+        "Power BI",
+        "ServiceNow",
+    ]
+    assert result.raw == [
+        "JavaScript",
+        "React",
+        "AWS",
+        "PostgreSQL",
+        "Power BI",
+        "ServiceNow",
+    ]
+
+
+def test_parse_resume_text_uses_shared_skill_taxonomy_and_fallback_years():
     raw_text = """
     Ericka Smiley James Atlanta, GA • james7.ericka@gmail.com • github.com/ericka-7james
     PROFESSIONAL SUMMARY Software Engineer with 2+ years of experience building full-stack apps.
     SKILLS
-    Python, JavaScript, HTML, Pandas, Terraform, Docker
+    JS, React.js, HTML5, Pandas, Terraform, Docker, Amazon Web Services, Postgres, PowerBI
     """
 
     parsed_json, warnings = parser.parse_resume_text(
@@ -237,12 +267,15 @@ def test_parse_resume_text_uses_fallback_years_and_extracts_location_and_skills(
     assert parsed_json["summary"]["estimated_years_experience"] == 2
     assert parsed_json["summary"]["seniority"] == "early_career"
     assert parsed_json["skills"]["normalized"] == [
-        "python",
-        "javascript",
-        "html",
-        "pandas",
-        "terraform",
-        "docker",
+        "JavaScript",
+        "React",
+        "HTML",
+        "Pandas",
+        "Terraform",
+        "Docker",
+        "AWS",
+        "PostgreSQL",
+        "Power BI",
     ]
     assert "Could not confidently infer candidate name." not in warnings
     assert parsed_json["meta"]["source_file_type"] == "application/pdf"
