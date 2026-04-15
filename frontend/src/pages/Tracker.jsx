@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import JobCard from "../components/jobs/JobCard.jsx";
 import CommonModal from "../components/common/CommonModal.jsx";
+import CommonLoadingModal from "../components/common/CommonLoadingModal.jsx";
 import ResumeUploadModal from "../components/jobs/ResumeUploadModal.jsx";
 import TrackerPreferencesPanel from "../components/tracker/TrackerPreferencesPanel.jsx";
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
@@ -112,6 +113,10 @@ function useViewportWidth() {
   );
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
     function handleResize() {
       setViewportWidth(window.innerWidth);
     }
@@ -127,7 +132,7 @@ function Tracker() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const viewportWidth = useViewportWidth();
-  const isMobile = viewportWidth <= 920;
+  const isMobile = viewportWidth < 768;
 
   const [activeTab, setActiveTab] = useState(TRACKER_TABS.SAVED);
   const [savedJobsRaw, setSavedJobsRaw] = useState([]);
@@ -255,7 +260,7 @@ function Tracker() {
       setIsLoading(false);
     }
 
-    loadTrackerData();
+    void loadTrackerData();
 
     return () => {
       isMounted = false;
@@ -341,7 +346,7 @@ function Tracker() {
   );
 
   function resetPreferencesDraft() {
-    setPreferencesDraft(DEFAULT_PREFERENCES);
+    setPreferencesDraft(trackerData?.preferences || DEFAULT_PREFERENCES);
   }
 
   async function handleToggleSave(job) {
@@ -445,6 +450,8 @@ function Tracker() {
         ...current,
         preferences: nextPreferences,
       }));
+
+      setPreferencesDraft(nextPreferences);
 
       setResolvedUserProfile((current) => ({
         ...current,
@@ -576,15 +583,14 @@ function Tracker() {
 
   if (authLoading) {
     return (
-      <main className="tracker-page">
-        <section className="section-pad">
-          <div className="container">
-            <div className="section-card tracker-status">
-              <h1 className="tracker-status__title">Loading your tracker...</h1>
-            </div>
-          </div>
-        </section>
-      </main>
+      <>
+        <main className="tracker-page" aria-hidden="true" />
+        <CommonLoadingModal
+          isOpen
+          message="Growing your tracker..."
+          label="Loading your tracker"
+        />
+      </>
     );
   }
 
@@ -666,9 +672,10 @@ function Tracker() {
                   type="button"
                   className="tracker-stat tracker-stat--preferences section-card"
                   onClick={() => setIsPreferencesModalOpen(true)}
+                  aria-label="Edit tracker preferences"
                 >
                   <span className="tracker-stat__label">Preferences</span>
-                  <strong className="tracker-stat__value">Edit</strong>
+                  <strong className="tracker-stat__value">Edit →</strong>
                 </button>
               </div>
 
@@ -824,19 +831,9 @@ function Tracker() {
                 </div>
               ) : null}
 
-              {isLoading ? (
-                <div
-                  className="section-card tracker-status"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <p className="tracker-status__title">
-                    Loading tracker jobs...
-                  </p>
-                </div>
-              ) : visibleJobs.length === 0 ? (
+              {!isLoading && visibleJobs.length === 0 ? (
                 renderEmptyState()
-              ) : (
+              ) : !isLoading ? (
                 <div className="tracker-list">
                   {visibleJobs.map((job) => (
                     <JobCard
@@ -853,11 +850,17 @@ function Tracker() {
                     />
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
       </section>
+
+      <CommonLoadingModal
+        isOpen={isLoading}
+        message="Growing your tracker..."
+        label="Loading tracker jobs"
+      />
 
       <CommonModal
         isOpen={isPreferencesModalOpen}

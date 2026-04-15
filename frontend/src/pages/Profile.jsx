@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import CommonModal from "../components/common/CommonModal.jsx";
+import CommonLoadingModal from "../components/common/CommonLoadingModal.jsx";
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
 import { useAuth } from "../hooks/useAuth";
 import { fetchTracker } from "../lib/tracker/trackerApi";
-import { readCachedResumeUiState } from "../lib/resumes";
 import "../styles/components/profile.css";
 
 const DEFAULT_PROFILE = {
@@ -121,35 +121,39 @@ function normalizeTrackerPayload(payload) {
   };
 }
 
-function buildResumeFromCache(cachedResume) {
-  if (!cachedResume || typeof cachedResume !== "object") {
-    return null;
-  }
+function useViewportWidth() {
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? 1280 : window.innerWidth
+  );
 
-  return {
-    id: cachedResume.id || null,
-    original_filename: cachedResume.name || null,
-    file_type: cachedResume.type || "application/pdf",
-    parse_status: cachedResume.parseStatus || "pending",
-    updated_at: cachedResume.uploadedAt || null,
-    ats_tags: Array.isArray(cachedResume.atsTags) ? cachedResume.atsTags : [],
-    parse_warnings: [],
-    parsed_json: null,
-  };
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    function handleResize() {
+      setViewportWidth(window.innerWidth);
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  return viewportWidth;
 }
 
 function Profile() {
   const navigate = useNavigate();
   const { user, loading: authLoading, handleSignOut } = useAuth();
+  const viewportWidth = useViewportWidth();
+  const isMobile = viewportWidth < 768;
 
   const [trackerData, setTrackerData] = useState(DEFAULT_TRACKER_DATA);
-  const [cachedResumeFallback, setCachedResumeFallback] = useState(() =>
-    readCachedResumeUiState()
-  );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [isSignOutModalOpen, setIsSignOutModalOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isPreferencesModalOpen, setIsPreferencesModalOpen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -157,7 +161,6 @@ function Profile() {
     async function loadProfileData() {
       if (!user) {
         setTrackerData(DEFAULT_TRACKER_DATA);
-        setCachedResumeFallback(null);
         setError("");
         setIsLoading(false);
         return;
@@ -173,21 +176,13 @@ function Profile() {
           return;
         }
 
-        const normalizedTracker = normalizeTrackerPayload(tracker);
-        setTrackerData(normalizedTracker);
-
-        if (normalizedTracker.resume) {
-          setCachedResumeFallback(null);
-        } else {
-          setCachedResumeFallback(readCachedResumeUiState());
-        }
+        setTrackerData(normalizeTrackerPayload(tracker));
       } catch (err) {
         if (!isMounted) {
           return;
         }
 
         setTrackerData(DEFAULT_TRACKER_DATA);
-        setCachedResumeFallback(readCachedResumeUiState());
         setError(getFriendlyProfileError(err));
       } finally {
         if (isMounted) {
@@ -204,8 +199,8 @@ function Profile() {
   }, [user]);
 
   const profile = trackerData?.profile || DEFAULT_PROFILE;
-  const latestResume =
-    trackerData?.resume || buildResumeFromCache(cachedResumeFallback) || null;
+  const preferences = trackerData?.preferences || DEFAULT_PREFERENCES;
+  const latestResume = trackerData?.resume || null;
 
   const displayName = useMemo(
     () => getResolvedDisplayName(profile, user),
@@ -230,17 +225,112 @@ function Profile() {
     }
   }
 
-  if (authLoading) {
+  function renderPreferencesContent() {
     return (
-      <main className="app-page profile-page">
-        <section className="section-pad">
-          <div className="container--product">
-            <div className="status-message-card status-message-card--info">
-              <p className="status-message-card__title">Loading your profile...</p>
+      <div className="settings-section">
+        <div className="settings-section__header">
+          <p className="section-label">Preferences</p>
+          <h2 className="card-title">Search and profile defaults</h2>
+          <p className="card-copy">
+            These reflect your durable account setup and the same
+            preference language used by Tracker.
+          </p>
+        </div>
+
+        <div className="settings-section__body">
+          <div className="settings-section__group">
+            <div className="form-field">
+              <p className="form-field__label">Display name</p>
+              <p className="card-copy">{displayName}</p>
+            </div>
+
+            <div className="form-field">
+              <p className="form-field__label">Career interests</p>
+              <p className="card-copy">
+                {formatList(profile.career_interests, "Not set yet")}
+              </p>
+            </div>
+
+            <div className="form-field">
+              <p className="form-field__label">Preferred job levels</p>
+              <p className="card-copy">
+                {formatList(
+                  preferences.desired_levels?.length
+                    ? preferences.desired_levels
+                    : profile.desired_levels,
+                  "Entry-level, Junior"
+                )}
+              </p>
+            </div>
+
+            <div className="form-field">
+              <p className="form-field__label">Preferred role types</p>
+              <p className="card-copy">
+                {formatList(
+                  preferences.preferred_role_types?.length
+                    ? preferences.preferred_role_types
+                    : profile.preferred_role_types,
+                  "Not set yet"
+                )}
+              </p>
+            </div>
+
+            <div className="form-field">
+              <p className="form-field__label">Location preferences</p>
+              <p className="card-copy">
+                {formatList(
+                  preferences.preferred_locations?.length
+                    ? preferences.preferred_locations
+                    : profile.preferred_locations,
+                  "Not set yet"
+                )}
+              </p>
+            </div>
+
+            <div className="form-field">
+              <p className="form-field__label">Remote / hybrid preference</p>
+              <p className="card-copy">
+                {formatList(
+                  preferences.preferred_workplace_types?.length
+                    ? preferences.preferred_workplace_types
+                    : profile.preferred_workplace_types,
+                  "Not set yet"
+                )}
+              </p>
+            </div>
+
+            <div className="form-field">
+              <p className="form-field__label">LGBTQ-friendly only</p>
+              <p className="card-copy">
+                {(typeof preferences.is_lgbt_friendly_only === "boolean"
+                  ? preferences.is_lgbt_friendly_only
+                  : profile.is_lgbt_friendly_only)
+                  ? "On"
+                  : "Off"}
+              </p>
             </div>
           </div>
-        </section>
-      </main>
+
+          <div className="settings-section__actions">
+            <Link to="/tracker" className="button button--secondary">
+              Edit in tracker
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (authLoading) {
+    return (
+      <>
+        <main className="app-page profile-page" aria-hidden="true" />
+        <CommonLoadingModal
+          isOpen
+          message="Growing your profile..."
+          label="Loading your profile"
+        />
+      </>
     );
   }
 
@@ -322,15 +412,30 @@ function Profile() {
                   <div className="info-panel__content">
                     <p className="card-copy">
                       Preferred levels:{" "}
-                      {formatList(profile.desired_levels, "Entry-level, Junior")}
+                      {formatList(
+                        preferences.desired_levels?.length
+                          ? preferences.desired_levels
+                          : profile.desired_levels,
+                        "Entry-level, Junior"
+                      )}
                     </p>
                     <p className="card-copy">
                       Workplace:{" "}
-                      {formatList(profile.preferred_workplace_types, "Not set yet")}
+                      {formatList(
+                        preferences.preferred_workplace_types?.length
+                          ? preferences.preferred_workplace_types
+                          : profile.preferred_workplace_types,
+                        "Not set yet"
+                      )}
                     </p>
                     <p className="card-copy">
                       Locations:{" "}
-                      {formatList(profile.preferred_locations, "Not set yet")}
+                      {formatList(
+                        preferences.preferred_locations?.length
+                          ? preferences.preferred_locations
+                          : profile.preferred_locations,
+                        "Not set yet"
+                      )}
                     </p>
                   </div>
                 </div>
@@ -380,7 +485,11 @@ function Profile() {
               <article className="compact-stat-card">
                 <p className="compact-stat-card__label">LGBTQ-friendly only</p>
                 <p className="compact-stat-card__value">
-                  {profile.is_lgbt_friendly_only ? "On" : "Off"}
+                  {(typeof preferences.is_lgbt_friendly_only === "boolean"
+                    ? preferences.is_lgbt_friendly_only
+                    : profile.is_lgbt_friendly_only)
+                    ? "On"
+                    : "Off"}
                 </p>
                 <p className="compact-stat-card__meta">
                   Whether this preference is active in your defaults.
@@ -391,100 +500,39 @@ function Profile() {
 
           <section className="app-split-layout app-split-layout--balanced">
             <div className="app-content-stack app-content-stack--tight">
-              <section className="app-panel-card">
-                <div className="settings-section">
-                  <div className="settings-section__header">
-                    <p className="section-label">Preferences</p>
-                    <h2 className="card-title">Search and profile defaults</h2>
-                    <p className="card-copy">
-                      These reflect your durable account setup and the same
-                      preference language used by Tracker.
-                    </p>
-                  </div>
-
-                  <div className="settings-section__body">
-                    <div className="settings-section__group">
-                      <div className="form-field">
-                        <p className="form-field__label">Display name</p>
-                        <p className="card-copy">{displayName}</p>
-                      </div>
-
-                      <div className="form-field">
-                        <p className="form-field__label">Career interests</p>
-                        <p className="card-copy">
-                          {formatList(profile.career_interests, "Not set yet")}
-                        </p>
-                      </div>
-
-                      <div className="form-field">
-                        <p className="form-field__label">Preferred job levels</p>
-                        <p className="card-copy">
-                          {formatList(profile.desired_levels, "Entry-level, Junior")}
-                        </p>
-                      </div>
-
-                      <div className="form-field">
-                        <p className="form-field__label">Preferred role types</p>
-                        <p className="card-copy">
-                          {formatList(profile.preferred_role_types, "Not set yet")}
-                        </p>
-                      </div>
-
-                      <div className="form-field">
-                        <p className="form-field__label">Location preferences</p>
-                        <p className="card-copy">
-                          {formatList(profile.preferred_locations, "Not set yet")}
-                        </p>
-                      </div>
-
-                      <div className="form-field">
-                        <p className="form-field__label">Remote / hybrid preference</p>
-                        <p className="card-copy">
-                          {formatList(
-                            profile.preferred_workplace_types,
-                            "Not set yet"
-                          )}
-                        </p>
-                      </div>
+              {!isMobile ? (
+                <section className="app-panel-card">
+                  {renderPreferencesContent()}
+                </section>
+              ) : (
+                <section className="app-panel-card">
+                  <div className="settings-section">
+                    <div className="settings-section__header">
+                      <p className="section-label">Preferences</p>
+                      <h2 className="card-title">Search and profile defaults</h2>
+                      <p className="card-copy">
+                        Open a cleaner modal view instead of scrolling through a
+                        long mobile card.
+                      </p>
                     </div>
 
-                    <div className="settings-section__actions">
-                      <Link to="/tracker" className="button button--secondary">
-                        Edit in tracker
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              <section className="app-panel-card">
-                <div className="settings-section">
-                  <div className="settings-section__header">
-                    <p className="section-label">Resume</p>
-                    <h2 className="card-title">Resume status</h2>
-                  </div>
-
-                  <div className="settings-section__body">
-                    <div className="info-panel">
-                      <div className="info-panel__content">
-                        <p className="card-copy">
-                          Current file:{" "}
-                          {latestResume?.original_filename || "No resume uploaded yet"}
-                        </p>
-                        <p className="card-copy">
-                          Status: {formatResumeStatus(latestResume)}
-                        </p>
+                    <div className="settings-section__body">
+                      <div className="settings-section__actions">
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          onClick={() => setIsPreferencesModalOpen(true)}
+                        >
+                          View preferences
+                        </button>
+                        <Link to="/tracker" className="button button--secondary">
+                          Edit in tracker
+                        </Link>
                       </div>
                     </div>
-
-                    <div className="settings-section__actions">
-                      <Link to="/tracker" className="button button--secondary">
-                        Manage resume in tracker
-                      </Link>
-                    </div>
                   </div>
-                </div>
-              </section>
+                </section>
+              )}
             </div>
 
             <div className="app-content-stack app-content-stack--tight">
@@ -520,7 +568,25 @@ function Profile() {
                   </div>
 
                   <div className="settings-section__body">
+                    <div className="info-panel">
+                      <div className="info-panel__content">
+                        <p className="card-copy">
+                          Current file:{" "}
+                          {latestResume?.original_filename || "No resume uploaded yet"}
+                        </p>
+                        <p className="card-copy">
+                          Status: {formatResumeStatus(latestResume)}
+                        </p>
+                      </div>
+                    </div>
+
                     <div className="settings-section__actions">
+                      <Link to="/tracker" className="button button--secondary">
+                        Manage resume in tracker
+                      </Link>
+                    </div>
+
+                    <div className="settings-section__actions profile-account-actions">
                       <button
                         type="button"
                         className="button button--secondary"
@@ -539,18 +605,27 @@ function Profile() {
                   <p className="message-card__copy">{error}</p>
                 </div>
               ) : null}
-
-              {isLoading ? (
-                <div className="status-message-card status-message-card--info">
-                  <p className="status-message-card__title">
-                    Refreshing profile details...
-                  </p>
-                </div>
-              ) : null}
             </div>
           </section>
         </div>
       </section>
+
+      <CommonLoadingModal
+        isOpen={isLoading}
+        message="Growing your profile..."
+        label="Refreshing profile details"
+      />
+
+      <CommonModal
+        isOpen={isPreferencesModalOpen}
+        title="Profile preferences"
+        onClose={() => setIsPreferencesModalOpen(false)}
+        size="md"
+        iconImage={BloombugAppIcon}
+        iconAlt="EarlyBloom Bloombug icon"
+      >
+        {renderPreferencesContent()}
+      </CommonModal>
 
       <CommonModal
         isOpen={isSignOutModalOpen}

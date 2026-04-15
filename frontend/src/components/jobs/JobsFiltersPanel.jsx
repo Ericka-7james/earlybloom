@@ -33,7 +33,6 @@ function renderFilterChips(options, selectedValues, onToggle) {
 
 function FilterSection({
   title,
-  selectedCount,
   isOpen,
   onToggleOpen,
   children,
@@ -52,12 +51,6 @@ function FilterSection({
           <h3 className="jobs-filter-group__title">{title}</h3>
 
           <div className="jobs-filter-group__header-meta">
-            {selectedCount > 0 ? (
-              <span className="jobs-filter-group__count">
-                {selectedCount} selected
-              </span>
-            ) : null}
-
             <span className="jobs-filter-group__chevron" aria-hidden="true">
               {isOpen ? "−" : "+"}
             </span>
@@ -135,7 +128,6 @@ function JobsFiltersPanel({
       <div className="jobs-filters-panel__groups">
         <FilterSection
           title="Experience level"
-          selectedCount={selectedExperienceLevels.length}
           isOpen={openSections.experience}
           onToggleOpen={() => toggleSection("experience")}
         >
@@ -151,7 +143,6 @@ function JobsFiltersPanel({
 
         <FilterSection
           title="Workplace"
-          selectedCount={selectedWorkplaces.length}
           isOpen={openSections.workplace}
           onToggleOpen={() => toggleSection("workplace")}
         >
@@ -167,7 +158,6 @@ function JobsFiltersPanel({
 
         <FilterSection
           title="Role type"
-          selectedCount={selectedRoleTypes.length}
           isOpen={openSections.roleType}
           onToggleOpen={() => toggleSection("roleType")}
         >

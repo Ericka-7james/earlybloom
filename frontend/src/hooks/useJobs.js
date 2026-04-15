@@ -1,4 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+/**
+ * @fileoverview Jobs data hook for EarlyBloom.
+ *
+ * This hook loads:
+ * - the shared jobs feed
+ * - the resolved profile inputs used for scoring and filtering
+ *
+ * Design goals:
+ * - keep loading, retry, and abort handling centralized
+ * - return stable default shapes when backend data is missing
+ * - avoid stale state updates after request cancellation
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchJobs,
   fetchResolvedJobProfile,
@@ -9,28 +22,125 @@ const DEFAULT_RESOLVED_USER_PROFILE = {
   desiredLevels: ["entry-level", "junior"],
   preferredRoleTypes: [],
   preferredWorkplaceTypes: [],
+  preferredLocations: [],
   skills: [],
   isLgbtFriendlyOnly: false,
 };
 
+/**
+ * Returns a fresh copy of the default resolved-profile shape.
+ *
+ * @returns {{
+ *   desiredLevels: string[],
+ *   preferredRoleTypes: string[],
+ *   preferredWorkplaceTypes: string[],
+ *   preferredLocations: string[],
+ *   skills: string[],
+ *   isLgbtFriendlyOnly: boolean
+ * }} Default resolved-profile object.
+ */
+function getDefaultResolvedUserProfile() {
+  return {
+    desiredLevels: [...DEFAULT_RESOLVED_USER_PROFILE.desiredLevels],
+    preferredRoleTypes: [...DEFAULT_RESOLVED_USER_PROFILE.preferredRoleTypes],
+    preferredWorkplaceTypes: [...DEFAULT_RESOLVED_USER_PROFILE.preferredWorkplaceTypes],
+    preferredLocations: [...DEFAULT_RESOLVED_USER_PROFILE.preferredLocations],
+    skills: [...DEFAULT_RESOLVED_USER_PROFILE.skills],
+    isLgbtFriendlyOnly: DEFAULT_RESOLVED_USER_PROFILE.isLgbtFriendlyOnly,
+  };
+}
+
+/**
+ * Normalizes a resolved-profile payload into the app's stable frontend shape.
+ *
+ * @param {object | null | undefined} profile Raw resolved-profile payload.
+ * @returns {{
+ *   desiredLevels: string[],
+ *   preferredRoleTypes: string[],
+ *   preferredWorkplaceTypes: string[],
+ *   preferredLocations: string[],
+ *   skills: string[],
+ *   isLgbtFriendlyOnly: boolean
+ * }} Normalized resolved-profile object.
+ */
+function normalizeResolvedUserProfile(profile) {
+  if (!profile || typeof profile !== "object") {
+    return getDefaultResolvedUserProfile();
+  }
+
+  return {
+    desiredLevels: Array.isArray(profile.desiredLevels)
+      ? profile.desiredLevels
+      : [...DEFAULT_RESOLVED_USER_PROFILE.desiredLevels],
+    preferredRoleTypes: Array.isArray(profile.preferredRoleTypes)
+      ? profile.preferredRoleTypes
+      : [...DEFAULT_RESOLVED_USER_PROFILE.preferredRoleTypes],
+    preferredWorkplaceTypes: Array.isArray(profile.preferredWorkplaceTypes)
+      ? profile.preferredWorkplaceTypes
+      : [...DEFAULT_RESOLVED_USER_PROFILE.preferredWorkplaceTypes],
+    preferredLocations: Array.isArray(profile.preferredLocations)
+      ? profile.preferredLocations
+      : [...DEFAULT_RESOLVED_USER_PROFILE.preferredLocations],
+    skills: Array.isArray(profile.skills)
+      ? profile.skills
+      : [...DEFAULT_RESOLVED_USER_PROFILE.skills],
+    isLgbtFriendlyOnly:
+      typeof profile.isLgbtFriendlyOnly === "boolean"
+        ? profile.isLgbtFriendlyOnly
+        : DEFAULT_RESOLVED_USER_PROFILE.isLgbtFriendlyOnly,
+  };
+}
+
+/**
+ * Loads jobs and resolved-profile data for the current viewer.
+ *
+ * @param {{
+ *   viewerKey?: string
+ * }} [options] Hook options.
+ * @returns {{
+ *   jobs: Array,
+ *   resolvedUserProfile: {
+ *     desiredLevels: string[],
+ *     preferredRoleTypes: string[],
+ *     preferredWorkplaceTypes: string[],
+ *     preferredLocations: string[],
+ *     skills: string[],
+ *     isLgbtFriendlyOnly: boolean
+ *   },
+ *   isLoading: boolean,
+ *   error: string,
+ *   isMockMode: boolean,
+ *   retry: () => void
+ * }} Jobs state and helpers.
+ */
 export function useJobs(options = {}) {
   const { viewerKey = "guest" } = options;
 
   const [jobs, setJobs] = useState([]);
   const [resolvedUserProfile, setResolvedUserProfile] = useState(
-    DEFAULT_RESOLVED_USER_PROFILE
+    getDefaultResolvedUserProfile()
   );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
 
+  /**
+   * Triggers a jobs reload.
+   *
+   * @returns {void}
+   */
   const retry = useCallback(() => {
-    setReloadKey((value) => value + 1);
+    setReloadKey((currentValue) => currentValue + 1);
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
 
+    /**
+     * Loads jobs and resolved-profile data in parallel.
+     *
+     * @returns {Promise<void>}
+     */
     async function loadJobsData() {
       setIsLoading(true);
       setError("");
@@ -47,23 +157,18 @@ export function useJobs(options = {}) {
 
         setJobs(Array.isArray(nextJobs) ? nextJobs : []);
         setResolvedUserProfile(
-          nextResolvedUserProfile && typeof nextResolvedUserProfile === "object"
-            ? {
-                ...DEFAULT_RESOLVED_USER_PROFILE,
-                ...nextResolvedUserProfile,
-              }
-            : DEFAULT_RESOLVED_USER_PROFILE
+          normalizeResolvedUserProfile(nextResolvedUserProfile)
         );
-      } catch (err) {
-        if (err?.name === "AbortError") {
+      } catch (error) {
+        if (controller.signal.aborted || error?.name === "AbortError") {
           return;
         }
 
         setJobs([]);
-        setResolvedUserProfile(DEFAULT_RESOLVED_USER_PROFILE);
+        setResolvedUserProfile(getDefaultResolvedUserProfile());
         setError(
-          err instanceof Error
-            ? err.message
+          error instanceof Error
+            ? error.message
             : "Something went wrong while loading jobs."
         );
       } finally {
@@ -73,17 +178,21 @@ export function useJobs(options = {}) {
       }
     }
 
-    loadJobsData();
+    void loadJobsData();
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+    };
   }, [reloadKey, viewerKey]);
+
+  const isMockMode = useMemo(() => shouldUseMockJobs(), []);
 
   return {
     jobs,
     resolvedUserProfile,
     isLoading,
     error,
-    isMockMode: shouldUseMockJobs(),
+    isMockMode,
     retry,
   };
 }
