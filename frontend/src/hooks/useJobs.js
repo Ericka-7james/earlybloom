@@ -9,6 +9,8 @@
  * - keep loading, retry, and abort handling centralized
  * - return stable default shapes when backend data is missing
  * - avoid stale state updates after request cancellation
+ * - keep previous jobs visible during refresh
+ * - distinguish first-load blocking from background refreshes
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -108,6 +110,8 @@ function normalizeResolvedUserProfile(profile) {
  *     isLgbtFriendlyOnly: boolean
  *   },
  *   isLoading: boolean,
+ *   isRefreshing: boolean,
+ *   hasLoadedOnce: boolean,
  *   error: string,
  *   isMockMode: boolean,
  *   retry: () => void
@@ -121,6 +125,8 @@ export function useJobs(options = {}) {
     getDefaultResolvedUserProfile()
   );
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -136,13 +142,16 @@ export function useJobs(options = {}) {
   useEffect(() => {
     const controller = new AbortController();
 
-    /**
-     * Loads jobs and resolved-profile data in parallel.
-     *
-     * @returns {Promise<void>}
-     */
     async function loadJobsData() {
-      setIsLoading(true);
+      const hasExistingJobs = Array.isArray(jobs) && jobs.length > 0;
+      const shouldUseRefreshState = hasLoadedOnce || hasExistingJobs;
+
+      if (shouldUseRefreshState) {
+        setIsRefreshing(true);
+      } else {
+        setIsLoading(true);
+      }
+
       setError("");
 
       try {
@@ -159,13 +168,17 @@ export function useJobs(options = {}) {
         setResolvedUserProfile(
           normalizeResolvedUserProfile(nextResolvedUserProfile)
         );
+        setHasLoadedOnce(true);
       } catch (error) {
         if (controller.signal.aborted || error?.name === "AbortError") {
           return;
         }
 
-        setJobs([]);
-        setResolvedUserProfile(getDefaultResolvedUserProfile());
+        if (!hasLoadedOnce && !hasExistingJobs) {
+          setJobs([]);
+          setResolvedUserProfile(getDefaultResolvedUserProfile());
+        }
+
         setError(
           error instanceof Error
             ? error.message
@@ -174,6 +187,7 @@ export function useJobs(options = {}) {
       } finally {
         if (!controller.signal.aborted) {
           setIsLoading(false);
+          setIsRefreshing(false);
         }
       }
     }
@@ -191,6 +205,8 @@ export function useJobs(options = {}) {
     jobs,
     resolvedUserProfile,
     isLoading,
+    isRefreshing,
+    hasLoadedOnce,
     error,
     isMockMode,
     retry,
