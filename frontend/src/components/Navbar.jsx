@@ -7,10 +7,7 @@ import "../styles/components/navbar.css";
 /**
  * Renders the shared application navigation.
  *
- * Session-aware:
- * - Shows tracker only for signed-in users
- * - Keeps desktop and mobile navigation aligned
- * - Prepares the nav structure for a future /profile route
+ * Public routes stay available even while auth is resolving.
  *
  * @returns {JSX.Element} Top navigation bar.
  */
@@ -62,64 +59,68 @@ function Navbar() {
   }, [closeMenu]);
 
   const desktopLinks = useMemo(() => {
-    if (loading) {
-      return [{ type: "status", label: "Loading..." }];
-    }
+    const publicLinks = [
+      { type: "link", to: "/", label: "Home" },
+      { type: "link", to: "/jobs", label: "Jobs" },
+      { type: "link", to: "/learn-more", label: "Learn More" },
+    ];
 
     if (user) {
       return [
         { type: "link", to: "/", label: "Home" },
         { type: "link", to: "/jobs", label: "Jobs" },
         { type: "link", to: "/tracker", label: "Tracker" },
-        { type: "link", to: "/profile", label: "Profile", disabled: true },
+        { type: "link", to: "/profile", label: "Profile" },
         { type: "button", label: "Sign out", onClick: onSignOut },
       ];
     }
 
     return [
-      { type: "link", to: "/", label: "Home" },
-      { type: "link", to: "/jobs", label: "Jobs" },
-      { type: "link", to: "/learn-more", label: "Learn More" },
-      { type: "link", to: "/sign-in", label: "Sign in", accent: true },
+      ...publicLinks,
+      {
+        type: "link",
+        to: "/sign-in",
+        label: loading ? "Checking sign in..." : "Sign in",
+        accent: true,
+      },
     ];
   }, [loading, onSignOut, user]);
 
   const mobileLinks = useMemo(() => {
-    if (loading) {
-      return [{ type: "status", label: "Loading..." }];
-    }
+    const publicLinks = [
+      { type: "link", to: "/", label: "Home" },
+      { type: "link", to: "/jobs", label: "Jobs" },
+      { type: "link", to: "/learn-more", label: "Learn More" },
+    ];
 
     if (user) {
       return [
         { type: "link", to: "/", label: "Home" },
         { type: "link", to: "/jobs", label: "Jobs" },
         { type: "link", to: "/tracker", label: "Tracker" },
-        { type: "link", to: "/profile", label: "Profile", disabled: true },
+        { type: "link", to: "/profile", label: "Profile" },
         { type: "button", label: "Sign out", onClick: onSignOut, danger: true },
       ];
     }
 
     return [
-      { type: "link", to: "/", label: "Home" },
-      { type: "link", to: "/jobs", label: "Jobs" },
-      { type: "link", to: "/learn-more", label: "Learn More" },
-      { type: "link", to: "/sign-in", label: "Sign in", accent: true },
+      ...publicLinks,
+      {
+        type: "link",
+        to: "/sign-in",
+        label: loading ? "Checking sign in..." : "Sign in",
+        accent: true,
+      },
     ];
   }, [loading, onSignOut, user]);
 
   function renderDesktopItem(item) {
-    if (item.type === "status") {
-      return (
-        <div className="nav-auth-placeholder" aria-hidden="true">
-          <span className="nav-link nav-link--muted">{item.label}</span>
-        </div>
-      );
-    }
+    const itemKey = item.key || `${item.type}-${item.label}`;
 
     if (item.type === "button") {
       return (
         <button
-          key={item.label}
+          key={itemKey}
           type="button"
           className="nav-link nav-link--button"
           onClick={item.onClick}
@@ -132,7 +133,7 @@ function Navbar() {
     if (item.disabled) {
       return (
         <span
-          key={item.label}
+          key={itemKey}
           className="nav-link nav-link--muted"
           aria-disabled="true"
           title="Coming soon"
@@ -144,7 +145,7 @@ function Navbar() {
 
     return (
       <NavLink
-        key={item.label}
+        key={itemKey}
         to={item.to}
         end={item.to === "/"}
         className={({ isActive }) =>
@@ -163,20 +164,12 @@ function Navbar() {
   }
 
   function renderMobileItem(item) {
-    if (item.type === "status") {
-      return (
-        <div className="nav-menu__item-wrap" key={item.label}>
-          <span className="nav-menu__item nav-menu__item--muted">
-            {item.label}
-          </span>
-        </div>
-      );
-    }
+    const itemKey = item.key || `${item.type}-${item.label}`;
 
     if (item.type === "button") {
       return (
         <button
-          key={item.label}
+          key={itemKey}
           type="button"
           className={[
             "nav-menu__item",
@@ -195,7 +188,7 @@ function Navbar() {
     if (item.disabled) {
       return (
         <span
-          key={item.label}
+          key={itemKey}
           className="nav-menu__item nav-menu__item--muted"
           aria-disabled="true"
           title="Coming soon"
@@ -207,7 +200,7 @@ function Navbar() {
 
     return (
       <NavLink
-        key={item.label}
+        key={itemKey}
         to={item.to}
         end={item.to === "/"}
         className={({ isActive }) =>

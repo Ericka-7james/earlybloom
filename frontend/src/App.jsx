@@ -3,6 +3,7 @@ import Navbar from "./components/Navbar";
 import Home from "./pages/Home";
 import Jobs from "./pages/Jobs";
 import Tracker from "./pages/Tracker";
+import Profile from "./pages/Profile";
 import LearnMore from "./pages/LearnMore";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
@@ -19,12 +20,10 @@ import SignUp from "./pages/SignUp";
  * - Home
  * - Jobs
  * - Tracker
+ * - Profile
  * - Learn More
  * - Sign In
  * - Sign Up
- *
- * Future-ready:
- * - shell supports adding /profile later without restructuring
  *
  * @returns {JSX.Element} The full application router and shell.
  */
@@ -40,6 +39,7 @@ function App() {
               <Route path="/" element={<Home />} />
               <Route path="/jobs" element={<Jobs />} />
               <Route path="/tracker" element={<Tracker />} />
+              <Route path="/profile" element={<Profile />} />
               <Route path="/learn-more" element={<LearnMore />} />
               <Route path="/sign-in" element={<SignIn />} />
               <Route path="/sign-up" element={<SignUp />} />
