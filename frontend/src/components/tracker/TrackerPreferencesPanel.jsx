@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   FILTER_GROUPS,
   toggleSelectedValue,
@@ -96,6 +96,16 @@ function TrackerPreferencesPanel({
     location: false,
   });
 
+  const totalSelectedCount = useMemo(() => {
+    return (
+      (preferencesDraft.desired_levels?.length || 0) +
+      (preferencesDraft.preferred_workplace_types?.length || 0) +
+      (preferencesDraft.preferred_role_types?.length || 0) +
+      (preferencesDraft.preferred_locations?.length || 0) +
+      (preferencesDraft.is_lgbt_friendly_only ? 1 : 0)
+    );
+  }, [preferencesDraft]);
+
   function toggleSection(sectionKey) {
     setOpenSections((current) => ({
       ...current,
@@ -134,6 +144,13 @@ function TrackerPreferencesPanel({
           These set your steady default search shape. Jobs page filters can still
           drift around freely without rewriting this setup.
         </p>
+
+        {totalSelectedCount > 0 ? (
+          <p className="card-meta">
+            {totalSelectedCount} preference
+            {totalSelectedCount === 1 ? "" : "s"} selected
+          </p>
+        ) : null}
       </div>
 
       <PreferenceSection

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   FILTER_GROUPS,
   toggleSelectedValue,
@@ -79,6 +79,14 @@ function JobsFiltersPanel({
     roleType: false,
   });
 
+  const totalSelectedCount = useMemo(
+    () =>
+      selectedExperienceLevels.length +
+      selectedWorkplaces.length +
+      selectedRoleTypes.length,
+    [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]
+  );
+
   function toggleSection(sectionKey) {
     setOpenSections((current) => ({
       ...current,
@@ -109,6 +117,12 @@ function JobsFiltersPanel({
           Entry-level and junior start selected by default so the feed stays
           early-career focused, but you can widen it whenever you want.
         </p>
+
+        {totalSelectedCount > 0 ? (
+          <p className="jobs-filters__summary">
+            {totalSelectedCount} filter{totalSelectedCount === 1 ? "" : "s"} selected
+          </p>
+        ) : null}
       </div>
 
       <div className="jobs-filters-panel__groups">

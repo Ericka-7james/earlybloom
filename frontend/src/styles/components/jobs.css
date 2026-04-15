@@ -1,14 +1,9 @@
 /**
  * EarlyBloom jobs styling.
  *
- * Jobs should serve as the reference page for signed-in product patterns:
- * - filters
- * - compact cards
- * - quick-scan detail modal content
- * - responsive page rhythm
- *
- * Shared shell, buttons, modal chrome, and card primitives belong in global CSS.
- * This file should keep only jobs-specific layout and presentation rules.
+ * This file keeps jobs-specific layout, filters, job cards, and modal content behavior.
+ * Shared card personality is delegated to the global design system where possible.
+ * Shared modal shell styling now lives outside this file.
  */
 
 .jobs-page {
@@ -52,15 +47,12 @@
   align-items: start;
 }
 
-.jobs-filters,
-.jobs-filters-panel {
+.jobs-filters {
   display: grid;
   gap: var(--space-4);
 }
 
 .jobs-filters__header {
-  display: grid;
-  gap: 0.65rem;
   margin-bottom: 0;
 }
 
@@ -73,13 +65,13 @@
 
 .jobs-filters__text,
 .jobs-results__text {
-  margin: 0;
+  margin: 0.4rem 0 0;
   color: var(--color-text-soft);
   line-height: 1.6;
 }
 
 .jobs-filters__summary {
-  margin: 0;
+  margin: 0.55rem 0 0;
   color: var(--color-primary-deep);
   font-size: 0.9rem;
   font-weight: 700;
@@ -105,9 +97,8 @@
   display: none;
 }
 
-.jobs-filters-panel__groups {
-  display: grid;
-  gap: 0.85rem;
+.jobs-filter-group + .jobs-filter-group {
+  margin-top: 0.85rem;
 }
 
 .jobs-filter-group {
@@ -361,12 +352,17 @@
   position: relative;
   padding: 0;
   overflow: hidden;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(124, 92, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 250, 252, 0.92));
+  box-shadow: 0 12px 28px rgba(81, 58, 130, 0.06);
 }
 
 .job-card--tracker-ready {
   display: grid;
-  gap: 0.9rem;
-  padding: 1rem;
+  gap: 0.85rem;
+  padding: 0.95rem 1rem 1rem;
 }
 
 .job-card__top-row {
@@ -441,13 +437,9 @@
   color: inherit;
   text-align: left;
   padding: 0;
-  display: block;
-  cursor: pointer;
-}
-
-.job-card__content {
   display: grid;
   gap: 0.8rem;
+  cursor: pointer;
 }
 
 .job-card__surface:hover .job-card__title {
@@ -456,8 +448,6 @@
 
 .job-card__heading {
   min-width: 0;
-  display: grid;
-  gap: 0.25rem;
 }
 
 .job-card__fit-tag,
@@ -524,7 +514,7 @@
 }
 
 .job-card__title {
-  margin: 0;
+  margin: 0 0 0.25rem;
   color: var(--color-heading);
   font-size: 1.05rem;
   line-height: 1.25;
@@ -537,14 +527,6 @@
   color: var(--color-text-soft);
   line-height: 1.45;
   font-size: 0.95rem;
-}
-
-.job-card__quick-take {
-  margin: 0;
-  color: var(--color-heading);
-  font-size: 0.94rem;
-  line-height: 1.5;
-  font-weight: 700;
 }
 
 .job-card__compact-meta {
@@ -580,6 +562,14 @@
   text-decoration: none;
 }
 
+.job-card__quick-take {
+  margin: 0;
+  color: var(--color-heading);
+  font-size: 0.94rem;
+  line-height: 1.5;
+  font-weight: 700;
+}
+
 .job-card__preview-list {
   list-style: none;
   padding: 0;
@@ -604,7 +594,7 @@
   color: #7a4b13;
 }
 
-/* Hide legacy card preview content */
+/* Hide old card preview content */
 
 .job-card__preview-block,
 .job-card__preview-label,
@@ -635,6 +625,128 @@
 
 /* Job-specific modal content */
 
+.jobs-reasons-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.jobs-reasons-modal__intro {
+  padding: 0.95rem;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-border);
+}
+
+.jobs-reasons-modal__eyebrow {
+  margin: 0 0 0.45rem;
+  color: var(--color-heading);
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.jobs-reasons-modal__eyebrow-fit {
+  font-weight: 800;
+}
+
+.jobs-reasons-modal__eyebrow-fit--real-junior {
+  color: #2f6b3d;
+}
+
+.jobs-reasons-modal__eyebrow-fit--stretch-role {
+  color: #8a5a12;
+}
+
+.jobs-reasons-modal__eyebrow-fit--too-senior {
+  color: #9a4458;
+}
+
+.jobs-reasons-modal__eyebrow-fit--misleading-junior {
+  color: #8a5a12;
+}
+
+.jobs-reasons-modal__job-title {
+  margin: 0;
+  color: var(--color-heading);
+  font-size: 1.08rem;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.jobs-reasons-modal__job-meta {
+  margin: 0.35rem 0 0;
+  color: var(--color-text-soft);
+  font-size: 0.92rem;
+}
+
+.jobs-reasons-modal__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.jobs-reasons-modal__label {
+  margin: 0;
+  color: var(--color-heading);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.jobs-reasons-modal__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.jobs-reasons-modal__list-item {
+  padding: 0.8rem 0.9rem;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.jobs-reasons-modal__list--warning .jobs-reasons-modal__list-item {
+  background: rgba(255, 240, 168, 0.16);
+  border-color: rgba(138, 90, 18, 0.14);
+  color: #7a4b13;
+}
+
+.jobs-reasons-modal__listing-link {
+  width: 100%;
+  justify-content: center;
+}
+
+.jobs-detail-modal__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.9rem;
+}
+
+.jobs-detail-modal__copy {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.jobs-detail-modal__actions {
+  margin-top: 0.5rem;
+}
+
+.jobs-inline-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+/* Job detail modal */
+
 .job-details-modal {
   display: grid;
   gap: 1rem;
@@ -646,11 +758,12 @@
   padding: 1rem;
   border-radius: 1.1rem;
   border: 1px solid rgba(124, 92, 255, 0.14);
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.96),
-    rgba(248, 242, 255, 0.82)
-  );
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.96),
+      rgba(248, 242, 255, 0.82)
+    );
 }
 
 .job-details-modal__hero-top {
@@ -851,6 +964,33 @@
   border: 1px solid var(--color-border);
 }
 
+.job-details-modal__expand-button {
+  justify-self: start;
+  border: 1px solid rgba(111, 84, 201, 0.16);
+  background: rgba(245, 239, 255, 0.94);
+  color: var(--color-primary-deep);
+  border-radius: 999px;
+  padding: 0.65rem 0.9rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.job-details-modal__expand-button:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-soft);
+}
+
+.job-details-modal__expand-button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .job-details-modal__actions {
   display: flex;
   justify-content: stretch;
@@ -1039,6 +1179,10 @@
   .job-card__title {
     font-size: 1.08rem;
   }
+
+  .jobs-reasons-modal__listing-link {
+    width: auto;
+  }
 }
 
 @media (min-width: 768px) {
@@ -1071,8 +1215,15 @@
     gap: 1.5rem;
   }
 
+  .jobs-hero__content {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
   .jobs-hero__upload {
-    width: min(100%, 280px);
+    width: 280px;
+    max-width: 280px;
+    margin-left: auto;
   }
 
   .jobs-hero__upload-box {
@@ -1084,7 +1235,11 @@
   }
 
   .job-card--tracker-ready {
-    padding: 1.05rem;
+    padding: 1rem 1.05rem 1.05rem;
+  }
+
+  .jobs-reasons-modal__job-title {
+    font-size: 1.15rem;
   }
 
   .job-details-modal {
