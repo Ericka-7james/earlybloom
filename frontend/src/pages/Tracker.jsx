@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import JobCard from "../components/jobs/JobCard.jsx";
 import CommonModal from "../components/common/CommonModal.jsx";
+import CommonLoadingModal from "../components/common/CommonLoadingModal.jsx";
 import ResumeUploadModal from "../components/jobs/ResumeUploadModal.jsx";
 import TrackerPreferencesPanel from "../components/tracker/TrackerPreferencesPanel.jsx";
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
@@ -582,15 +583,14 @@ function Tracker() {
 
   if (authLoading) {
     return (
-      <main className="tracker-page">
-        <section className="section-pad">
-          <div className="container">
-            <div className="section-card tracker-status">
-              <h1 className="tracker-status__title">Loading your tracker...</h1>
-            </div>
-          </div>
-        </section>
-      </main>
+      <>
+        <main className="tracker-page" aria-hidden="true" />
+        <CommonLoadingModal
+          isOpen
+          message="Growing your tracker..."
+          label="Loading your tracker"
+        />
+      </>
     );
   }
 
@@ -831,19 +831,9 @@ function Tracker() {
                 </div>
               ) : null}
 
-              {isLoading ? (
-                <div
-                  className="section-card tracker-status"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <p className="tracker-status__title">
-                    Loading tracker jobs...
-                  </p>
-                </div>
-              ) : visibleJobs.length === 0 ? (
+              {!isLoading && visibleJobs.length === 0 ? (
                 renderEmptyState()
-              ) : (
+              ) : !isLoading ? (
                 <div className="tracker-list">
                   {visibleJobs.map((job) => (
                     <JobCard
@@ -860,11 +850,17 @@ function Tracker() {
                     />
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
       </section>
+
+      <CommonLoadingModal
+        isOpen={isLoading}
+        message="Growing your tracker..."
+        label="Loading tracker jobs"
+      />
 
       <CommonModal
         isOpen={isPreferencesModalOpen}
