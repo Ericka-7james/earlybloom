@@ -2,6 +2,12 @@ import React, { useMemo, useState } from "react";
 import CommonModal from "../common/CommonModal.jsx";
 import BloombugAppIcon from "../../assets/bloombug/BloombugAppIcon.png";
 
+/**
+ * Returns the fit badge modifier for the details modal.
+ *
+ * @param {string} fitTag Fit tag label.
+ * @returns {string} CSS-safe modifier.
+ */
 function getFitTagModifier(fitTag) {
   return String(fitTag || "")
     .trim()
@@ -9,6 +15,12 @@ function getFitTagModifier(fitTag) {
     .replace(/\s+/g, "-");
 }
 
+/**
+ * Splits long text into display paragraphs.
+ *
+ * @param {string} text Free text.
+ * @returns {string[]} Paragraphs.
+ */
 function renderParagraphs(text) {
   if (!text || typeof text !== "string") {
     return [];
@@ -25,10 +37,54 @@ function renderParagraphs(text) {
     .filter(Boolean);
 }
 
+/**
+ * Returns a safe deduplicated list of strings.
+ *
+ * @param {string[] | undefined} values Values to normalize.
+ * @returns {string[]} Deduplicated values.
+ */
+function getUniqueStrings(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  const result = [];
+  const seen = new Set();
+
+  values.forEach((value) => {
+    const text = String(value || "").trim();
+    const key = text.toLowerCase();
+
+    if (!text || seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    result.push(text);
+  });
+
+  return result;
+}
+
+/**
+ * Job details modal.
+ *
+ * @param {{
+ *   job: object | null,
+ *   isOpen: boolean,
+ *   onClose: () => void,
+ * }} props Modal props.
+ * @returns {JSX.Element} Job details modal.
+ */
 function JobDetailsModal({ job, isOpen, onClose }) {
   const [copyState, setCopyState] = useState("idle");
 
   const summaryParagraphs = useMemo(() => renderParagraphs(job?.summary), [job]);
+  const matchedSkills = useMemo(
+    () => getUniqueStrings(job?.matchedSkills),
+    [job]
+  );
+  const jobSkills = useMemo(() => getUniqueStrings(job?.skills), [job]);
 
   async function handleCopySearchText() {
     const fallbackSearchText = [job?.title, job?.company]
@@ -134,6 +190,54 @@ function JobDetailsModal({ job, isOpen, onClose }) {
             </div>
           ) : null}
         </section>
+
+        {matchedSkills.length > 0 || jobSkills.length > 0 ? (
+          <section className="job-details-modal__section">
+            <div className="job-details-modal__section-heading">
+              <h4 className="job-details-modal__section-title">Skills</h4>
+              <p className="job-details-modal__section-subtext">
+                This is where the role overlaps with your background and what the
+                posting appears to emphasize.
+              </p>
+            </div>
+
+            <div className="job-details-modal__skills-grid">
+              {matchedSkills.length > 0 ? (
+                <div className="job-details-modal__skills-card">
+                  <p className="job-details-modal__skills-label">Matched skills</p>
+
+                  <div className="job-details-modal__skills-list">
+                    {matchedSkills.map((skill) => (
+                      <span
+                        key={`${job.id}-matched-${skill}`}
+                        className="job-details-modal__skill-chip job-details-modal__skill-chip--matched"
+                      >
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {jobSkills.length > 0 ? (
+                <div className="job-details-modal__skills-card">
+                  <p className="job-details-modal__skills-label">Job skills</p>
+
+                  <div className="job-details-modal__skills-list">
+                    {jobSkills.map((skill) => (
+                      <span
+                        key={`${job.id}-job-skill-${skill}`}
+                        className="job-details-modal__skill-chip"
+                      >
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
 
         {Array.isArray(job.requirementsSnapshot) &&
         job.requirementsSnapshot.length > 0 ? (
