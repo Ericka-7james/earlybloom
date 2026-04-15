@@ -78,7 +78,6 @@ class NormalizedJob(BaseModel):
     salary_max: int | None = None
     salary_currency: str | None = "USD"
 
-    # Internal shared-cache metadata
     stable_key: str | None = None
     provider_payload_hash: str | None = None
 
@@ -93,13 +92,11 @@ class NormalizedJob(BaseModel):
     )
     @classmethod
     def normalize_text_fields(cls, value: object) -> str:
-        """Normalize string-like text fields into compact readable text."""
         return " ".join(str(value or "").strip().split())
 
     @field_validator("source", mode="before")
     @classmethod
     def normalize_source(cls, value: object) -> str:
-        """Normalize source name casing."""
         return str(value or "unknown").strip().lower()
 
     @field_validator(
@@ -112,7 +109,6 @@ class NormalizedJob(BaseModel):
     )
     @classmethod
     def normalize_optional_strings(cls, value: object) -> str | None:
-        """Normalize optional string fields and collapse empty strings to None."""
         text = str(value or "").strip()
         return text or None
 
@@ -125,7 +121,6 @@ class NormalizedJob(BaseModel):
     )
     @classmethod
     def normalize_string_lists(cls, value: object) -> list[str]:
-        """Normalize list fields into cleaned string lists."""
         if not isinstance(value, list):
             return []
 
@@ -149,7 +144,6 @@ class NormalizedJob(BaseModel):
     @field_validator("salary_min", "salary_max", mode="before")
     @classmethod
     def normalize_salary_numbers(cls, value: object) -> int | None:
-        """Coerce salary-like values to integers when possible."""
         if value is None or value == "":
             return None
 
@@ -191,7 +185,6 @@ class JobQueryParams(BaseModel):
     @field_validator("levels", "role_types", mode="before")
     @classmethod
     def normalize_query_lists(cls, value: object) -> list[str]:
-        """Normalize query list params into stripped lowercase values."""
         if value is None:
             return []
 
@@ -232,6 +225,7 @@ class ResolvedJobProfileResponse(BaseModel):
     )
     preferredRoleTypes: list[str] = Field(default_factory=list)
     preferredWorkplaceTypes: list[str] = Field(default_factory=list)
+    preferredLocations: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     isLgbtFriendlyOnly: bool = False
 

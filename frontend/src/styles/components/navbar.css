@@ -1,20 +1,46 @@
 .site-header {
   position: sticky;
   top: 0;
-  z-index: 20;
-  backdrop-filter: blur(14px);
-  background: rgba(255, 250, 252, 0.72);
-  border-bottom: 1px solid rgba(124, 92, 163, 0.08);
+  z-index: 30;
+  padding-top: 0.75rem;
+  padding-bottom: 0.5rem;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 250, 252, 0.82) 0%,
+      rgba(255, 250, 252, 0.58) 72%,
+      rgba(255, 250, 252, 0) 100%
+    );
+  backdrop-filter: blur(18px);
+}
+
+.site-header__inner {
+  position: relative;
+}
+
+.site-header__inner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(124, 92, 163, 0.12);
+  box-shadow:
+    0 10px 32px rgba(81, 58, 130, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.38);
+  backdrop-filter: blur(18px);
+  pointer-events: none;
 }
 
 .navbar {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  min-height: 76px;
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
+  gap: 0.875rem;
+  min-height: 74px;
+  padding: 0.7rem 0.85rem;
 }
 
 .brand {
@@ -26,8 +52,8 @@
 }
 
 .brand__icon {
-  width: 52px;
-  height: 52px;
+  width: 50px;
+  height: 50px;
   object-fit: contain;
   border-radius: 18px;
   box-shadow: var(--shadow-soft);
@@ -45,7 +71,7 @@
   font-weight: 800;
   letter-spacing: -0.03em;
   color: var(--color-heading);
-  line-height: 1.1;
+  line-height: 1.05;
 }
 
 .brand__subtitle {
@@ -61,37 +87,59 @@
   display: none;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.5rem;
+  gap: 0.35rem;
   flex: 0 0 auto;
 }
 
 .nav-link {
-  padding: 0.7rem 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0.72rem 0.95rem;
   border-radius: 999px;
   color: var(--color-text-soft);
+  font-weight: 700;
+  border: 1px solid transparent;
   transition:
     background-color 180ms ease,
     color 180ms ease,
     transform 180ms ease,
-    box-shadow 180ms ease;
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    opacity 180ms ease;
 }
 
 .nav-link:hover {
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.72);
   color: var(--color-heading);
   transform: translateY(-1px);
   box-shadow: var(--shadow-soft);
+  border-color: rgba(124, 92, 163, 0.12);
+}
+
+.nav-link--active {
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--color-heading);
+  border-color: rgba(124, 92, 163, 0.16);
+  box-shadow: var(--shadow-soft);
+}
+
+.nav-link--accent {
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--color-primary-deep);
+  border-color: rgba(124, 92, 163, 0.14);
 }
 
 .nav-link--button {
-  background: none;
-  border: none;
+  background: transparent;
+  border: 1px solid transparent;
   color: inherit;
   cursor: pointer;
 }
 
 .nav-link--muted {
-  opacity: 0.7;
+  opacity: 0.5;
   pointer-events: none;
 }
 
@@ -111,21 +159,23 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.32);
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.5);
   border: 1px solid rgba(124, 92, 163, 0.14);
   color: var(--color-heading);
   transition:
     transform 180ms ease,
     background-color 180ms ease,
-    box-shadow 180ms ease;
+    box-shadow 180ms ease,
+    border-color 180ms ease;
 }
 
 .nav-menu__trigger:hover {
   transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.78);
+  border-color: rgba(124, 92, 163, 0.2);
   box-shadow: var(--shadow-soft);
 }
 
@@ -136,14 +186,18 @@
 
 .nav-menu__dropdown {
   position: absolute;
-  top: calc(100% + 0.65rem);
+  top: calc(100% + 0.75rem);
   right: 0;
-  min-width: 220px;
-  padding: 0.55rem;
+  width: min(270px, calc(100vw - 1.5rem));
+  z-index: 40;
+}
+
+.nav-menu__panel {
   display: grid;
-  gap: 0.2rem;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.96);
+  gap: 0.25rem;
+  padding: 0.55rem;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.94);
   border: 1px solid var(--color-border);
   box-shadow: 0 18px 48px rgba(81, 58, 130, 0.18);
   backdrop-filter: blur(18px);
@@ -160,40 +214,75 @@
   min-height: 48px;
   padding: 0.9rem 1rem;
   border-radius: 14px;
-  color: #1f1a2e;
+  color: var(--color-heading);
   background: transparent;
   text-align: left;
-  font-weight: 500;
-  font-size: 1.05rem;
+  font-weight: 600;
+  font-size: 1rem;
+  border: 1px solid transparent;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease,
+    border-color 180ms ease;
 }
 
 .nav-menu__item:hover,
 .nav-menu__item--button:hover {
-  background: rgba(245, 239, 255, 0.9);
+  background: rgba(245, 239, 255, 0.92);
+  border-color: rgba(124, 92, 163, 0.12);
+}
+
+.nav-menu__item--active {
+  background: rgba(245, 239, 255, 0.98);
+  border-color: rgba(124, 92, 163, 0.14);
+  color: var(--color-primary-deep);
+}
+
+.nav-menu__item--accent {
+  color: var(--color-primary-deep);
 }
 
 .nav-menu__item--button {
-  border: 0;
+  border: 1px solid transparent;
   cursor: pointer;
+}
+
+.nav-menu__item--danger {
+  color: #8d3157;
 }
 
 .nav-menu__item--muted {
   color: var(--color-text-soft);
+  opacity: 0.6;
 }
 
 .nav-menu__trigger:focus-visible,
 .nav-link:focus-visible,
 .nav-link--button:focus-visible,
 .nav-menu__item:focus-visible,
-.nav-menu__item--button:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
+.nav-menu__item--button:focus-visible,
+.brand:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  border-color: var(--color-border-focus);
 }
 
 @media (max-width: 425px) {
+  .site-header {
+    padding-top: 0.55rem;
+    padding-bottom: 0.35rem;
+  }
+
+  .navbar {
+    min-height: 70px;
+    padding: 0.65rem 0.7rem;
+  }
+
   .brand__icon {
-    width: 48px;
-    height: 48px;
+    width: 46px;
+    height: 46px;
+    border-radius: 16px;
   }
 
   .brand__title {
@@ -201,11 +290,16 @@
   }
 
   .brand__subtitle {
-    font-size: 0.74rem;
+    font-size: 0.73rem;
   }
 }
 
 @media (min-width: 769px) {
+  .navbar {
+    min-height: 78px;
+    padding-inline: 1rem;
+  }
+
   .nav-links {
     display: flex;
   }

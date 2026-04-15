@@ -8,31 +8,26 @@ describe("JobCard", () => {
     id: "job-1",
     title: "Junior Frontend Engineer",
     company: "Bloom Labs",
-    location: "Atlanta, GA",
-    experienceLevel: "junior",
-    summary: "Build polished UI for early-career job seekers.",
     fitTag: "Real Junior",
     matchScore: 87,
-    reasons: ["Entry-level title", "React experience aligns"],
-    warningFlags: [],
     source: "greenhouse",
     sourceUrl: "https://example.com/job-1",
     url: "https://example.com/job-1",
-    metadata: ["Atlanta, GA", "Junior", "Source: Greenhouse"],
+    cardMeta: ["Atlanta, GA", "Junior", "Remote"],
   };
 
-  it("renders the core compact job information", () => {
+  it("renders the core job information", () => {
     render(<JobCard job={baseJob} />);
 
     expect(screen.getByText("Junior Frontend Engineer")).toBeInTheDocument();
     expect(screen.getByText("Bloom Labs")).toBeInTheDocument();
     expect(screen.getByText("Real Junior")).toBeInTheDocument();
     expect(screen.getByLabelText("87 percent match")).toBeInTheDocument();
-    expect(screen.getByText("View details")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quick view" })).toBeInTheDocument();
 
     expect(screen.getByText("Atlanta, GA")).toBeInTheDocument();
     expect(screen.getByText("Junior")).toBeInTheDocument();
-    expect(screen.getByText("Source: Greenhouse")).toBeInTheDocument();
+    expect(screen.getByText("Remote")).toBeInTheDocument();
   });
 
   it("renders the main surface button with the expected accessible name", () => {
@@ -45,19 +40,74 @@ describe("JobCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("does not render the summary preview on the card", () => {
+  it("renders the default quick take for Real Junior roles", () => {
     render(<JobCard job={baseJob} />);
 
     expect(
-      screen.queryByText("Build polished UI for early-career job seekers.")
-    ).not.toBeInTheDocument();
+      screen.getByText("Looks realistically junior-friendly.")
+    ).toBeInTheDocument();
   });
 
-  it("does not render the old Why preview block", () => {
-    render(<JobCard job={baseJob} />);
+  it("renders qualification signal text when provided", () => {
+    render(
+      <JobCard
+        job={{
+          ...baseJob,
+          qualificationSignal: {
+            text: "Role is explicitly framed as early-career friendly.",
+          },
+        }}
+      />
+    );
 
-    expect(screen.queryByText("Why")).not.toBeInTheDocument();
-    expect(screen.queryByText("Entry-level title")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Role is explicitly framed as early-career friendly.")
+    ).toBeInTheDocument();
+  });
+
+  it("renders the default quick take for Stretch Role", () => {
+    render(
+      <JobCard
+        job={{
+          ...baseJob,
+          fitTag: "Stretch Role",
+        }}
+      />
+    );
+
+    expect(
+      screen.getByText("Possible fit, but double-check requirements.")
+    ).toBeInTheDocument();
+  });
+
+  it("renders the default quick take for Misleading Junior", () => {
+    render(
+      <JobCard
+        job={{
+          ...baseJob,
+          fitTag: "Misleading Junior",
+        }}
+      />
+    );
+
+    expect(
+      screen.getByText("Labeled junior, but parts may lean more experienced.")
+    ).toBeInTheDocument();
+  });
+
+  it("renders the default quick take fallback for Too Senior roles", () => {
+    render(
+      <JobCard
+        job={{
+          ...baseJob,
+          fitTag: "Too Senior",
+        }}
+      />
+    );
+
+    expect(
+      screen.getByText("This may be more experienced than it first appears.")
+    ).toBeInTheDocument();
   });
 
   it("calls onOpenDetails when the card surface is clicked", () => {
@@ -75,41 +125,15 @@ describe("JobCard", () => {
     expect(onOpenDetails).toHaveBeenCalledWith(baseJob);
   });
 
-  it("calls onOpenDetails when view details is clicked", () => {
+  it("calls onOpenDetails when Quick view is clicked", () => {
     const onOpenDetails = vi.fn();
 
     render(<JobCard job={baseJob} onOpenDetails={onOpenDetails} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "View details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Quick view" }));
 
     expect(onOpenDetails).toHaveBeenCalledTimes(1);
     expect(onOpenDetails).toHaveBeenCalledWith(baseJob);
-  });
-
-  it("shows watchout chip when there are warning flags", () => {
-    render(
-      <JobCard
-        job={{
-          ...baseJob,
-          warningFlags: ["Asks for 3+ years"],
-        }}
-      />
-    );
-
-    expect(screen.getByText("Watchouts")).toBeInTheDocument();
-  });
-
-  it("does not show the watchout chip when there are no warning flags", () => {
-    render(
-      <JobCard
-        job={{
-          ...baseJob,
-          warningFlags: [],
-        }}
-      />
-    );
-
-    expect(screen.queryByText("Watchouts")).not.toBeInTheDocument();
   });
 
   it("shows saved chip when the job is saved", () => {
@@ -125,7 +149,7 @@ describe("JobCard", () => {
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
-  it("falls back to safe defaults for invalid fitTag and matchScore", () => {
+  it("falls back to safe defaults for invalid fitTag and high matchScore", () => {
     render(
       <JobCard
         job={{
@@ -134,7 +158,6 @@ describe("JobCard", () => {
           company: "Unknown Co",
           fitTag: "Not A Real Tag",
           matchScore: 999,
-          warningFlags: [],
         }}
       />
     );
@@ -152,7 +175,6 @@ describe("JobCard", () => {
           company: "Bloom Labs",
           fitTag: "Stretch Role",
           matchScore: -20,
-          warningFlags: [],
         }}
       />
     );
@@ -166,7 +188,6 @@ describe("JobCard", () => {
           title: "Missing Score Role",
           company: "Bloom Labs",
           fitTag: "Stretch Role",
-          warningFlags: [],
         }}
       />
     );
@@ -174,27 +195,40 @@ describe("JobCard", () => {
     expect(screen.getByLabelText("0 percent match")).toBeInTheDocument();
   });
 
-  it("renders up to six metadata items", () => {
+  it("renders all cardMeta items", () => {
     render(
       <JobCard
         job={{
           ...baseJob,
-          metadata: ["One", "Two", "Three", "Four", "Five", "Six", "Seven"],
+          cardMeta: ["One", "Two", "Three", "Four", "Five", "Six", "Seven"],
         }}
       />
     );
 
     expect(screen.getByText("One")).toBeInTheDocument();
     expect(screen.getByText("Six")).toBeInTheDocument();
-    expect(screen.queryByText("Seven")).not.toBeInTheDocument();
+    expect(screen.getByText("Seven")).toBeInTheDocument();
   });
 
-  it("does not render metadata section when metadata is missing", () => {
+  it("does not render metadata section when cardMeta is missing", () => {
     render(
       <JobCard
         job={{
           ...baseJob,
-          metadata: undefined,
+          cardMeta: undefined,
+        }}
+      />
+    );
+
+    expect(screen.queryByLabelText("Job metadata")).not.toBeInTheDocument();
+  });
+
+  it("does not render metadata section when cardMeta is not an array", () => {
+    render(
+      <JobCard
+        job={{
+          ...baseJob,
+          cardMeta: "not-an-array",
         }}
       />
     );
@@ -207,7 +241,6 @@ describe("JobCard", () => {
       <JobCard
         job={{
           id: "job-5",
-          warningFlags: [],
         }}
       />
     );
@@ -313,7 +346,7 @@ describe("JobCard", () => {
 
     render(<JobCard job={baseJob} onHide={onHide} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide job" }));
 
     expect(onHide).toHaveBeenCalledTimes(1);
     expect(onHide).toHaveBeenCalledWith(baseJob);
@@ -327,7 +360,7 @@ describe("JobCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows hidden state label when the job is hidden", () => {
+  it("shows restore label when the job is hidden", () => {
     render(
       <JobCard
         job={{
@@ -337,7 +370,9 @@ describe("JobCard", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Hidden" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Restore job" })
+    ).toBeInTheDocument();
   });
 
   it("does not call onHide when hide is pending", () => {
@@ -351,9 +386,45 @@ describe("JobCard", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Hide" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    expect(screen.getByRole("button", { name: "Hide job" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Hide job" }));
 
     expect(onHide).not.toHaveBeenCalled();
+  });
+
+  it("does not open details when clicking save", () => {
+    const onOpenDetails = vi.fn();
+    const onSaveToggle = vi.fn();
+
+    render(
+      <JobCard
+        job={baseJob}
+        onOpenDetails={onOpenDetails}
+        onSaveToggle={onSaveToggle}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save job" }));
+
+    expect(onSaveToggle).toHaveBeenCalledTimes(1);
+    expect(onOpenDetails).not.toHaveBeenCalled();
+  });
+
+  it("does not open details when clicking hide", () => {
+    const onOpenDetails = vi.fn();
+    const onHide = vi.fn();
+
+    render(
+      <JobCard
+        job={baseJob}
+        onOpenDetails={onOpenDetails}
+        onHide={onHide}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide job" }));
+
+    expect(onHide).toHaveBeenCalledTimes(1);
+    expect(onOpenDetails).not.toHaveBeenCalled();
   });
 });

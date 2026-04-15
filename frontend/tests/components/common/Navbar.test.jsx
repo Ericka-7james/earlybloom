@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import Navbar from "../../../src/components/Navbar";
@@ -50,7 +50,7 @@ describe("Navbar", () => {
 
     expect(screen.getByText("EarlyBloom")).toBeInTheDocument();
     expect(
-      screen.getByText("Grow into the right role")
+      screen.getByText("Real roles for early careers")
     ).toBeInTheDocument();
   });
 
@@ -71,9 +71,12 @@ describe("Navbar", () => {
       name: "Primary navigation",
     });
 
-    expect(screen.getAllByRole("link", { name: "Home" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: "Jobs" }).length).toBeGreaterThan(0);
-
+    expect(
+      screen.getAllByRole("link", { name: "Home" }).length
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("link", { name: "Jobs" }).length
+    ).toBeGreaterThan(0);
     expect(
       screen.getByRole("link", { name: "Learn More" })
     ).toBeInTheDocument();
@@ -83,7 +86,13 @@ describe("Navbar", () => {
 
     expect(nav).toBeInTheDocument();
     expect(
-      screen.queryByRole("link", { name: "Sign up" })
+      screen.queryByRole("link", { name: "Tracker" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Profile" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Sign out" })
     ).not.toBeInTheDocument();
   });
 
@@ -91,7 +100,6 @@ describe("Navbar", () => {
     renderWithRouter();
 
     const jobsLinks = screen.getAllByRole("link", { name: "Jobs" });
-
     expect(jobsLinks[0]).toHaveAttribute("href", "/jobs");
   });
 
@@ -99,7 +107,6 @@ describe("Navbar", () => {
     renderWithRouter();
 
     const learnMoreLink = screen.getByRole("link", { name: "Learn More" });
-
     expect(learnMoreLink).toHaveAttribute("href", "/learn-more");
   });
 
@@ -112,10 +119,17 @@ describe("Navbar", () => {
 
     renderWithRouter();
 
-    expect(screen.getAllByRole("link", { name: "Home" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: "Jobs" }).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("link", { name: "Home" }).length
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("link", { name: "Jobs" }).length
+    ).toBeGreaterThan(0);
     expect(
       screen.getByRole("link", { name: "Tracker" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Profile" })
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Sign out" })
@@ -129,7 +143,7 @@ describe("Navbar", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows loading placeholder while auth state is loading", () => {
+  it("shows checking sign in label while auth state is loading", () => {
     useAuth.mockReturnValue({
       user: null,
       loading: true,
@@ -142,29 +156,25 @@ describe("Navbar", () => {
       screen.getByRole("link", { name: "EarlyBloom home" })
     ).toBeInTheDocument();
 
-    expect(screen.getByText("Loading...")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Checking sign in..." })
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByRole("link", { name: "Home" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Jobs" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Learn More" })
+    ).toBeInTheDocument();
 
     expect(
       screen.getByRole("button", {
         name: "Open navigation menu",
       })
     ).toBeInTheDocument();
-
-    expect(
-      screen.queryByRole("link", { name: "Home" })
-    ).not.toBeInTheDocument();
-
-    expect(
-      screen.queryByRole("link", { name: "Jobs" })
-    ).not.toBeInTheDocument();
-
-    expect(
-      screen.queryByRole("link", { name: "Sign in" })
-    ).not.toBeInTheDocument();
-
-    expect(
-      screen.queryByRole("button", { name: "Sign out" })
-    ).not.toBeInTheDocument();
   });
 
   it("opens the mobile menu when trigger is clicked", async () => {
@@ -180,6 +190,9 @@ describe("Navbar", () => {
     await user.click(menuButton);
 
     expect(menuButton).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("button", { name: "Close navigation menu" })
+    ).toBeInTheDocument();
     expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 
@@ -191,11 +204,13 @@ describe("Navbar", () => {
       screen.getByRole("button", { name: "Open navigation menu" })
     );
 
-    const menu = screen.getByRole("menu");
-
-    expect(menu).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Home" }).length).toBeGreaterThan(1);
-    expect(screen.getAllByRole("link", { name: "Jobs" }).length).toBeGreaterThan(1);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("link", { name: "Home" }).length
+    ).toBeGreaterThan(1);
+    expect(
+      screen.getAllByRole("link", { name: "Jobs" }).length
+    ).toBeGreaterThan(1);
     expect(
       screen.getAllByRole("link", { name: "Learn More" }).length
     ).toBeGreaterThan(0);
@@ -219,11 +234,12 @@ describe("Navbar", () => {
       screen.getByRole("button", { name: "Open navigation menu" })
     );
 
-    const menu = screen.getByRole("menu");
-
-    expect(menu).toBeInTheDocument();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(
       screen.getAllByRole("link", { name: "Tracker" }).length
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("link", { name: "Profile" }).length
     ).toBeGreaterThan(0);
     expect(
       screen.getAllByRole("button", { name: "Sign out" }).length
@@ -262,6 +278,55 @@ describe("Navbar", () => {
     expect(screen.getByRole("menu")).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("closes the mobile menu when clicking outside", async () => {
+    const user = userEvent.setup();
+    renderWithRouter();
+
+    await user.click(
+      screen.getByRole("button", { name: "Open navigation menu" })
+    );
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("closes the mobile menu when a mobile nav link is clicked", async () => {
+    const user = userEvent.setup();
+    renderWithRouter();
+
+    await user.click(
+      screen.getByRole("button", { name: "Open navigation menu" })
+    );
+
+    const homeLinks = screen.getAllByRole("link", { name: "Home" });
+    const mobileHomeLink = homeLinks[homeLinks.length - 1];
+
+    await user.click(mobileHomeLink);
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("toggles the mobile menu closed when trigger is clicked again", async () => {
+    const user = userEvent.setup();
+    renderWithRouter();
+
+    const trigger = screen.getByRole("button", {
+      name: "Open navigation menu",
+    });
+
+    await user.click(trigger);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Close navigation menu" })
+    );
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });

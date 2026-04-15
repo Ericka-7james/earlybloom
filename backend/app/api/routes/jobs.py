@@ -138,6 +138,7 @@ def _set_refreshed_auth_cookies_if_needed(
 
 
 def _serialize_public_jobs(jobs: list[dict[str, Any]]) -> list[PublicJob]:
+    """Validate and serialize public job payloads."""
     return [PublicJob.model_validate(job) for job in jobs]
 
 
@@ -147,6 +148,7 @@ def _build_tracker_mutation_response(
     user_id: str,
     public_job_id: str,
 ) -> JobTrackerMutationResponse:
+    """Build the frontend viewer-state payload after a save/hide mutation."""
     viewer_state_payload = repository.apply_viewer_state_to_jobs(
         user_id=user_id,
         jobs=[{"id": public_job_id}],
@@ -167,6 +169,45 @@ def _build_tracker_mutation_response(
         job_id=public_job_id,
         viewer_state=JobViewerState.model_validate(viewer_state),
     )
+
+
+def _build_related_jobs_response(
+    *,
+    response: Response,
+    current: ViewerContext,
+    repository: JobCacheRepository,
+    relation_type: str,
+) -> JobsResponse:
+    """Build a saved-jobs or hidden-jobs response."""
+    if relation_type == "saved":
+        job_rows = repository.list_saved_jobs_for_user(
+            user_id=current.user_id or ""
+        )
+    elif relation_type == "hidden":
+        job_rows = repository.list_hidden_jobs_for_user(
+            user_id=current.user_id or ""
+        )
+    else:
+        raise ValueError(f"Unsupported relation_type={relation_type}")
+
+    public_jobs: list[dict[str, Any]] = []
+
+    for row in job_rows:
+        normalized = repository.row_to_normalized_job(row)
+        if normalized is None:
+            continue
+        public_jobs.append(map_normalized_job_to_response(normalized))
+
+    public_jobs = repository.apply_viewer_state_to_jobs(
+        user_id=current.user_id or "",
+        jobs=public_jobs,
+        exclude_hidden=False,
+    )
+
+    _set_refreshed_auth_cookies_if_needed(response, current)
+
+    serialized_jobs = _serialize_public_jobs(public_jobs)
+    return JobsResponse(jobs=serialized_jobs, total=len(serialized_jobs))
 
 
 @router.get("", response_model=JobsResponse)
@@ -218,7 +259,11 @@ def get_jobs_profile(
         ) from exc
 
 
-@router.post("/saved", response_model=JobTrackerMutationResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/saved",
+    response_model=JobTrackerMutationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 def save_job(
     payload: JobTrackerMutationRequest,
     response: Response,
@@ -278,7 +323,11 @@ def unsave_job(
         ) from exc
 
 
-@router.post("/hidden", response_model=JobTrackerMutationResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/hidden",
+    response_model=JobTrackerMutationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 def hide_job(
     payload: JobTrackerMutationRequest,
     response: Response,
@@ -346,25 +395,12 @@ def list_saved_jobs(
 ) -> JobsResponse:
     """List saved jobs for the authenticated user."""
     try:
-        job_rows = repository.list_saved_jobs_for_user(user_id=current.user_id or "")
-        public_jobs: list[dict[str, Any]] = []
-
-        for row in job_rows:
-            normalized = repository.row_to_normalized_job(row)
-            if normalized is None:
-                continue
-            public_jobs.append(map_normalized_job_to_response(normalized))
-
-        public_jobs = repository.apply_viewer_state_to_jobs(
-            user_id=current.user_id or "",
-            jobs=public_jobs,
-            exclude_hidden=False,
+        return _build_related_jobs_response(
+            response=response,
+            current=current,
+            repository=repository,
+            relation_type="saved",
         )
-
-        _set_refreshed_auth_cookies_if_needed(response, current)
-
-        serialized_jobs = _serialize_public_jobs(public_jobs)
-        return JobsResponse(jobs=serialized_jobs, total=len(serialized_jobs))
     except HTTPException:
         raise
     except Exception as exc:
@@ -383,25 +419,12 @@ def list_hidden_jobs(
 ) -> JobsResponse:
     """List hidden jobs for the authenticated user."""
     try:
-        job_rows = repository.list_hidden_jobs_for_user(user_id=current.user_id or "")
-        public_jobs: list[dict[str, Any]] = []
-
-        for row in job_rows:
-            normalized = repository.row_to_normalized_job(row)
-            if normalized is None:
-                continue
-            public_jobs.append(map_normalized_job_to_response(normalized))
-
-        public_jobs = repository.apply_viewer_state_to_jobs(
-            user_id=current.user_id or "",
-            jobs=public_jobs,
-            exclude_hidden=False,
+        return _build_related_jobs_response(
+            response=response,
+            current=current,
+            repository=repository,
+            relation_type="hidden",
         )
-
-        _set_refreshed_auth_cookies_if_needed(response, current)
-
-        serialized_jobs = _serialize_public_jobs(public_jobs)
-        return JobsResponse(jobs=serialized_jobs, total=len(serialized_jobs))
     except HTTPException:
         raise
     except Exception as exc:

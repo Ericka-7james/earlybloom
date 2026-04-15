@@ -1,12 +1,12 @@
 /**
  * @fileoverview Auth session hook for EarlyBloom.
  *
- * Fetches current session from backend and exposes:
- * - user
- * - loading state
- * - refresh + signOut helpers
+ * Uses backend cookie session as the app-shell source of truth.
  *
- * Also listens for app-wide auth changes so Navbar and pages stay in sync.
+ * Principles:
+ * - Public pages must remain usable while auth is being checked.
+ * - Auth lookup should happen in the background.
+ * - Restricted pages can still gate on resolved auth state.
  */
 
 import { useEffect, useState, useCallback } from "react";
@@ -15,7 +15,9 @@ import { getSession, signOut } from "../lib/auth/authApi";
 const AUTH_CHANGED_EVENT = "earlybloom:auth-changed";
 
 /**
- * Broadcasts that auth state changed somewhere in the app.
+ * Broadcast that auth state changed somewhere in the app.
+ *
+ * @returns {void}
  */
 export function notifyAuthChanged() {
   window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
@@ -23,6 +25,12 @@ export function notifyAuthChanged() {
 
 /**
  * Auth hook.
+ *
+ * Returns:
+ *   user: Current authenticated user or null.
+ *   loading: Whether auth state is refreshing.
+ *   refresh: Refresh auth state and return the current user.
+ *   handleSignOut: Sign the user out.
  *
  * @returns {{
  *   user: object | null,
@@ -33,9 +41,11 @@ export function notifyAuthChanged() {
  */
 export function useAuth() {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   const fetchSession = useCallback(async () => {
+    setLoading(true);
+
     try {
       const session = await getSession();
       const nextUser = session?.user || null;
@@ -50,16 +60,41 @@ export function useAuth() {
   }, []);
 
   useEffect(() => {
-    fetchSession();
+    let isMounted = true;
+
+    async function bootstrapAuth() {
+      setLoading(true);
+
+      try {
+        const session = await getSession();
+        if (!isMounted) {
+          return;
+        }
+
+        setUser(session?.user || null);
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+
+        setUser(null);
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    bootstrapAuth();
 
     function handleAuthChanged() {
-      setLoading(true);
       fetchSession();
     }
 
     window.addEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
 
     return () => {
+      isMounted = false;
       window.removeEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
     };
   }, [fetchSession]);
@@ -69,6 +104,7 @@ export function useAuth() {
       await signOut();
     } finally {
       setUser(null);
+      setLoading(false);
       notifyAuthChanged();
     }
   }

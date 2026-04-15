@@ -6,3 +6,4 @@ python-dotenv
 typing-extensions
 python-multipart
 supabase
+pytest-asyncio

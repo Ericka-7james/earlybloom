@@ -304,6 +304,88 @@ function normalizeViewerState(rawJob, overrideState) {
   };
 }
 
+function createQualificationSignal(job) {
+  const fitTag = cleanText(job.fitTag).toLowerCase();
+  const score = Number(job.matchScore ?? 0);
+
+  if (fitTag === "real junior" && score >= 70) {
+    return {
+      tone: "strong",
+      label: "Strong fit",
+      text: "This looks realistically junior-friendly and worth a closer look.",
+    };
+  }
+
+  if (fitTag === "stretch role" || score >= 55) {
+    return {
+      tone: "medium",
+      label: "Possible fit",
+      text: "You may qualify, but review the requirements before spending time applying.",
+    };
+  }
+
+  if (fitTag === "misleading junior") {
+    return {
+      tone: "warning",
+      label: "Proceed carefully",
+      text: "This may be labeled junior, but parts of the listing suggest otherwise.",
+    };
+  }
+
+  return {
+    tone: "warning",
+    label: "Probably not ideal",
+    text: "This role may lean more experienced than it first appears.",
+  };
+}
+
+function createQuickFacts({
+  experienceLevel,
+  workplaceType,
+  employmentType,
+  compensation,
+  sourceLabel,
+}) {
+  return [
+    { label: "Level", value: experienceLevel || "Not listed" },
+    { label: "Workplace", value: workplaceType || "Not listed" },
+    { label: "Type", value: employmentType || "Not listed" },
+    { label: "Pay", value: compensation || "Not listed" },
+    { label: "Source", value: sourceLabel || "Not listed" },
+  ];
+}
+
+function createRequirementsSnapshot(job) {
+  const reasons = Array.isArray(job.reasons) ? job.reasons : [];
+  return reasons.slice(0, 4);
+}
+
+function createCompensationSignal(compensation) {
+  if (!compensation) {
+    return null;
+  }
+
+  return `Compensation: ${compensation}`;
+}
+
+function createCardMeta({
+  cardLocation,
+  experienceLevel,
+  workplaceType,
+  compensation,
+}) {
+  return [
+    cardLocation,
+    experienceLevel,
+    workplaceType,
+    compensation,
+  ].filter((value) => typeof value === "string" && value.trim().length > 0);
+}
+
+function createSearchQuery(title, company) {
+  return [title, company].filter(Boolean).join(" ");
+}
+
 export function mapJobsForDisplay(
   rawJobs = [],
   scoredJobs = [],
@@ -315,24 +397,28 @@ export function mapJobsForDisplay(
   return rawJobs.map((job) => {
     const scored = scoredMap.get(job.id);
     const compensation = buildCompensation(job);
+    const formattedCompensation = formatCompensation(compensation);
     const sourceUrl = resolveSourceUrl(job);
     const source = job.source ?? job.source_name ?? null;
+    const sourceLabel = formatSourceLabel(source);
     const fullLocation = resolveLocation(job);
+    const cardLocation = formatCardLocation(fullLocation, source);
     const modalLocation = formatModalLocation(fullLocation, source);
     const workplaceType = formatWorkplaceType(resolveWorkplaceType(job));
     const experienceLevel = normalizeExperienceLevel(resolveExperienceLevel(job));
     const employmentType = formatEmploymentType(resolveEmploymentType(job));
+
     const viewerState = normalizeViewerState(
       job,
       viewerStateOverrides?.[job.id] ?? null
     );
 
-    return {
+    const mappedJob = {
       id: job.id,
       title: job.title ?? "Untitled role",
       company: resolveCompany(job),
       location: fullLocation || "Location not listed",
-      cardLocation: formatCardLocation(fullLocation, source),
+      cardLocation,
       modalLocation,
       fullLocation,
       workplaceType,
@@ -349,10 +435,10 @@ export function mapJobsForDisplay(
       warningFlags: resolveWarnings(job, scored),
       scoreBreakdown: normalizeScoreBreakdown(scored?.scoreBreakdown),
       confidence: scored?.confidence ?? null,
-      compensation: formatCompensation(compensation),
+      compensation: formattedCompensation,
       postedAt: resolvePostedAt(job),
       source,
-      sourceLabel: formatSourceLabel(source),
+      sourceLabel,
       sourceUrl,
       url: sourceUrl,
       isSaved: viewerState.isSaved,
@@ -360,13 +446,37 @@ export function mapJobsForDisplay(
       savedAt: viewerState.savedAt,
       hiddenAt: viewerState.hiddenAt,
       metadata: [
-        formatCardLocation(fullLocation, source),
+        cardLocation,
         experienceLevel,
         workplaceType,
         employmentType,
-        formatCompensation(compensation),
-        formatSourceLabel(source),
+        formattedCompensation,
+        sourceLabel,
       ].filter((value) => typeof value === "string" && value.trim().length > 0),
+    };
+
+    const compensationSignal = createCompensationSignal(formattedCompensation);
+
+    return {
+      ...mappedJob,
+      qualificationSignal: createQualificationSignal(mappedJob),
+      quickFacts: createQuickFacts({
+        experienceLevel,
+        workplaceType,
+        employmentType,
+        compensation: formattedCompensation,
+        sourceLabel,
+      }),
+      requirementsSnapshot: createRequirementsSnapshot(mappedJob),
+      compensationSignal,
+      cardMeta: createCardMeta({
+        cardLocation,
+        experienceLevel,
+        workplaceType,
+        compensation: formattedCompensation,
+      }),
+      searchQuery: createSearchQuery(mappedJob.title, mappedJob.company),
+      fitSummary: resolveFitTag(scored),
     };
   });
 }

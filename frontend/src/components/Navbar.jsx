@@ -1,17 +1,13 @@
-import { Link, useNavigate } from "react-router-dom";
-import { useEffect, useRef, useState } from "react";
+import { Link, NavLink, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
 import { useAuth } from "../hooks/useAuth";
 import "../styles/components/navbar.css";
 
 /**
- * Renders the shared site navigation.
+ * Renders the shared application navigation.
  *
- * Session-aware:
- * - Shows tracker only for signed-in users
- * - Shows sign in for guests and sign out for signed-in users
- * - Uses desktop links above 768px
- * - Uses a compact overflow menu at 768px and below
+ * Public routes stay available even while auth is resolving.
  *
  * @returns {JSX.Element} Top navigation bar.
  */
@@ -22,23 +18,19 @@ function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
-  async function onSignOut() {
+  const closeMenu = useCallback(() => {
+    setIsMenuOpen(false);
+  }, []);
+
+  const toggleMenu = useCallback(() => {
+    setIsMenuOpen((current) => !current);
+  }, []);
+
+  const onSignOut = useCallback(async () => {
     await handleSignOut();
     setIsMenuOpen(false);
     navigate("/");
-  }
-
-  function closeMenu() {
-    setIsMenuOpen(false);
-  }
-
-  function toggleMenu() {
-    setIsMenuOpen((current) => !current);
-  }
-
-  function handleMobileNavClick() {
-    closeMenu();
-  }
+  }, [handleSignOut, navigate]);
 
   useEffect(() => {
     function handlePointerDown(event) {
@@ -64,184 +56,214 @@ function Navbar() {
       document.removeEventListener("touchstart", handlePointerDown);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, []);
+  }, [closeMenu]);
 
-  function renderDesktopLinks() {
-    if (loading) {
+  const desktopLinks = useMemo(() => {
+    const publicLinks = [
+      { type: "link", to: "/", label: "Home" },
+      { type: "link", to: "/jobs", label: "Jobs" },
+      { type: "link", to: "/learn-more", label: "Learn More" },
+    ];
+
+    if (user) {
+      return [
+        { type: "link", to: "/", label: "Home" },
+        { type: "link", to: "/jobs", label: "Jobs" },
+        { type: "link", to: "/tracker", label: "Tracker" },
+        { type: "link", to: "/profile", label: "Profile" },
+        { type: "button", label: "Sign out", onClick: onSignOut },
+      ];
+    }
+
+    return [
+      ...publicLinks,
+      {
+        type: "link",
+        to: "/sign-in",
+        label: loading ? "Checking sign in..." : "Sign in",
+        accent: true,
+      },
+    ];
+  }, [loading, onSignOut, user]);
+
+  const mobileLinks = useMemo(() => {
+    const publicLinks = [
+      { type: "link", to: "/", label: "Home" },
+      { type: "link", to: "/jobs", label: "Jobs" },
+      { type: "link", to: "/learn-more", label: "Learn More" },
+    ];
+
+    if (user) {
+      return [
+        { type: "link", to: "/", label: "Home" },
+        { type: "link", to: "/jobs", label: "Jobs" },
+        { type: "link", to: "/tracker", label: "Tracker" },
+        { type: "link", to: "/profile", label: "Profile" },
+        { type: "button", label: "Sign out", onClick: onSignOut, danger: true },
+      ];
+    }
+
+    return [
+      ...publicLinks,
+      {
+        type: "link",
+        to: "/sign-in",
+        label: loading ? "Checking sign in..." : "Sign in",
+        accent: true,
+      },
+    ];
+  }, [loading, onSignOut, user]);
+
+  function renderDesktopItem(item) {
+    const itemKey = item.key || `${item.type}-${item.label}`;
+
+    if (item.type === "button") {
       return (
-        <div className="nav-auth-placeholder" aria-hidden="true">
-          <span className="nav-link nav-link--muted">Loading...</span>
-        </div>
+        <button
+          key={itemKey}
+          type="button"
+          className="nav-link nav-link--button"
+          onClick={item.onClick}
+        >
+          {item.label}
+        </button>
       );
     }
 
-    if (user) {
+    if (item.disabled) {
       return (
-        <>
-          <Link to="/" className="nav-link">
-            Home
-          </Link>
-
-          <Link to="/jobs" className="nav-link">
-            Jobs
-          </Link>
-
-          <Link to="/tracker" className="nav-link">
-            Tracker
-          </Link>
-
-          <button
-            type="button"
-            className="nav-link nav-link--button"
-            onClick={onSignOut}
-          >
-            Sign out
-          </button>
-        </>
+        <span
+          key={itemKey}
+          className="nav-link nav-link--muted"
+          aria-disabled="true"
+          title="Coming soon"
+        >
+          {item.label}
+        </span>
       );
     }
 
     return (
-      <>
-        <Link to="/" className="nav-link">
-          Home
-        </Link>
-
-        <Link to="/jobs" className="nav-link">
-          Jobs
-        </Link>
-
-        <Link to="/learn-more" className="nav-link">
-          Learn More
-        </Link>
-
-        <Link to="/sign-in" className="nav-link">
-          Sign in
-        </Link>
-      </>
+      <NavLink
+        key={itemKey}
+        to={item.to}
+        end={item.to === "/"}
+        className={({ isActive }) =>
+          [
+            "nav-link",
+            isActive ? "nav-link--active" : "",
+            item.accent ? "nav-link--accent" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")
+        }
+      >
+        {item.label}
+      </NavLink>
     );
   }
 
-  function renderMobileMenuItems() {
-    if (loading) {
+  function renderMobileItem(item) {
+    const itemKey = item.key || `${item.type}-${item.label}`;
+
+    if (item.type === "button") {
       return (
-        <div className="nav-menu__item-wrap">
-          <span className="nav-menu__item nav-menu__item--muted">
-            Loading...
-          </span>
-        </div>
+        <button
+          key={itemKey}
+          type="button"
+          className={[
+            "nav-menu__item",
+            "nav-menu__item--button",
+            item.danger ? "nav-menu__item--danger" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          onClick={item.onClick}
+        >
+          {item.label}
+        </button>
       );
     }
 
-    if (user) {
+    if (item.disabled) {
       return (
-        <>
-          <Link to="/" className="nav-menu__item" onClick={handleMobileNavClick}>
-            Home
-          </Link>
-
-          <Link
-            to="/jobs"
-            className="nav-menu__item"
-            onClick={handleMobileNavClick}
-          >
-            Jobs
-          </Link>
-
-          <Link
-            to="/tracker"
-            className="nav-menu__item"
-            onClick={handleMobileNavClick}
-          >
-            Tracker
-          </Link>
-
-          <button
-            type="button"
-            className="nav-menu__item nav-menu__item--button"
-            onClick={onSignOut}
-          >
-            Sign out
-          </button>
-        </>
+        <span
+          key={itemKey}
+          className="nav-menu__item nav-menu__item--muted"
+          aria-disabled="true"
+          title="Coming soon"
+        >
+          {item.label}
+        </span>
       );
     }
 
     return (
-      <>
-        <Link to="/" className="nav-menu__item" onClick={handleMobileNavClick}>
-          Home
-        </Link>
-
-        <Link
-          to="/jobs"
-          className="nav-menu__item"
-          onClick={handleMobileNavClick}
-        >
-          Jobs
-        </Link>
-
-        <Link
-          to="/learn-more"
-          className="nav-menu__item"
-          onClick={handleMobileNavClick}
-        >
-          Learn More
-        </Link>
-
-        <Link
-          to="/sign-in"
-          className="nav-menu__item"
-          onClick={handleMobileNavClick}
-        >
-          Sign in
-        </Link>
-      </>
+      <NavLink
+        key={itemKey}
+        to={item.to}
+        end={item.to === "/"}
+        className={({ isActive }) =>
+          [
+            "nav-menu__item",
+            isActive ? "nav-menu__item--active" : "",
+            item.accent ? "nav-menu__item--accent" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")
+        }
+        onClick={closeMenu}
+      >
+        {item.label}
+      </NavLink>
     );
   }
 
   return (
     <header className="site-header">
-      <div className="container navbar">
-        <Link to="/" className="brand" aria-label="EarlyBloom home">
-          <img
-            src={BloombugAppIcon}
-            alt="EarlyBloom Bloombug icon"
-            className="brand__icon"
-          />
+      <div className="site-header__inner container--product">
+        <div className="navbar">
+          <Link to="/" className="brand" aria-label="EarlyBloom home">
+            <img
+              src={BloombugAppIcon}
+              alt="EarlyBloom Bloombug icon"
+              className="brand__icon"
+            />
 
-          <div className="brand__text">
-            <span className="brand__title">EarlyBloom</span>
-            <span className="brand__subtitle">Grow into the right role</span>
-          </div>
-        </Link>
-
-        <nav
-          className="nav-links nav-links--desktop"
-          aria-label="Primary navigation"
-        >
-          {renderDesktopLinks()}
-        </nav>
-
-        <div className="nav-menu" ref={menuRef}>
-          <button
-            type="button"
-            className="nav-menu__trigger"
-            onClick={toggleMenu}
-            aria-label="Open navigation menu"
-            aria-expanded={isMenuOpen}
-            aria-haspopup="menu"
-          >
-            <span className="nav-menu__dots" aria-hidden="true">
-              ⋮
-            </span>
-          </button>
-
-          {isMenuOpen ? (
-            <div className="nav-menu__dropdown" role="menu">
-              {renderMobileMenuItems()}
+            <div className="brand__text">
+              <span className="brand__title">EarlyBloom</span>
+              <span className="brand__subtitle">
+                Real roles for early careers
+              </span>
             </div>
-          ) : null}
+          </Link>
+
+          <nav className="nav-links" aria-label="Primary navigation">
+            {desktopLinks.map(renderDesktopItem)}
+          </nav>
+
+          <div className="nav-menu" ref={menuRef}>
+            <button
+              type="button"
+              className="nav-menu__trigger"
+              onClick={toggleMenu}
+              aria-label={isMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+              aria-expanded={isMenuOpen}
+              aria-haspopup="menu"
+            >
+              <span className="nav-menu__dots" aria-hidden="true">
+                ⋮
+              </span>
+            </button>
+
+            {isMenuOpen ? (
+              <div className="nav-menu__dropdown" role="menu">
+                <div className="nav-menu__panel">
+                  {mobileLinks.map(renderMobileItem)}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </header>

@@ -20,22 +20,18 @@ if not SUPABASE_URL or not SUPABASE_SECRET_KEY:
         "Missing SUPABASE_URL or SUPABASE_SECRET_KEY for backend database access."
     )
 
-_supabase_admin: Client | None = None
-
-# Matches the actual FK column name in user_saved_jobs and user_hidden_jobs.
 TRACKER_JOB_FK_COLUMN = "job_cache_id"
 USER_SAVED_JOBS_TABLE = "user_saved_jobs"
 USER_HIDDEN_JOBS_TABLE = "user_hidden_jobs"
 
 
 def get_supabase_admin() -> Client:
-    """Return a cached Supabase admin client."""
-    global _supabase_admin
+    """Return a fresh Supabase admin client.
 
-    if _supabase_admin is None:
-        _supabase_admin = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
-
-    return _supabase_admin
+    A fresh client avoids shared httpx/http2 state leaking across requests,
+    which can cause intermittent LocalProtocolError / stream-state failures.
+    """
+    return create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
 
 
 def get_user_id_from_bearer_token(authorization_header: Optional[str]) -> str:
@@ -832,13 +828,11 @@ class ResumeRepository:
         raw_text: Optional[str] = None,
         parsed_json: Optional[Dict[str, Any]] = None,
         parse_warnings: Optional[list[str]] = None,
-        latest_error: Optional[str] = None,
         ats_tags: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
         update_payload: Dict[str, Any] = {
             "parse_status": parse_status,
             "parse_warnings": parse_warnings or [],
-            "latest_error": latest_error,
         }
 
         if raw_text is not None:
