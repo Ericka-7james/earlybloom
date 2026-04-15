@@ -8,6 +8,9 @@ from fastapi.testclient import TestClient
 from app.api.routes.auth import router as auth_router
 
 
+VALID_SIGN_UP_PASSWORD = "Supersecret123!"
+
+
 def build_test_app() -> FastAPI:
     app = FastAPI()
     app.include_router(auth_router)
@@ -88,15 +91,14 @@ def test_sign_up_returns_auth_response_and_sets_cookies_when_session_exists(monk
         "/auth/sign-up",
         json={
             "email": "test@example.com",
-            "password": "supersecret123",
-            "confirm_password": "supersecret123",
-            "display_name": "E",
+            "password": VALID_SIGN_UP_PASSWORD,
         },
     )
 
     assert response.status_code == 200
     assert response.json() == auth_response
     assert captured["payload"].email == "test@example.com"
+    assert captured["payload"].password == VALID_SIGN_UP_PASSWORD
     assert captured["session"] is fake_session
     assert "test-cookie=set" in response.headers.get("set-cookie", "")
 
@@ -127,9 +129,7 @@ def test_sign_up_skips_cookie_write_when_session_is_none(monkeypatch):
         "/auth/sign-up",
         json={
             "email": "test@example.com",
-            "password": "supersecret123",
-            "confirm_password": "supersecret123",
-            "display_name": "E",
+            "password": VALID_SIGN_UP_PASSWORD,
         },
     )
 
@@ -175,6 +175,8 @@ def test_sign_in_returns_auth_response_and_sets_cookies(monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == auth_response
+    assert captured["payload"].email == "test@example.com"
+    assert captured["payload"].password == "supersecret123"
     assert captured["session"] is fake_session
 
 
