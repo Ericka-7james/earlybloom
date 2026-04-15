@@ -18,6 +18,10 @@
   width: 100%;
 }
 
+.profile-account-actions {
+  justify-content: flex-end;
+}
+
 @media (min-width: 640px) {
   .profile-shortcuts .button {
     width: auto;

@@ -49,13 +49,7 @@ function CommonLoadingModal({
   }, []);
 
   useEffect(() => {
-    if (!isOpen) {
-      setFrameIndex(0);
-      return undefined;
-    }
-
-    if (prefersReducedMotion || safeFrames.length <= 1) {
-      setFrameIndex(0);
+    if (!isOpen || prefersReducedMotion || safeFrames.length <= 1) {
       return undefined;
     }
 
@@ -85,7 +79,8 @@ function CommonLoadingModal({
     return null;
   }
 
-  const currentFrame = safeFrames[frameIndex] || safeFrames[0];
+  const displayFrameIndex = prefersReducedMotion ? 0 : frameIndex % safeFrames.length;
+  const currentFrame = safeFrames[displayFrameIndex] || safeFrames[0];
 
   return (
     <div
