@@ -559,11 +559,10 @@ function Profile() {
               <section className="app-panel-card app-panel-card--soft">
                 <div className="settings-section">
                   <div className="settings-section__header">
-                    <p className="section-label">Account actions</p>
-                    <h2 className="card-title">Session controls</h2>
+                    <p className="section-label">Resume</p>
+                    <h2 className="card-title">Your latest upload</h2>
                     <p className="card-copy">
-                      Use these for account-level actions while Profile is still
-                      in its first version.
+                      Manage your resume parsing and uploads from Tracker.
                     </p>
                   </div>
 
@@ -585,7 +584,21 @@ function Profile() {
                         Manage resume in tracker
                       </Link>
                     </div>
+                  </div>
+                </div>
+              </section>
 
+              <section className="app-panel-card app-panel-card--soft">
+                <div className="settings-section">
+                  <div className="settings-section__header">
+                    <p className="section-label">Account actions</p>
+                    <h2 className="card-title">Sign out</h2>
+                    <p className="card-copy">
+                      End your current session on this device.
+                    </p>
+                  </div>
+
+                  <div className="settings-section__body">
                     <div className="settings-section__actions profile-account-actions">
                       <button
                         type="button"
