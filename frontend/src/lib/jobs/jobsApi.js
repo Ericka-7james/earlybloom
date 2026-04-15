@@ -29,6 +29,10 @@ const DEFAULT_RESOLVED_USER_PROFILE = {
   isLgbtFriendlyOnly: false,
 };
 
+const GET_RESPONSE_TTL_MS = 30_000;
+const _inflightGetRequests = new Map();
+const _responseCache = new Map();
+
 /**
  * Returns whether jobs requests should use mock data.
  *
@@ -109,6 +113,9 @@ async function readErrorMessage(response, fallbackMessage) {
 /**
  * Performs a backend jobs request and returns parsed JSON.
  *
+ * GET requests are deduped in-flight and briefly cached in memory to reduce
+ * repeated fetches during the same browsing session.
+ *
  * @param {string} path Backend API path.
  * @param {RequestInit} [options] Fetch options.
  * @returns {Promise<any>} Parsed JSON payload or null for 204 responses.
@@ -116,36 +123,126 @@ async function readErrorMessage(response, fallbackMessage) {
 async function requestJson(path, options = {}) {
   ensureApiBaseUrl();
 
-  let response;
+  const method = String(options.method || "GET").toUpperCase();
+  const isGetRequest = method === "GET";
+  const fullUrl = `${API_BASE_URL}${path}`;
+  const cacheKey = `${method}:${fullUrl}`;
 
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      credentials: "include",
-      ...options,
-      headers: {
-        Accept: "application/json",
-        ...(options.headers || {}),
-      },
-    });
-  } catch {
-    throw new Error(
-      "Unable to reach the server. Check that the backend is running and try again."
-    );
+  if (isGetRequest) {
+    const cached = getCachedResponse(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const inflight = _inflightGetRequests.get(cacheKey);
+    if (inflight) {
+      return inflight;
+    }
   }
 
-  if (!response.ok) {
-    const fallbackMessage = `${options.method || "GET"} ${path} failed (${response.status}).`;
-    const message = await readErrorMessage(response, fallbackMessage);
-    const error = new Error(message);
-    error.status = response.status;
-    throw error;
+  const requestPromise = (async () => {
+    let response;
+
+    try {
+      response = await fetch(fullUrl, {
+        credentials: "include",
+        ...options,
+        headers: {
+          Accept: "application/json",
+          ...(options.headers || {}),
+        },
+      });
+    } catch {
+      throw new Error(
+        " the server. Check that the backend is running and try again."
+      );
+    }
+
+    if (!response.ok) {
+      const fallbackMessage = `${method} ${path} failed (${response.status}).`;
+      const message = await readErrorMessage(response, fallbackMessage);
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+
+    if (response.status === 204) {
+      if (isGetRequest) {
+        setCachedResponse(cacheKey, null);
+      }
+      return null;
+    }
+
+    const payload = await response.json();
+
+    if (isGetRequest) {
+      setCachedResponse(cacheKey, payload);
+    }
+
+    return payload;
+  })();
+
+  if (isGetRequest) {
+    _inflightGetRequests.set(cacheKey, requestPromise);
+
+    try {
+      return await requestPromise;
+    } finally {
+      _inflightGetRequests.delete(cacheKey);
+    }
   }
 
-  if (response.status === 204) {
-    return null;
+  return requestPromise;
+}
+
+/**
+ * Returns a cached GET response when still fresh.
+ *
+ * @param {string} cacheKey Request cache key.
+ * @returns {any | undefined} Cached payload, or undefined when stale/missing.
+ */
+function getCachedResponse(cacheKey) {
+  const entry = _responseCache.get(cacheKey);
+  if (!entry) {
+    return undefined;
   }
 
-  return await response.json();
+  if (Date.now() - entry.storedAt > GET_RESPONSE_TTL_MS) {
+    _responseCache.delete(cacheKey);
+    return undefined;
+  }
+
+  return entry.payload;
+}
+
+/**
+ * Stores a GET response in the lightweight client cache.
+ *
+ * @param {string} cacheKey Request cache key.
+ * @param {any} payload Parsed response payload.
+ * @returns {void}
+ */
+function setCachedResponse(cacheKey, payload) {
+  _responseCache.set(cacheKey, {
+    storedAt: Date.now(),
+    payload,
+  });
+
+  if (_responseCache.size > 10) {
+    const oldestKey = _responseCache.keys().next().value;
+    if (oldestKey) {
+      _responseCache.delete(oldestKey);
+    }
+  }
+}
+
+/**
+ * Clears cached GET responses. Useful after mutations.
+ *
+ * @returns {void}
+ */
+function clearJobsRequestCache() {
+  _responseCache.clear();
 }
 
 /**
@@ -381,14 +478,18 @@ function normalizeJobsPayload(payload) {
 /**
  * Fetches the public jobs feed.
  *
- * @param {{ signal?: AbortSignal }} [options] Fetch options.
+ * @param {{ signal?: AbortSignal, force?: boolean }} [options] Fetch options.
  * @returns {Promise<Array<object>>} Normalized jobs array.
  */
 export async function fetchJobs(options = {}) {
-  const { signal } = options;
+  const { signal, force = false } = options;
 
   if (USE_MOCK_JOBS) {
     return MOCK_RAW_JOBS;
+  }
+
+  if (force) {
+    clearJobsRequestCache();
   }
 
   const payload = await requestJson("/jobs", {
@@ -402,14 +503,18 @@ export async function fetchJobs(options = {}) {
 /**
  * Fetches the resolved jobs profile used for scoring and filtering.
  *
- * @param {{ signal?: AbortSignal }} [options] Fetch options.
+ * @param {{ signal?: AbortSignal, force?: boolean }} [options] Fetch options.
  * @returns {Promise<object>} Resolved jobs profile.
  */
 export async function fetchResolvedJobProfile(options = {}) {
-  const { signal } = options;
+  const { signal, force = false } = options;
 
   if (USE_MOCK_JOBS) {
     return normalizeMockUserProfile(MOCK_USER_PROFILE);
+  }
+
+  if (force) {
+    clearJobsRequestCache();
   }
 
   const payload = await requestJson("/jobs/profile", {
@@ -427,13 +532,16 @@ export async function fetchResolvedJobProfile(options = {}) {
  * @returns {Promise<object>} Save mutation response.
  */
 export async function saveJob(jobId) {
-  return requestJson("/jobs/saved", {
+  const result = await requestJson("/jobs/saved", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ job_id: jobId }),
   });
+
+  clearJobsRequestCache();
+  return result;
 }
 
 /**
@@ -443,9 +551,12 @@ export async function saveJob(jobId) {
  * @returns {Promise<object>} Unsave mutation response.
  */
 export async function unsaveJob(jobId) {
-  return requestJson(`/jobs/saved/${encodeURIComponent(jobId)}`, {
+  const result = await requestJson(`/jobs/saved/${encodeURIComponent(jobId)}`, {
     method: "DELETE",
   });
+
+  clearJobsRequestCache();
+  return result;
 }
 
 /**
@@ -455,13 +566,16 @@ export async function unsaveJob(jobId) {
  * @returns {Promise<object>} Hide mutation response.
  */
 export async function hideJob(jobId) {
-  return requestJson("/jobs/hidden", {
+  const result = await requestJson("/jobs/hidden", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ job_id: jobId }),
   });
+
+  clearJobsRequestCache();
+  return result;
 }
 
 /**
@@ -471,22 +585,29 @@ export async function hideJob(jobId) {
  * @returns {Promise<object>} Unhide mutation response.
  */
 export async function unhideJob(jobId) {
-  return requestJson(`/jobs/hidden/${encodeURIComponent(jobId)}`, {
+  const result = await requestJson(`/jobs/hidden/${encodeURIComponent(jobId)}`, {
     method: "DELETE",
   });
+
+  clearJobsRequestCache();
+  return result;
 }
 
 /**
  * Fetches saved jobs for the current authenticated user.
  *
- * @param {{ signal?: AbortSignal }} [options] Fetch options.
+ * @param {{ signal?: AbortSignal, force?: boolean }} [options] Fetch options.
  * @returns {Promise<Array<object>>} Normalized saved jobs.
  */
 export async function fetchSavedJobs(options = {}) {
-  const { signal } = options;
+  const { signal, force = false } = options;
 
   if (USE_MOCK_JOBS) {
     return [];
+  }
+
+  if (force) {
+    clearJobsRequestCache();
   }
 
   const payload = await requestJson("/jobs/saved", {
@@ -500,14 +621,18 @@ export async function fetchSavedJobs(options = {}) {
 /**
  * Fetches hidden jobs for the current authenticated user.
  *
- * @param {{ signal?: AbortSignal }} [options] Fetch options.
+ * @param {{ signal?: AbortSignal, force?: boolean }} [options] Fetch options.
  * @returns {Promise<Array<object>>} Normalized hidden jobs.
  */
 export async function fetchHiddenJobs(options = {}) {
-  const { signal } = options;
+  const { signal, force = false } = options;
 
   if (USE_MOCK_JOBS) {
     return [];
+  }
+
+  if (force) {
+    clearJobsRequestCache();
   }
 
   try {

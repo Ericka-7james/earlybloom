@@ -58,13 +58,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ViewerContext:
-    """Represents the current jobs viewer.
-
-    Attributes:
-        user_id: Authenticated user ID when available.
-        session: Refreshed session object used to reissue cookies when needed.
-        refreshed: Whether auth was refreshed during this request.
-    """
+    """Represents the current jobs viewer."""
 
     user_id: str | None = None
     session: Any | None = None
@@ -72,22 +66,14 @@ class ViewerContext:
 
 
 def get_job_ingestion_service() -> JobIngestionService:
-    """Returns a configured job ingestion service.
-
-    Returns:
-        JobIngestionService: Shared ingestion service instance.
-    """
+    """Returns a configured job ingestion service."""
     from app.services.jobs.providers import get_configured_providers
 
     return JobIngestionService(providers=get_configured_providers())
 
 
 def get_job_cache_repository() -> JobCacheRepository:
-    """Returns a job-cache repository instance.
-
-    Returns:
-        JobCacheRepository: Repository for jobs cache and viewer-state access.
-    """
+    """Returns a job-cache repository instance."""
     return JobCacheRepository()
 
 
@@ -96,15 +82,7 @@ def _resolve_viewer_from_session(
     access_token: str | None,
     refresh_token: str | None,
 ) -> CurrentSessionContext | None:
-    """Resolves a viewer session from auth cookies.
-
-    Args:
-        access_token: Cookie-backed access token.
-        refresh_token: Cookie-backed refresh token.
-
-    Returns:
-        CurrentSessionContext | None: Verified or refreshed session context, or None.
-    """
+    """Resolves a viewer session from auth cookies."""
     if not access_token and not refresh_token:
         return None
 
@@ -128,19 +106,7 @@ def get_optional_viewer_context(
         alias=auth_settings.refresh_cookie_name,
     ),
 ) -> ViewerContext:
-    """Resolves the current viewer using cookies first, then bearer token.
-
-    Guests are allowed to browse jobs, so failed auth resolution returns an empty
-    viewer context instead of raising.
-
-    Args:
-        authorization: Optional Authorization header.
-        access_token: Access-token cookie.
-        refresh_token: Refresh-token cookie.
-
-    Returns:
-        ViewerContext: Resolved viewer context.
-    """
+    """Resolves the current viewer using cookies first, then bearer token."""
     current = _resolve_viewer_from_session(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -165,17 +131,7 @@ def get_optional_viewer_context(
 def get_required_viewer_context(
     current: ViewerContext = Depends(get_optional_viewer_context),
 ) -> ViewerContext:
-    """Requires an authenticated viewer for tracker mutations.
-
-    Args:
-        current: Resolved viewer context.
-
-    Raises:
-        HTTPException: If the viewer is not authenticated.
-
-    Returns:
-        ViewerContext: Authenticated viewer context.
-    """
+    """Requires an authenticated viewer for tracker mutations."""
     if not current.user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -188,25 +144,13 @@ def _set_refreshed_auth_cookies_if_needed(
     response: Response,
     current: ViewerContext,
 ) -> None:
-    """Reissues auth cookies when the session was refreshed during the request.
-
-    Args:
-        response: Outgoing FastAPI response.
-        current: Current viewer context.
-    """
+    """Reissues auth cookies when the session was refreshed during the request."""
     if current.refreshed and current.session is not None:
         set_auth_cookies(response, current.session)
 
 
 def _serialize_public_jobs(jobs: list[dict[str, Any]]) -> list[PublicJob]:
-    """Validates and serializes public job payloads.
-
-    Args:
-        jobs: Raw jobs payload list.
-
-    Returns:
-        list[PublicJob]: Validated public job models.
-    """
+    """Validates and serializes public job payloads."""
     return [PublicJob.model_validate(job) for job in jobs]
 
 
@@ -216,16 +160,7 @@ def _build_tracker_mutation_response(
     user_id: str,
     public_job_id: str,
 ) -> JobTrackerMutationResponse:
-    """Builds the viewer-state response after a save/hide mutation.
-
-    Args:
-        repository: Job cache repository.
-        user_id: Authenticated user ID.
-        public_job_id: Public job ID.
-
-    Returns:
-        JobTrackerMutationResponse: Tracker mutation response payload.
-    """
+    """Builds the viewer-state response after a save/hide mutation."""
     viewer_state_payload = repository.apply_viewer_state_to_jobs(
         user_id=user_id,
         jobs=[{"id": public_job_id}],
@@ -255,20 +190,7 @@ def _build_related_jobs_response(
     repository: JobCacheRepository,
     relation_type: str,
 ) -> JobsResponse:
-    """Builds a saved-jobs or hidden-jobs response.
-
-    Args:
-        response: Outgoing response object.
-        current: Current authenticated viewer context.
-        repository: Job cache repository.
-        relation_type: Either "saved" or "hidden".
-
-    Raises:
-        ValueError: If relation_type is unsupported.
-
-    Returns:
-        JobsResponse: Serialized related-jobs response.
-    """
+    """Builds a saved-jobs or hidden-jobs response."""
     if relation_type == "saved":
         job_rows = repository.list_saved_jobs_for_user(user_id=current.user_id or "")
     elif relation_type == "hidden":
@@ -296,6 +218,20 @@ def _build_related_jobs_response(
     return JobsResponse(jobs=serialized_jobs, total=len(serialized_jobs))
 
 
+def _load_cached_public_jobs(repository: JobCacheRepository, limit: int = 160) -> list[dict[str, Any]]:
+    """Fallback loader for cached jobs when live ingestion fails."""
+    rows = repository.list_active_jobs(limit=limit)
+    public_jobs: list[dict[str, Any]] = []
+
+    for row in rows:
+        normalized = repository.row_to_normalized_job(row)
+        if normalized is None:
+            continue
+        public_jobs.append(map_normalized_job_to_response(normalized))
+
+    return public_jobs
+
+
 @router.get("", response_model=JobsResponse)
 async def list_jobs(
     response: Response,
@@ -303,39 +239,35 @@ async def list_jobs(
     job_ingestion_service: JobIngestionService = Depends(get_job_ingestion_service),
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobsResponse:
-    """Returns normalized jobs for browsing, scoring, and UI display.
+    """Returns normalized jobs for browsing, scoring, and UI display."""
+    jobs: list[dict[str, Any]] = []
 
-    Args:
-        response: Outgoing response object.
-        current: Current viewer context.
-        job_ingestion_service: Jobs ingestion service.
-        repository: Job cache repository.
-
-    Raises:
-        HTTPException: If jobs cannot be loaded.
-
-    Returns:
-        JobsResponse: Public jobs response.
-    """
     try:
         jobs = await job_ingestion_service.ingest_jobs()
+    except Exception:
+        logger.exception("Live jobs ingestion failed. Falling back to shared cache.")
 
-        if current.user_id:
-            jobs = repository.apply_viewer_state_to_jobs(
-                user_id=current.user_id,
-                jobs=jobs,
-                exclude_hidden=True,
-            )
-            _set_refreshed_auth_cookies_if_needed(response, current)
+        try:
+            jobs = _load_cached_public_jobs(repository)
+        except Exception:
+            logger.exception("Shared cache fallback also failed.")
 
-        serialized_jobs = _serialize_public_jobs(jobs)
-        return JobsResponse(jobs=serialized_jobs, total=len(serialized_jobs))
-    except Exception as exc:
-        logger.exception("Failed to list jobs.")
+    if not jobs:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to load jobs at this time.",
-        ) from exc
+        )
+
+    if current.user_id:
+        jobs = repository.apply_viewer_state_to_jobs(
+            user_id=current.user_id,
+            jobs=jobs,
+            exclude_hidden=True,
+        )
+        _set_refreshed_auth_cookies_if_needed(response, current)
+
+    serialized_jobs = _serialize_public_jobs(jobs)
+    return JobsResponse(jobs=serialized_jobs, total=len(serialized_jobs))
 
 
 @router.get("/profile", response_model=ResolvedJobProfileResponse)
@@ -343,20 +275,7 @@ def get_jobs_profile(
     response: Response,
     current: ViewerContext = Depends(get_optional_viewer_context),
 ) -> ResolvedJobProfileResponse:
-    """Returns the resolved jobs scoring profile for the current viewer.
-
-    Guests receive default scoring preferences.
-
-    Args:
-        response: Outgoing response object.
-        current: Current viewer context.
-
-    Raises:
-        HTTPException: If the resolved profile cannot be built.
-
-    Returns:
-        ResolvedJobProfileResponse: Resolved jobs profile.
-    """
+    """Returns the resolved jobs scoring profile for the current viewer."""
     try:
         if not current.user_id:
             return ResolvedJobProfileResponse(**DEFAULT_RESOLVED_JOB_PROFILE)
@@ -367,8 +286,8 @@ def get_jobs_profile(
     except Exception as exc:
         logger.exception("Failed to resolve jobs profile.")
         raise HTTPException(
-          status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-          detail="Unable to load job profile at this time.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to load job profile at this time.",
         ) from exc
 
 
@@ -383,20 +302,7 @@ def save_job(
     current: ViewerContext = Depends(get_required_viewer_context),
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobTrackerMutationResponse:
-    """Saves a shared cached job for the authenticated user.
-
-    Args:
-        payload: Save-job request payload.
-        response: Outgoing response object.
-        current: Authenticated viewer context.
-        repository: Job cache repository.
-
-    Raises:
-        HTTPException: If the save action fails.
-
-    Returns:
-        JobTrackerMutationResponse: Viewer-state mutation response.
-    """
+    """Saves a shared cached job for the authenticated user."""
     try:
         repository.save_job_for_user(
             user_id=current.user_id or "",
@@ -426,20 +332,7 @@ def unsave_job(
     current: ViewerContext = Depends(get_required_viewer_context),
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobTrackerMutationResponse:
-    """Removes a saved-job relationship for the authenticated user.
-
-    Args:
-        job_id: Public job ID.
-        response: Outgoing response object.
-        current: Authenticated viewer context.
-        repository: Job cache repository.
-
-    Raises:
-        HTTPException: If the unsave action fails.
-
-    Returns:
-        JobTrackerMutationResponse: Viewer-state mutation response.
-    """
+    """Removes a saved-job relationship for the authenticated user."""
     try:
         repository.unsave_job_for_user(
             user_id=current.user_id or "",
@@ -473,20 +366,7 @@ def hide_job(
     current: ViewerContext = Depends(get_required_viewer_context),
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobTrackerMutationResponse:
-    """Hides a shared cached job for the authenticated user.
-
-    Args:
-        payload: Hide-job request payload.
-        response: Outgoing response object.
-        current: Authenticated viewer context.
-        repository: Job cache repository.
-
-    Raises:
-        HTTPException: If the hide action fails.
-
-    Returns:
-        JobTrackerMutationResponse: Viewer-state mutation response.
-    """
+    """Hides a shared cached job for the authenticated user."""
     try:
         repository.hide_job_for_user(
             user_id=current.user_id or "",
@@ -516,20 +396,7 @@ def unhide_job(
     current: ViewerContext = Depends(get_required_viewer_context),
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobTrackerMutationResponse:
-    """Removes a hidden-job relationship for the authenticated user.
-
-    Args:
-        job_id: Public job ID.
-        response: Outgoing response object.
-        current: Authenticated viewer context.
-        repository: Job cache repository.
-
-    Raises:
-        HTTPException: If the unhide action fails.
-
-    Returns:
-        JobTrackerMutationResponse: Viewer-state mutation response.
-    """
+    """Removes a hidden-job relationship for the authenticated user."""
     try:
         repository.unhide_job_for_user(
             user_id=current.user_id or "",
@@ -558,19 +425,7 @@ def list_saved_jobs(
     current: ViewerContext = Depends(get_required_viewer_context),
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobsResponse:
-    """Lists saved jobs for the authenticated user.
-
-    Args:
-        response: Outgoing response object.
-        current: Authenticated viewer context.
-        repository: Job cache repository.
-
-    Raises:
-        HTTPException: If saved jobs cannot be loaded.
-
-    Returns:
-        JobsResponse: Saved jobs response.
-    """
+    """Lists saved jobs for the authenticated user."""
     try:
         return _build_related_jobs_response(
             response=response,
@@ -594,19 +449,7 @@ def list_hidden_jobs(
     current: ViewerContext = Depends(get_required_viewer_context),
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobsResponse:
-    """Lists hidden jobs for the authenticated user.
-
-    Args:
-        response: Outgoing response object.
-        current: Authenticated viewer context.
-        repository: Job cache repository.
-
-    Raises:
-        HTTPException: If hidden jobs cannot be loaded.
-
-    Returns:
-        JobsResponse: Hidden jobs response.
-    """
+    """Lists hidden jobs for the authenticated user."""
     try:
         return _build_related_jobs_response(
             response=response,

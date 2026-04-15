@@ -289,6 +289,13 @@ class JobCacheRepository:
         status_value: str = "running",
         metadata: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
+        """Create an ingestion run row.
+
+        The row acts as a time-bounded lease. Stale running rows are cleaned
+        before future lock checks.
+        """
+        now_iso = datetime.now(timezone.utc).isoformat()
+
         result = (
             self.client.table("job_ingestion_runs")
             .insert(
@@ -296,6 +303,12 @@ class JobCacheRepository:
                     "provider": provider,
                     "query_key": query_key,
                     "status": status_value,
+                    "started_at": now_iso,
+                    "completed_at": None,
+                    "raw_count": 0,
+                    "normalized_count": 0,
+                    "deduped_count": 0,
+                    "error_message": None,
                     "metadata": metadata or {},
                 }
             )
@@ -316,6 +329,7 @@ class JobCacheRepository:
         error_message: str | None = None,
         metadata: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
+        """Mark an ingestion run complete."""
         result = (
             self.client.table("job_ingestion_runs")
             .update(
@@ -343,6 +357,7 @@ class JobCacheRepository:
         query_key: str,
         within_seconds: int,
     ) -> bool:
+        """Return whether a successful run completed within the cooldown window."""
         cutoff_iso = (
             datetime.now(timezone.utc) - timedelta(seconds=within_seconds)
         ).isoformat()
@@ -367,6 +382,17 @@ class JobCacheRepository:
         query_key: str,
         within_seconds: int,
     ) -> bool:
+        """Return whether a still-valid running lease exists.
+
+        Before checking, automatically expire stale running rows so crashes do
+        not block ingestion forever.
+        """
+        self._expire_stale_running_ingestions(
+            provider=provider,
+            query_key=query_key,
+            within_seconds=within_seconds,
+        )
+
         cutoff_iso = (
             datetime.now(timezone.utc) - timedelta(seconds=within_seconds)
         ).isoformat()
@@ -383,6 +409,39 @@ class JobCacheRepository:
         )
 
         return bool(result.data)
+
+    def _expire_stale_running_ingestions(
+        self,
+        *,
+        provider: str,
+        query_key: str,
+        within_seconds: int,
+    ) -> list[Dict[str, Any]]:
+        """Expire running rows whose lease window has elapsed.
+
+        This prevents crashed requests from leaving permanent 'running' locks.
+        """
+        cutoff_iso = (
+            datetime.now(timezone.utc) - timedelta(seconds=within_seconds)
+        ).isoformat()
+
+        result = (
+            self.client.table("job_ingestion_runs")
+            .update(
+                {
+                    "status": "expired",
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "error_message": "Automatically expired stale running ingestion lease.",
+                }
+            )
+            .eq("provider", provider)
+            .eq("query_key", query_key)
+            .eq("status", "running")
+            .lt("started_at", cutoff_iso)
+            .execute()
+        )
+
+        return result.data or []
 
     def mark_expired_jobs_inactive(self) -> list[Dict[str, Any]]:
         """Mark expired jobs inactive."""

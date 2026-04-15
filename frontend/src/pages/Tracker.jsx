@@ -160,6 +160,7 @@ function Tracker() {
   const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
   const [isPreferencesModalOpen, setIsPreferencesModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState("");
   const [pendingActions, setPendingActions] = useState({});
   const [viewerOverrides, setViewerOverrides] = useState({});
@@ -182,6 +183,7 @@ function Tracker() {
         });
         setPreferencesDraft(DEFAULT_PREFERENCES);
         setIsLoading(false);
+        setHasLoadedOnce(false);
         setError("");
         return;
       }
@@ -258,6 +260,7 @@ function Tracker() {
       setResolvedUserProfile(nextResolvedProfile);
       setError(loadErrors.join(" "));
       setIsLoading(false);
+      setHasLoadedOnce(true);
     }
 
     void loadTrackerData();
@@ -344,6 +347,13 @@ function Tracker() {
   const displayedResumeLocation = formatResumeLocation(
     parsedResume?.basics?.location
   );
+
+  const shouldShowLoadingModal =
+    isLoading &&
+    !hasLoadedOnce &&
+    savedJobsRaw.length === 0 &&
+    hiddenJobsRaw.length === 0 &&
+    !trackerData?.resume;
 
   function resetPreferencesDraft() {
     setPreferencesDraft(trackerData?.preferences || DEFAULT_PREFERENCES);
@@ -857,7 +867,7 @@ function Tracker() {
       </section>
 
       <CommonLoadingModal
-        isOpen={isLoading}
+        isOpen={shouldShowLoadingModal}
         message="Growing your tracker..."
         label="Loading tracker jobs"
       />

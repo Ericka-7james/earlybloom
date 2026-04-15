@@ -11,6 +11,7 @@
  * - avoid stale state updates after request cancellation
  * - keep previous jobs visible during refresh
  * - distinguish first-load blocking from background refreshes
+ * - degrade gracefully when one request succeeds and the other fails
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -29,18 +30,6 @@ const DEFAULT_RESOLVED_USER_PROFILE = {
   isLgbtFriendlyOnly: false,
 };
 
-/**
- * Returns a fresh copy of the default resolved-profile shape.
- *
- * @returns {{
- *   desiredLevels: string[],
- *   preferredRoleTypes: string[],
- *   preferredWorkplaceTypes: string[],
- *   preferredLocations: string[],
- *   skills: string[],
- *   isLgbtFriendlyOnly: boolean
- * }} Default resolved-profile object.
- */
 function getDefaultResolvedUserProfile() {
   return {
     desiredLevels: [...DEFAULT_RESOLVED_USER_PROFILE.desiredLevels],
@@ -52,19 +41,6 @@ function getDefaultResolvedUserProfile() {
   };
 }
 
-/**
- * Normalizes a resolved-profile payload into the app's stable frontend shape.
- *
- * @param {object | null | undefined} profile Raw resolved-profile payload.
- * @returns {{
- *   desiredLevels: string[],
- *   preferredRoleTypes: string[],
- *   preferredWorkplaceTypes: string[],
- *   preferredLocations: string[],
- *   skills: string[],
- *   isLgbtFriendlyOnly: boolean
- * }} Normalized resolved-profile object.
- */
 function normalizeResolvedUserProfile(profile) {
   if (!profile || typeof profile !== "object") {
     return getDefaultResolvedUserProfile();
@@ -93,30 +69,14 @@ function normalizeResolvedUserProfile(profile) {
   };
 }
 
-/**
- * Loads jobs and resolved-profile data for the current viewer.
- *
- * @param {{
- *   viewerKey?: string
- * }} [options] Hook options.
- * @returns {{
- *   jobs: Array,
- *   resolvedUserProfile: {
- *     desiredLevels: string[],
- *     preferredRoleTypes: string[],
- *     preferredWorkplaceTypes: string[],
- *     preferredLocations: string[],
- *     skills: string[],
- *     isLgbtFriendlyOnly: boolean
- *   },
- *   isLoading: boolean,
- *   isRefreshing: boolean,
- *   hasLoadedOnce: boolean,
- *   error: string,
- *   isMockMode: boolean,
- *   retry: () => void
- * }} Jobs state and helpers.
- */
+function getReadableErrorMessage(error, fallbackMessage) {
+  if (error instanceof Error && error.message?.trim()) {
+    return error.message;
+  }
+
+  return fallbackMessage;
+}
+
 export function useJobs(options = {}) {
   const { viewerKey = "guest" } = options;
 
@@ -130,11 +90,6 @@ export function useJobs(options = {}) {
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
 
-  /**
-   * Triggers a jobs reload.
-   *
-   * @returns {void}
-   */
   const retry = useCallback(() => {
     setReloadKey((currentValue) => currentValue + 1);
   }, []);
@@ -154,42 +109,51 @@ export function useJobs(options = {}) {
 
       setError("");
 
-      try {
-        const [nextJobs, nextResolvedUserProfile] = await Promise.all([
-          fetchJobs({ signal: controller.signal }),
-          fetchResolvedJobProfile({ signal: controller.signal }),
-        ]);
+      const [jobsResult, profileResult] = await Promise.allSettled([
+        fetchJobs({ signal: controller.signal }),
+        fetchResolvedJobProfile({ signal: controller.signal }),
+      ]);
 
-        if (controller.signal.aborted) {
-          return;
-        }
+      if (controller.signal.aborted) {
+        return;
+      }
 
-        setJobs(Array.isArray(nextJobs) ? nextJobs : []);
-        setResolvedUserProfile(
-          normalizeResolvedUserProfile(nextResolvedUserProfile)
-        );
+      let nextError = "";
+
+      if (jobsResult.status === "fulfilled") {
+        setJobs(Array.isArray(jobsResult.value) ? jobsResult.value : []);
         setHasLoadedOnce(true);
-      } catch (error) {
-        if (controller.signal.aborted || error?.name === "AbortError") {
-          return;
-        }
-
-        if (!hasLoadedOnce && !hasExistingJobs) {
-          setJobs([]);
-          setResolvedUserProfile(getDefaultResolvedUserProfile());
-        }
-
-        setError(
-          error instanceof Error
-            ? error.message
-            : "Something went wrong while loading jobs."
+      } else if (!hasExistingJobs && !hasLoadedOnce) {
+        setJobs([]);
+        nextError = getReadableErrorMessage(
+          jobsResult.reason,
+          "Something went wrong while loading jobs."
         );
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsLoading(false);
-          setIsRefreshing(false);
+      } else {
+        nextError = getReadableErrorMessage(
+          jobsResult.reason,
+          "Refreshing jobs failed. Showing the last loaded results."
+        );
+      }
+
+      if (profileResult.status === "fulfilled") {
+        setResolvedUserProfile(
+          normalizeResolvedUserProfile(profileResult.value)
+        );
+      } else if (!hasLoadedOnce && !hasExistingJobs) {
+        setResolvedUserProfile(getDefaultResolvedUserProfile());
+
+        if (!nextError) {
+          nextError = getReadableErrorMessage(
+            profileResult.reason,
+            "Something went wrong while loading your job profile."
+          );
         }
       }
+
+      setError(nextError);
+      setIsLoading(false);
+      setIsRefreshing(false);
     }
 
     void loadJobsData();
