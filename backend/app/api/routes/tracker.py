@@ -1,4 +1,12 @@
-"""Tracker API routes."""
+"""Tracker API routes for EarlyBloom.
+
+These routes provide:
+- combined tracker data for the authenticated user
+- tracker preference updates
+- stable defaults when profile or resume data is missing
+
+The tracker is an authenticated surface and always requires a verified session.
+"""
 
 from __future__ import annotations
 
@@ -34,17 +42,32 @@ logger = logging.getLogger(__name__)
 
 
 def get_resume_repository() -> ResumeRepository:
-    """Create a resume repository instance."""
+    """Returns a resume repository instance.
+
+    Returns:
+        ResumeRepository: Repository for resume data access.
+    """
     return ResumeRepository(client=get_supabase_admin())
 
 
 def get_job_cache_repository() -> JobCacheRepository:
-    """Create a job cache repository instance."""
+    """Returns a job-cache repository instance.
+
+    Returns:
+        JobCacheRepository: Repository for saved and hidden job access.
+    """
     return JobCacheRepository()
 
 
 def _normalize_string_list(value: Any) -> list[str]:
-    """Normalize a flexible value into a cleaned lowercase string list."""
+    """Normalizes a flexible value into a cleaned lowercase string list.
+
+    Args:
+        value: Raw list-like field.
+
+    Returns:
+        list[str]: Deduplicated normalized string list.
+    """
     if not isinstance(value, list):
         return []
 
@@ -64,7 +87,14 @@ def _normalize_string_list(value: Any) -> list[str]:
 def _build_preferences_from_profile(
     profile_row: dict[str, Any] | None,
 ) -> TrackerPreferences:
-    """Map a profile row into tracker preferences."""
+    """Builds tracker preferences from a stored profile row.
+
+    Args:
+        profile_row: Stored profile row, if available.
+
+    Returns:
+        TrackerPreferences: Tracker preferences with stable defaults.
+    """
     defaults = DEFAULT_RESOLVED_JOB_PROFILE
 
     if not profile_row:
@@ -105,7 +135,16 @@ def _build_profile_summary(
     user_email: str | None,
     profile_row: dict[str, Any] | None,
 ) -> ProfileSummary:
-    """Build the tracker profile summary from the stored profile row or defaults."""
+    """Builds the tracker profile summary.
+
+    Args:
+        user_id: Authenticated user ID.
+        user_email: Authenticated user email.
+        profile_row: Stored profile row, if available.
+
+    Returns:
+        ProfileSummary: Profile summary with safe defaults.
+    """
     if profile_row:
         return ProfileSummary(**profile_row)
 
@@ -121,7 +160,14 @@ def _build_profile_summary(
 
 
 def _serialize_resume(record: dict[str, Any] | None) -> TrackerResumeSummary | None:
-    """Map a resume row into the tracker resume summary shape."""
+    """Maps a resume row into the tracker resume summary shape.
+
+    Args:
+        record: Resume database row, if available.
+
+    Returns:
+        TrackerResumeSummary | None: Serialized tracker resume summary.
+    """
     if not record:
         return None
 
@@ -144,7 +190,20 @@ def get_tracker(
     resume_repository: ResumeRepository = Depends(get_resume_repository),
     job_repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> TrackerResponse:
-    """Return combined tracker data for the authenticated user."""
+    """Returns combined tracker data for the authenticated user.
+
+    Args:
+        response: Outgoing response object.
+        current: Verified current session context.
+        resume_repository: Resume repository.
+        job_repository: Job cache repository.
+
+    Raises:
+        HTTPException: If tracker data cannot be loaded.
+
+    Returns:
+        TrackerResponse: Combined tracker response payload.
+    """
     try:
         if current.refreshed and current.session is not None:
             set_auth_cookies(response, current.session)
@@ -194,7 +253,19 @@ def update_tracker_preferences(
     response: Response,
     current: CurrentSessionContext = Depends(get_current_session_context),
 ) -> UpdateTrackerPreferencesResponse:
-    """Persist tracker preferences for the authenticated user."""
+    """Persists tracker preferences for the authenticated user.
+
+    Args:
+        payload: Tracker preference update payload.
+        response: Outgoing response object.
+        current: Verified current session context.
+
+    Raises:
+        HTTPException: If preferences cannot be saved.
+
+    Returns:
+        UpdateTrackerPreferencesResponse: Updated preferences payload.
+    """
     try:
         if current.refreshed and current.session is not None:
             set_auth_cookies(response, current.session)

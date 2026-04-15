@@ -1,3 +1,20 @@
+/**
+ * @fileoverview Resume upload modal for EarlyBloom.
+ *
+ * This component handles:
+ * - validating PDF selection
+ * - extracting text from text-based PDFs
+ * - saving the resume record through the backend
+ * - triggering backend parsing
+ * - reflecting stable, honest upload states in the UI
+ *
+ * Launch goals:
+ * - clear status transitions
+ * - graceful failure handling
+ * - no false sense of parser confidence
+ * - safe close behavior during processing
+ */
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 
@@ -16,6 +33,14 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
+const MAX_RESUME_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Returns whether the given file appears to be a PDF.
+ *
+ * @param {File | null | undefined} file File to validate.
+ * @returns {boolean} True when the file appears to be a PDF.
+ */
 function isPdfFile(file) {
   if (!file) {
     return false;
@@ -27,6 +52,12 @@ function isPdfFile(file) {
   return isPdfMimeType || hasPdfExtension;
 }
 
+/**
+ * Formats a file size into a readable label.
+ *
+ * @param {number} bytes File size in bytes.
+ * @returns {string} Human-readable file size.
+ */
 function formatFileSize(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return "Unknown size";
@@ -45,6 +76,12 @@ function formatFileSize(bytes) {
   return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
 }
 
+/**
+ * Formats a parser status label for display.
+ *
+ * @param {string | null | undefined} parseStatus Raw parse status.
+ * @returns {string} Human-readable parse status.
+ */
 function formatParseStatus(parseStatus) {
   if (!parseStatus) {
     return "No status yet";
@@ -57,6 +94,15 @@ function formatParseStatus(parseStatus) {
     .join(" ");
 }
 
+/**
+ * Extracts text from a PDF using pdf.js.
+ *
+ * This works best for text-based PDFs and may fail or return sparse text for
+ * scanned/image-based documents.
+ *
+ * @param {File} file PDF file to read.
+ * @returns {Promise<string>} Extracted PDF text.
+ */
 async function extractPdfText(file) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -81,6 +127,35 @@ async function extractPdfText(file) {
   return pageTexts.join("\n\n").trim();
 }
 
+/**
+ * Validates a selected resume file and returns a user-friendly error when needed.
+ *
+ * @param {File} file Selected file.
+ * @returns {string} Validation error message, or an empty string when valid.
+ */
+function validateResumeFile(file) {
+  if (!isPdfFile(file)) {
+    return "Please upload a PDF resume.";
+  }
+
+  if (file.size > MAX_RESUME_FILE_SIZE_BYTES) {
+    return "Please upload a PDF under 10 MB.";
+  }
+
+  return "";
+}
+
+/**
+ * Resume upload modal component.
+ *
+ * @param {{
+ *   isOpen: boolean,
+ *   onClose?: () => void,
+ *   onResumeSaved?: (resume: object) => void,
+ *   resumeFile?: object | null
+ * }} props Component props.
+ * @returns {JSX.Element} Resume upload modal.
+ */
 function ResumeUploadModal({
   isOpen,
   onClose,
@@ -115,6 +190,25 @@ function ResumeUploadModal({
     };
   }, [resumeFile]);
 
+  /**
+   * Opens the hidden file input.
+   *
+   * @returns {void}
+   */
+  function openFilePicker() {
+    if (isSavingResume) {
+      return;
+    }
+
+    fileInputRef.current?.click();
+  }
+
+  /**
+   * Persists and parses the selected resume file.
+   *
+   * @param {File} file Selected PDF file.
+   * @returns {Promise<void>}
+   */
   async function persistResumeFile(file) {
     setIsSavingResume(true);
     setUploadState("processing");
@@ -125,13 +219,15 @@ function ResumeUploadModal({
     });
 
     try {
+      await requireAuthenticatedSession();
+
       const rawText = await extractPdfText(file);
 
       if (!rawText) {
-        throw new Error("No extractable text found in PDF.");
+        throw new Error(
+          "We could not extract readable text from this PDF. Try a text-based PDF instead of a scanned image."
+        );
       }
-
-      await requireAuthenticatedSession();
 
       const savedResume = await saveAndVerifyResumeRecord({
         originalFilename: file.name,
@@ -153,6 +249,7 @@ function ResumeUploadModal({
       const cachedResume = buildResumeUiCache(file, {
         ...savedResume,
         parse_status: parseResult.parse_status,
+        ats_tags: parseResult.ats_tags,
       });
 
       cacheResumeUiState(cachedResume);
@@ -171,6 +268,12 @@ function ResumeUploadModal({
     }
   }
 
+  /**
+   * Handles a file selection from the hidden file input.
+   *
+   * @param {React.ChangeEvent<HTMLInputElement>} event Input change event.
+   * @returns {Promise<void>}
+   */
   async function handleResumeFileChange(event) {
     const file = event.target.files?.[0];
 
@@ -178,9 +281,10 @@ function ResumeUploadModal({
       return;
     }
 
-    if (!isPdfFile(file)) {
+    const validationMessage = validateResumeFile(file);
+    if (validationMessage) {
       setUploadState("error");
-      setResumeError("Please upload a PDF resume.");
+      setResumeError(validationMessage);
       setSelectedFileMeta({
         name: file.name,
         sizeLabel: formatFileSize(file.size),
@@ -193,6 +297,12 @@ function ResumeUploadModal({
     event.target.value = "";
   }
 
+  /**
+   * Handles a resume file dropped into the upload target.
+   *
+   * @param {React.DragEvent<HTMLButtonElement>} event Drop event.
+   * @returns {Promise<void>}
+   */
   async function handleResumeDrop(event) {
     event.preventDefault();
 
@@ -201,14 +311,14 @@ function ResumeUploadModal({
     }
 
     const file = event.dataTransfer.files?.[0];
-
     if (!file) {
       return;
     }
 
-    if (!isPdfFile(file)) {
+    const validationMessage = validateResumeFile(file);
+    if (validationMessage) {
       setUploadState("error");
-      setResumeError("Please upload a PDF resume.");
+      setResumeError(validationMessage);
       setSelectedFileMeta({
         name: file.name,
         sizeLabel: formatFileSize(file.size),
@@ -219,10 +329,21 @@ function ResumeUploadModal({
     await persistResumeFile(file);
   }
 
+  /**
+   * Allows drag-over on the upload target.
+   *
+   * @param {React.DragEvent<HTMLButtonElement>} event Drag event.
+   * @returns {void}
+   */
   function handleResumeDragOver(event) {
     event.preventDefault();
   }
 
+  /**
+   * Closes the modal if processing is not active.
+   *
+   * @returns {void}
+   */
   function handleClose() {
     if (isSavingResume) {
       return;
@@ -316,7 +437,7 @@ function ResumeUploadModal({
         <button
           type="button"
           className="filter-trigger-card"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={openFilePicker}
           onDrop={handleResumeDrop}
           onDragOver={handleResumeDragOver}
           disabled={isSavingResume}
@@ -339,7 +460,7 @@ function ResumeUploadModal({
           </span>
 
           <span className="filter-trigger-card__meta">
-            PDF only. Cleaner text extraction works best with text-based PDFs.
+            PDF only. Text-based PDFs work best for clean extraction and resume parsing.
           </span>
         </button>
 
@@ -403,7 +524,7 @@ function ResumeUploadModal({
             <p className="status-message-card__title">Resume uploaded</p>
             <p className="status-message-card__copy">
               {selectedFileMeta?.name
-                ? `${selectedFileMeta.name} is ready and your tracker can refresh its resume signals.`
+                ? `${selectedFileMeta.name} is saved and your tracker can refresh its resume signals.`
                 : "Your resume was uploaded successfully."}
             </p>
           </div>

@@ -1,5 +1,24 @@
+/**
+ * @fileoverview Jobs page for EarlyBloom.
+ *
+ * This page is responsible for:
+ * - rendering the main jobs discovery experience
+ * - loading scored/filterable jobs through shared hooks
+ * - supporting save and hide mutations
+ * - gating signed-in-only actions
+ * - managing resume upload entry points
+ * - presenting filters, pagination, and job details
+ *
+ * Design goals:
+ * - keep the public jobs feed usable for guests
+ * - degrade gracefully when tracker or resume data is unavailable
+ * - keep UI state predictable during auth and mutation transitions
+ * - preserve launch-focused simplicity without overengineering
+ */
+
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
 import JobCard from "../components/jobs/JobCard.jsx";
 import JobsFiltersPanel from "../components/jobs/JobsFiltersPanel.jsx";
 import JobsActiveFilters from "../components/jobs/JobsActiveFilters.jsx";
@@ -29,6 +48,80 @@ const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
 const WELCOME_MODAL_PENDING_KEY = "earlybloom_welcome_modal_pending";
 const JOBS_PER_PAGE = 12;
 
+/**
+ * Returns whether browser storage APIs are available.
+ *
+ * @returns {boolean} True when `window` is available.
+ */
+function canUseBrowserStorage() {
+  return typeof window !== "undefined";
+}
+
+/**
+ * Reads a session-storage value safely.
+ *
+ * @param {string} key Storage key.
+ * @returns {string | null} Stored value or null.
+ */
+function readSessionStorageValue(key) {
+  if (!canUseBrowserStorage()) {
+    return null;
+  }
+
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Writes a session-storage value safely.
+ *
+ * @param {string} key Storage key.
+ * @param {string} value Value to store.
+ * @returns {void}
+ */
+function writeSessionStorageValue(key, value) {
+  if (!canUseBrowserStorage()) {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {
+    // Ignore storage write failures.
+  }
+}
+
+/**
+ * Removes a session-storage value safely.
+ *
+ * @param {string} key Storage key.
+ * @returns {void}
+ */
+function removeSessionStorageValue(key) {
+  if (!canUseBrowserStorage()) {
+    return;
+  }
+
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore storage removal failures.
+  }
+}
+
+/**
+ * Returns sign-in-required modal content for a given user intent.
+ *
+ * @param {"save"|"hide"|"resume"} intent Requested action intent.
+ * @returns {{
+ *   eyebrow: string,
+ *   title: string,
+ *   body: string
+ * }} Modal content payload.
+ */
 function getLoginRequiredContent(intent) {
   switch (intent) {
     case "save":
@@ -53,23 +146,50 @@ function getLoginRequiredContent(intent) {
   }
 }
 
+/**
+ * Tracks viewport width for responsive pagination behavior.
+ *
+ * @returns {number} Current viewport width.
+ */
 function useViewportWidth() {
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window === "undefined" ? 1280 : window.innerWidth
   );
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    /**
+     * Updates the current viewport width.
+     *
+     * @returns {void}
+     */
     function handleResize() {
       setViewportWidth(window.innerWidth);
     }
 
     window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
   }, []);
 
   return viewportWidth;
 }
 
+/**
+ * Returns pagination layout settings for the current viewport width.
+ *
+ * @param {number} viewportWidth Current viewport width.
+ * @returns {{
+ *   nearStartCount: number,
+ *   middleNeighborCount: number,
+ *   nearEndCount: number
+ * }} Pagination configuration.
+ */
 function getPaginationConfig(viewportWidth) {
   if (viewportWidth <= 375) {
     return {
@@ -110,6 +230,14 @@ function getPaginationConfig(viewportWidth) {
   };
 }
 
+/**
+ * Builds the visible page-number sequence for the pagination control.
+ *
+ * @param {number} currentPage Current page number.
+ * @param {number} totalPages Total available pages.
+ * @param {number} viewportWidth Current viewport width.
+ * @returns {(number | "...")[]} Visible page sequence.
+ */
 function getVisiblePageNumbers(currentPage, totalPages, viewportWidth) {
   if (totalPages <= 1) {
     return [1];
@@ -166,6 +294,12 @@ function getVisiblePageNumbers(currentPage, totalPages, viewportWidth) {
   return result;
 }
 
+/**
+ * Converts a tracker resume payload into the jobs-page resume UI shape.
+ *
+ * @param {object | null | undefined} resume Tracker resume payload.
+ * @returns {object | null} Normalized resume UI state.
+ */
 function buildResumeUiStateFromTrackerResume(resume) {
   if (!resume || typeof resume !== "object") {
     return null;
@@ -183,6 +317,11 @@ function buildResumeUiStateFromTrackerResume(resume) {
   };
 }
 
+/**
+ * Jobs page component.
+ *
+ * @returns {JSX.Element} Jobs discovery page.
+ */
 function Jobs() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
@@ -206,13 +345,37 @@ function Jobs() {
   const [pendingActions, setPendingActions] = useState({});
   const [actionError, setActionError] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(() => {
+    const welcomePending =
+      readSessionStorageValue(WELCOME_MODAL_PENDING_KEY) === "true";
+    const cachedResume = readCachedResumeUiState();
+    const hasCachedResume = Boolean(cachedResume);
+
+    return welcomePending && !hasCachedResume;
+  });
+
+  const {
+    jobs: rawJobs,
+    resolvedUserProfile,
+    isLoading,
+    error,
+    isMockMode,
+    retry,
+  } = useJobs({ viewerKey });
 
   useEffect(() => {
     let isMounted = true;
 
+    /**
+     * Loads tracker resume state for authenticated users.
+     *
+     * @returns {Promise<void>}
+     */
     async function loadTrackerResume() {
       if (!user) {
-        setTrackerResume(null);
+        if (isMounted) {
+          setTrackerResume(null);
+        }
         return;
       }
 
@@ -237,7 +400,7 @@ function Jobs() {
       }
     }
 
-    loadTrackerResume();
+    void loadTrackerResume();
 
     return () => {
       isMounted = false;
@@ -252,23 +415,14 @@ function Jobs() {
     return trackerResume || resumeFile || null;
   }, [user, trackerResume, resumeFile]);
 
-  const hasUploadedResume = Boolean(visibleResumeFile);
-  const hasCachedResume = Boolean(visibleResumeFile);
-  const welcomePending =
-    window.sessionStorage.getItem(WELCOME_MODAL_PENDING_KEY) === "true";
+  const hasVisibleResume = Boolean(visibleResumeFile);
 
-  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(
-    welcomePending && !hasCachedResume && !hasUploadedResume
-  );
-
-  const {
-    jobs: rawJobs,
-    resolvedUserProfile,
-    isLoading,
-    error,
-    isMockMode,
-    retry,
-  } = useJobs({ viewerKey });
+  useEffect(() => {
+    if (hasVisibleResume) {
+      setIsWelcomeModalOpen(false);
+      removeSessionStorageValue(WELCOME_MODAL_PENDING_KEY);
+    }
+  }, [hasVisibleResume]);
 
   useEffect(() => {
     setJobViewerOverrides({});
@@ -321,7 +475,8 @@ function Jobs() {
     return getVisiblePageNumbers(currentPage, totalPages, viewportWidth);
   }, [currentPage, totalPages, viewportWidth]);
 
-  const pageStartCount = jobs.length === 0 ? 0 : (currentPage - 1) * JOBS_PER_PAGE + 1;
+  const pageStartCount =
+    jobs.length === 0 ? 0 : (currentPage - 1) * JOBS_PER_PAGE + 1;
   const pageEndCount = Math.min(currentPage * JOBS_PER_PAGE, jobs.length);
 
   const filtersSummary = useMemo(() => {
@@ -352,51 +507,106 @@ function Jobs() {
     });
   }, [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]);
 
+  const loginContent = getLoginRequiredContent(loginRequiredIntent);
+
+  /**
+   * Opens the job details modal.
+   *
+   * @param {object} job Selected job payload.
+   * @returns {void}
+   */
   function handleOpenDetails(job) {
     setActiveJob(job);
   }
 
+  /**
+   * Closes the job details modal.
+   *
+   * @returns {void}
+   */
   function handleCloseDetails() {
     setActiveJob(null);
   }
 
+  /**
+   * Closes the resume modal and records a dismissal marker.
+   *
+   * @returns {void}
+   */
   function handleCloseResumeModal() {
     setIsResumeModalOpen(false);
-    window.sessionStorage.setItem(RESUME_MODAL_DISMISSED_KEY, "true");
+    writeSessionStorageValue(RESUME_MODAL_DISMISSED_KEY, "true");
   }
 
+  /**
+   * Applies saved resume state after a successful upload.
+   *
+   * @param {object} savedResumeUiState Saved resume UI state.
+   * @returns {void}
+   */
   function handleResumeSaved(savedResumeUiState) {
     setResumeFile(savedResumeUiState);
     setTrackerResume(savedResumeUiState);
     setIsResumeModalOpen(false);
     setIsWelcomeModalOpen(false);
-    window.sessionStorage.removeItem(WELCOME_MODAL_PENDING_KEY);
-    window.sessionStorage.removeItem(RESUME_MODAL_DISMISSED_KEY);
+    removeSessionStorageValue(WELCOME_MODAL_PENDING_KEY);
+    removeSessionStorageValue(RESUME_MODAL_DISMISSED_KEY);
   }
 
+  /**
+   * Closes the welcome modal.
+   *
+   * @returns {void}
+   */
   function handleCloseWelcomeModal() {
     setIsWelcomeModalOpen(false);
-    window.sessionStorage.removeItem(WELCOME_MODAL_PENDING_KEY);
+    removeSessionStorageValue(WELCOME_MODAL_PENDING_KEY);
   }
 
+  /**
+   * Opens the resume flow from the welcome modal.
+   *
+   * @returns {void}
+   */
   function handleOpenResumeFromWelcome() {
     handleRequestResumeUpload();
   }
 
+  /**
+   * Closes the sign-in-required modal.
+   *
+   * @returns {void}
+   */
   function handleCloseLoginRequiredModal() {
     setIsLoginRequiredModalOpen(false);
   }
 
+  /**
+   * Navigates the user to sign-in after a gated action.
+   *
+   * @returns {void}
+   */
   function handleGoToSignIn() {
     setIsLoginRequiredModalOpen(false);
     navigate("/sign-in");
   }
 
+  /**
+   * Opens the sign-in-required modal for the given action intent.
+   *
+   * @param {"save"|"hide"|"resume"} intent Gated action intent.
+   * @returns {void}
+   */
   function openLoginRequiredModal(intent) {
     setLoginRequiredIntent(intent);
     setIsLoginRequiredModalOpen(true);
   }
 
+  /**
+   * Opens the resume upload flow when available, otherwise gates to sign-in.
+   *
+   * @returns {void}
+   */
   function handleRequestResumeUpload() {
     if (authLoading) {
       return;
@@ -413,12 +623,23 @@ function Jobs() {
     setIsResumeModalOpen(true);
   }
 
+  /**
+   * Clears all active filter selections.
+   *
+   * @returns {void}
+   */
   function clearAllFilters() {
     setSelectedExperienceLevels([]);
     setSelectedWorkplaces([]);
     setSelectedRoleTypes([]);
   }
 
+  /**
+   * Removes a single active filter tag.
+   *
+   * @param {{ type: string, value: string }} tag Active filter tag.
+   * @returns {void}
+   */
   function removeActiveFilterTag(tag) {
     if (tag.type === "experience") {
       setSelectedExperienceLevels((currentValues) =>
@@ -439,6 +660,13 @@ function Jobs() {
     );
   }
 
+  /**
+   * Applies pending-state flags for a job action.
+   *
+   * @param {string} jobId Job ID.
+   * @param {object} nextState Partial pending-state patch.
+   * @returns {void}
+   */
   function updatePendingAction(jobId, nextState) {
     setPendingActions((current) => ({
       ...current,
@@ -449,6 +677,13 @@ function Jobs() {
     }));
   }
 
+  /**
+   * Clears a specific pending-state flag for a job action.
+   *
+   * @param {string} jobId Job ID.
+   * @param {string} key Pending-state key.
+   * @returns {void}
+   */
   function clearPendingAction(jobId, key) {
     setPendingActions((current) => {
       const next = { ...current };
@@ -465,6 +700,13 @@ function Jobs() {
     });
   }
 
+  /**
+   * Applies an optimistic viewer-state override for a job.
+   *
+   * @param {string} jobId Job ID.
+   * @param {object} patch Viewer-state patch.
+   * @returns {void}
+   */
   function applyViewerOverride(jobId, patch) {
     setJobViewerOverrides((current) => ({
       ...current,
@@ -475,6 +717,12 @@ function Jobs() {
     }));
   }
 
+  /**
+   * Removes an optimistic viewer-state override for a job.
+   *
+   * @param {string} jobId Job ID.
+   * @returns {void}
+   */
   function removeViewerOverride(jobId) {
     setJobViewerOverrides((current) => {
       const next = { ...current };
@@ -483,6 +731,12 @@ function Jobs() {
     });
   }
 
+  /**
+   * Toggles the saved state for a job with optimistic UI behavior.
+   *
+   * @param {object} job Job payload.
+   * @returns {Promise<void>}
+   */
   async function handleToggleSave(job) {
     if (authLoading) {
       return;
@@ -511,7 +765,7 @@ function Jobs() {
       if (nextViewerState) {
         applyViewerOverride(jobId, nextViewerState);
       }
-    } catch (err) {
+    } catch (error) {
       if (previousOverride) {
         applyViewerOverride(jobId, previousOverride);
       } else {
@@ -519,8 +773,8 @@ function Jobs() {
       }
 
       setActionError(
-        err instanceof Error
-          ? err.message
+        error instanceof Error
+          ? error.message
           : "We could not update that saved job right now."
       );
     } finally {
@@ -528,6 +782,12 @@ function Jobs() {
     }
   }
 
+  /**
+   * Hides a job with optimistic UI behavior.
+   *
+   * @param {object} job Job payload.
+   * @returns {Promise<void>}
+   */
   async function handleHideJob(job) {
     if (authLoading) {
       return;
@@ -555,7 +815,7 @@ function Jobs() {
       if (nextViewerState) {
         applyViewerOverride(jobId, nextViewerState);
       }
-    } catch (err) {
+    } catch (error) {
       if (previousOverride) {
         applyViewerOverride(jobId, previousOverride);
       } else {
@@ -563,8 +823,8 @@ function Jobs() {
       }
 
       setActionError(
-        err instanceof Error
-          ? err.message
+        error instanceof Error
+          ? error.message
           : "We could not hide that job right now."
       );
     } finally {
@@ -572,19 +832,26 @@ function Jobs() {
     }
   }
 
+  /**
+   * Changes the current jobs page and scrolls to the top.
+   *
+   * @param {number} nextPage Target page number.
+   * @returns {void}
+   */
   function handleChangePage(nextPage) {
     if (nextPage < 1 || nextPage > totalPages || nextPage === currentPage) {
       return;
     }
 
     setCurrentPage(nextPage);
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth",
-    });
-  }
 
-  const loginContent = getLoginRequiredContent(loginRequiredIntent);
+    if (typeof window !== "undefined") {
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    }
+  }
 
   return (
     <main className="jobs-page">
@@ -679,8 +946,8 @@ function Jobs() {
                   {isLoading
                     ? "Loading roles..."
                     : error
-                    ? "We could not load jobs right now."
-                    : `${jobs.length} roles matched to your profile.`}
+                      ? "We could not load jobs right now."
+                      : `${jobs.length} roles matched to your profile.`}
                 </p>
 
                 {!isLoading && !error && jobs.length > 0 ? (
