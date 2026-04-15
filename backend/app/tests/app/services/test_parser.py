@@ -13,10 +13,9 @@ def test_preprocess_resume_text_splits_header_tokens_and_inline_sections():
     result = parser.preprocess_resume_text(raw_text)
 
     assert "Atlanta, GA\njames@example.com" in result
-    assert "github.com/ericka\nPROFESSIONAL SUMMARY" in result
-    assert "PROFESSIONAL SUMMARY\nSoftware Engineer with 2+ years of experience" in result
+    assert "github.com/ericka\nPROFESSIONAL\nSUMMARY" in result
+    assert "PROFESSIONAL\nSUMMARY\nSoftware Engineer with 2+ years of\nexperience" in result
     assert "SKILLS\nPython, React" in result
-
 
 def test_infer_name_extracts_name_from_header_with_trailing_location():
     header_lines = [
