@@ -1,8 +1,8 @@
 /**
  * EarlyBloom learn more styling.
  *
- * Relies on shared hero-card, section-card, and callout-card primitives.
- * Keeps only page-specific layout and feature-list presentation here.
+ * Keeps only page-specific layout hooks here and relies on shared
+ * hero-card, section-card, feature-card, and callout-card primitives.
  */
 
 .learnmore-page {
@@ -42,23 +42,9 @@
   max-width: 60ch;
 }
 
-.learnmore-hero-card {
-  position: relative;
-}
-
-.learnmore-hero-card__image {
-  width: min(100%, 420px);
-  margin-inline: auto;
-}
-
 .learnmore-story {
   display: grid;
   gap: 1rem;
-}
-
-.learnmore-panel {
-  display: grid;
-  gap: var(--space-4);
 }
 
 .learnmore-values {
@@ -67,60 +53,11 @@
 }
 
 .learnmore-grid {
-  display: grid;
   gap: 1rem;
 }
 
-.learnmore-card {
-  border-radius: var(--radius-lg);
-  padding: 1.2rem;
-}
-
-.learnmore-card__number {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 48px;
-  min-height: 48px;
-  border-radius: 16px;
-  background: var(--gradient-brand);
-  color: var(--color-heading);
-  font-weight: 800;
-}
-
-.learnmore-card__title {
-  margin: 1rem 0 0;
-  color: var(--color-heading);
-  font-size: 1.1rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-}
-
-.learnmore-card__copy {
-  margin: 0.6rem 0 0;
-  color: var(--color-text-soft);
-  line-height: 1.7;
-}
-
-.learnmore-callout__media {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.learnmore-callout__content {
+.learnmore-callout .callout-card__content {
   text-align: left;
-}
-
-.learnmore-callout__image {
-  width: min(100%, 280px);
-  margin-inline: auto;
-}
-
-@media (min-width: 640px) {
-  .learnmore-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (min-width: 860px) {
@@ -137,9 +74,5 @@
 
   .learnmore-story {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .learnmore-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
