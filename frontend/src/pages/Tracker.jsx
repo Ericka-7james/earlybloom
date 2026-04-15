@@ -662,14 +662,15 @@ function Tracker() {
                   </strong>
                 </article>
 
-                <button
-                  type="button"
-                  className="tracker-stat tracker-stat--preferences section-card"
-                  onClick={() => setIsPreferencesModalOpen(true)}
-                >
-                  <span className="tracker-stat__label">Preferences</span>
-                  <strong className="tracker-stat__value">Edit</strong>
-                </button>
+                  <button
+                    type="button"
+                    className="tracker-stat tracker-stat--preferences section-card"
+                    onClick={() => setIsPreferencesModalOpen(true)}
+                    aria-label="Edit tracker preferences"
+                  >
+                    <span className="tracker-stat__label">Preferences</span>
+                    <strong className="tracker-stat__value">Edit →</strong>
+                  </button>
               </div>
 
               <section className="section-card tracker-resume-card">
