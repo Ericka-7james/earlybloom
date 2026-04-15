@@ -1,0 +1,25 @@
+.profile-page {
+  width: 100%;
+}
+
+.profile-hero {
+  align-items: start;
+}
+
+.profile-hero__aside {
+  min-width: 0;
+}
+
+.profile-shortcuts {
+  align-items: stretch;
+}
+
+.profile-shortcuts .button {
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .profile-shortcuts .button {
+    width: auto;
+  }
+}

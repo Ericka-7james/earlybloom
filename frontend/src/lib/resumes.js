@@ -5,22 +5,88 @@ export const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
 export const RESUME_RAW_TEXT_SESSION_KEY = "earlybloom_resume_raw_text";
 export const RESUME_BUCKET_NAME = "resume-uploads";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+
+/**
+ * Convert backend error payloads into readable messages.
+ *
+ * Args:
+ *   errorPayload: Parsed backend error payload.
+ *   fallbackMessage: Message used when no specific detail is available.
+ *
+ * Returns:
+ *   Readable error message.
+ */
+function normalizeApiErrorMessage(errorPayload, fallbackMessage) {
+  const detail = errorPayload?.detail;
+
+  if (typeof detail === "string" && detail.trim()) {
+    return detail;
+  }
+
+  if (Array.isArray(detail) && detail.length > 0) {
+    return detail
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+
+        if (item?.msg && Array.isArray(item?.loc)) {
+          return `${item.loc.join(".")}: ${item.msg}`;
+        }
+
+        if (item?.msg) {
+          return item.msg;
+        }
+
+        try {
+          return JSON.stringify(item);
+        } catch {
+          return String(item);
+        }
+      })
+      .join(" | ");
+  }
+
+  if (detail && typeof detail === "object") {
+    if (typeof detail?.msg === "string" && detail.msg.trim()) {
+      return detail.msg;
+    }
+
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return fallbackMessage;
+    }
+  }
+
+  if (
+    typeof errorPayload?.message === "string" &&
+    errorPayload.message.trim()
+  ) {
+    return errorPayload.message;
+  }
+
+  return fallbackMessage;
+}
 
 /**
  * Build local UI cache state for a resume upload.
  *
- * @param {File} file Uploaded file object.
- * @param {Object | null} resumeRecord Stored resume record if available.
- * @returns {Object} Resume UI cache payload.
+ * Args:
+ *   file: Uploaded file object.
+ *   resumeRecord: Stored resume record if available.
+ *
+ * Returns:
+ *   Resume UI cache payload.
  */
 export function buildResumeUiCache(file, resumeRecord = null) {
   return {
     id: resumeRecord?.id ?? null,
-    name: file.name,
-    size: file.size,
-    type: file.type || "application/pdf",
-    uploadedAt: new Date().toISOString(),
+    name: file?.name || resumeRecord?.original_filename || "resume.pdf",
+    size: file?.size ?? null,
+    type: file?.type || resumeRecord?.file_type || "application/pdf",
+    uploadedAt: resumeRecord?.updated_at || new Date().toISOString(),
     parseStatus: resumeRecord?.parse_status ?? "pending",
     atsTags: Array.isArray(resumeRecord?.ats_tags) ? resumeRecord.ats_tags : [],
     isLocalOnly: resumeRecord?.isLocalOnly ?? false,
@@ -30,22 +96,22 @@ export function buildResumeUiCache(file, resumeRecord = null) {
 /**
  * Cache resume UI state locally.
  *
- * @param {Object} cachedResume Resume UI cache payload.
- * @returns {void}
+ * Args:
+ *   cachedResume: Resume UI cache payload.
+ *
+ * Returns:
+ *   void
  */
 export function cacheResumeUiState(cachedResume) {
-  window.localStorage.setItem(
-    RESUME_STORAGE_KEY,
-    JSON.stringify(cachedResume)
-  );
-
+  window.localStorage.setItem(RESUME_STORAGE_KEY, JSON.stringify(cachedResume));
   window.sessionStorage.setItem(RESUME_MODAL_DISMISSED_KEY, "true");
 }
 
 /**
  * Read cached resume UI state.
  *
- * @returns {Object | null} Cached resume UI state, if present.
+ * Returns:
+ *   Cached resume UI state, if present.
  */
 export function readCachedResumeUiState() {
   try {
@@ -59,7 +125,8 @@ export function readCachedResumeUiState() {
 /**
  * Clear cached resume UI state.
  *
- * @returns {void}
+ * Returns:
+ *   void
  */
 export function clearCachedResumeUiState() {
   window.localStorage.removeItem(RESUME_STORAGE_KEY);
@@ -70,8 +137,11 @@ export function clearCachedResumeUiState() {
 /**
  * Cache extracted raw resume text in session storage.
  *
- * @param {string | null | undefined} rawText Extracted raw text.
- * @returns {void}
+ * Args:
+ *   rawText: Extracted raw text.
+ *
+ * Returns:
+ *   void
  */
 export function cacheResumeRawText(rawText) {
   if (!rawText) {
@@ -85,7 +155,8 @@ export function cacheResumeRawText(rawText) {
 /**
  * Read cached raw resume text.
  *
- * @returns {string | null} Cached raw text if present.
+ * Returns:
+ *   Cached raw text if present.
  */
 export function readCachedResumeRawText() {
   try {
@@ -96,45 +167,142 @@ export function readCachedResumeRawText() {
 }
 
 /**
- * Fetch the current optional authenticated session.
+ * Fetch the current authenticated backend session using HTTP-only cookies.
  *
- * @returns {Promise<Object | null>} Supabase auth session or null.
+ * Returns:
+ *   Auth session payload from the backend.
+ *
+ * Throws:
+ *   Error: If the backend session cannot be confirmed.
  */
-export async function getOptionalSession() {
-  const {
-    data: { session },
-    error,
-  } = await supabase.auth.getSession();
-
-  if (error) {
-    throw error;
+export async function requireBackendSession() {
+  if (!API_BASE_URL) {
+    throw new Error("Missing VITE_API_BASE_URL.");
   }
 
-  return session ?? null;
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}/auth/session`, {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+      },
+    });
+  } catch {
+    throw new Error(
+      "Unable to reach the server. Check that the backend is running and try again.",
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      "Your session is not available in this browser. Refresh the page and sign in again.",
+    );
+  }
+
+  let payload = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!payload?.authenticated || !payload?.user?.id) {
+    throw new Error(
+      "Your session is not available in this browser. Refresh the page and sign in again.",
+    );
+  }
+
+  return payload;
 }
 
 /**
- * Require an authenticated session.
+ * Legacy-compatible session helper.
  *
- * @returns {Promise<Object>} Authenticated session.
- * @throws {Error} If the user is not signed in.
+ * ResumeUploadModal currently imports requireAuthenticatedSession, so keep this
+ * exported name while routing it through the backend cookie session.
+ *
+ * Returns:
+ *   Confirmed backend session payload.
  */
 export async function requireAuthenticatedSession() {
-  const session = await getOptionalSession();
+  return requireBackendSession();
+}
 
-  if (!session?.user) {
-    throw new Error("Please sign in before saving your resume.");
+/**
+ * Best-effort browser Supabase session lookup for legacy direct Storage flows.
+ *
+ * Returns:
+ *   Supabase auth session or null.
+ */
+export async function getOptionalSupabaseSession() {
+  try {
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error) {
+      return null;
+    }
+
+    if (session?.user && session?.access_token) {
+      return session;
+    }
+
+    const { data: refreshedData, error: refreshError } =
+      await supabase.auth.refreshSession();
+
+    if (refreshError) {
+      return null;
+    }
+
+    const refreshedSession = refreshedData?.session ?? null;
+
+    if (refreshedSession?.user && refreshedSession?.access_token) {
+      return refreshedSession;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build standard backend headers for cookie-auth API calls.
+ *
+ * Returns:
+ *   Authenticated request headers for backend API calls.
+ *
+ * Throws:
+ *   Error: If the API base URL is missing or no cookie session exists.
+ */
+export async function buildAuthenticatedApiHeaders() {
+  if (!API_BASE_URL) {
+    throw new Error("Missing VITE_API_BASE_URL.");
   }
 
-  return session;
+  await requireBackendSession();
+
+  return {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
 }
 
 /**
  * Build the canonical storage path for a user's single active resume.
  *
- * @param {string} userId Authenticated user ID.
- * @param {string} fileName Original file name.
- * @returns {string} Stable storage object path.
+ * Args:
+ *   userId: Authenticated user ID.
+ *   fileName: Original file name.
+ *
+ * Returns:
+ *   Stable storage object path.
  */
 export function buildResumeStoragePath(userId, fileName) {
   const extension = String(fileName || "resume.pdf").split(".").pop() || "pdf";
@@ -144,13 +312,28 @@ export function buildResumeStoragePath(userId, fileName) {
 /**
  * Upload a resume file to Supabase Storage, overwriting the prior file if it exists.
  *
- * @param {Object} params Upload parameters.
- * @param {File} params.file Resume PDF file.
- * @returns {Promise<{ storagePath: string, publicUrl: string | null }>} Upload result.
+ * Note:
+ *   This still depends on a browser Supabase session because storage upload is
+ *   currently performed directly from the frontend.
+ *
+ * Args:
+ *   params: Upload parameters.
+ *   params.file: Resume PDF file.
+ *
+ * Returns:
+ *   Upload result containing storage path and public URL.
  */
 export async function uploadResumeFile({ file }) {
-  const session = await requireAuthenticatedSession();
-  const userId = session.user.id;
+  const backendSession = await requireBackendSession();
+  const browserSession = await getOptionalSupabaseSession();
+
+  if (!browserSession?.user?.id) {
+    throw new Error(
+      "Your app session is active, but browser storage auth is missing. Refresh the page and sign in again.",
+    );
+  }
+
+  const userId = backendSession.user.id;
   const storagePath = buildResumeStoragePath(userId, file.name);
 
   const { error } = await supabase.storage
@@ -176,20 +359,23 @@ export async function uploadResumeFile({ file }) {
 }
 
 /**
- * Upsert the user's single active resume record.
+ * Create or update the user's active resume record through the backend.
  *
- * @param {Object} params Resume record parameters.
- * @param {string} params.originalFilename Original uploaded file name.
- * @param {number} params.fileSizeBytes File size in bytes.
- * @param {string} [params.fileType="application/pdf"] File MIME type.
- * @param {string} [params.parseStatus="pending"] Parse status.
- * @param {string | null} [params.rawText=null] Extracted raw text.
- * @param {Object | null} [params.parsedJson=null] Parsed resume JSON.
- * @param {string[]} [params.parseWarnings=[]] Parse warnings.
- * @param {string[]} [params.atsTags=[]] ATS tags.
- * @param {string} [params.uploadSource="web"] Upload source label.
- * @param {string | null} [params.storagePath=null] Storage object path.
- * @returns {Promise<Object>} Upserted resume row.
+ * Args:
+ *   params: Resume record parameters.
+ *   params.originalFilename: Original uploaded file name.
+ *   params.fileSizeBytes: File size in bytes.
+ *   params.fileType: File MIME type.
+ *   params.parseStatus: Parse status.
+ *   params.rawText: Extracted raw text.
+ *   params.parsedJson: Parsed resume JSON.
+ *   params.parseWarnings: Parse warnings.
+ *   params.atsTags: ATS tags.
+ *   params.uploadSource: Upload source label.
+ *   params.storagePath: Storage object path.
+ *
+ * Returns:
+ *   Upserted resume row from the backend.
  */
 export async function saveResumeRecord({
   originalFilename,
@@ -203,44 +389,61 @@ export async function saveResumeRecord({
   uploadSource = "web",
   storagePath = null,
 }) {
-  const session = await requireAuthenticatedSession();
+  const headers = await buildAuthenticatedApiHeaders();
 
-  const payload = {
-    user_id: session.user.id,
-    original_filename: originalFilename,
-    file_size_bytes: fileSizeBytes,
-    file_type: fileType,
-    upload_source: uploadSource,
-    storage_path: storagePath,
-    parse_status: parseStatus,
-    raw_text: rawText,
-    parsed_json: parsedJson,
-    parse_warnings: parseWarnings,
-    ats_tags: atsTags,
-  };
+  const response = await fetch(`${API_BASE_URL}/resume/current`, {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: JSON.stringify({
+      original_filename: originalFilename,
+      file_size_bytes: fileSizeBytes,
+      file_type: fileType,
+      upload_source: uploadSource,
+      storage_path: storagePath,
+      parse_status: parseStatus,
+      raw_text: rawText,
+      parsed_json: parsedJson,
+      parse_warnings: parseWarnings,
+      ats_tags: atsTags,
+    }),
+  });
 
-  const { data, error } = await supabase
-    .from("resumes")
-    .upsert(payload, { onConflict: "user_id" })
-    .select()
-    .single();
+  if (!response.ok) {
+    let message = "Failed to save resume record.";
 
-  if (error) {
-    throw error;
+    try {
+      const errorPayload = await response.json();
+      message = normalizeApiErrorMessage(errorPayload, message);
+    } catch {
+      try {
+        const text = await response.text();
+        if (text?.trim()) {
+          message = text;
+        }
+      } catch {
+        // Keep default message.
+      }
+    }
+
+    throw new Error(message);
   }
 
-  return data;
+  return await response.json();
 }
 
 /**
  * Parse a stored resume record through the backend parser.
  *
- * @param {Object} params Parse parameters.
- * @param {string} params.resumeId Resume row ID.
- * @param {string} params.rawText Extracted raw text.
- * @param {string} [params.fileType="application/pdf"] File MIME type.
- * @param {string} [params.extractionMethod="text"] Extraction method label.
- * @returns {Promise<Object>} Parse response payload.
+ * Args:
+ *   params: Parse parameters.
+ *   params.resumeId: Resume row ID.
+ *   params.rawText: Extracted raw text.
+ *   params.fileType: File MIME type.
+ *   params.extractionMethod: Extraction method label.
+ *
+ * Returns:
+ *   Parse response payload.
  */
 export async function parseResumeRecord({
   resumeId,
@@ -248,19 +451,12 @@ export async function parseResumeRecord({
   fileType = "application/pdf",
   extractionMethod = "text",
 }) {
-  if (!API_BASE_URL) {
-    throw new Error("Missing VITE_API_BASE_URL.");
-  }
-
-  const session = await requireAuthenticatedSession();
-  const accessToken = session.access_token;
+  const headers = await buildAuthenticatedApiHeaders();
 
   const response = await fetch(`${API_BASE_URL}/resume/${resumeId}/parse`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
+    credentials: "include",
+    headers,
     body: JSON.stringify({
       raw_text: rawText,
       file_type: fileType,
@@ -273,9 +469,16 @@ export async function parseResumeRecord({
 
     try {
       const errorPayload = await response.json();
-      message = errorPayload?.detail || message;
+      message = normalizeApiErrorMessage(errorPayload, message);
     } catch {
-      // Keep default message.
+      try {
+        const text = await response.text();
+        if (text?.trim()) {
+          message = text;
+        }
+      } catch {
+        // Keep default message.
+      }
     }
 
     throw new Error(message);
@@ -285,23 +488,133 @@ export async function parseResumeRecord({
 }
 
 /**
- * Fetch all stored resumes for the authenticated user.
+ * Fetch the canonical latest tracker resume from the backend.
  *
- * With the single-resume-per-user model, this will usually return zero or one row.
- *
- * @returns {Promise<Object[]>} Resume records ordered by most recent.
+ * Returns:
+ *   Latest resume summary from the tracker payload, or null when none exists.
  */
-export async function fetchMyResumes() {
-  await requireAuthenticatedSession();
+export async function fetchLatestTrackerResume() {
+  const headers = await buildAuthenticatedApiHeaders();
 
-  const { data, error } = await supabase
-    .from("resumes")
-    .select("*")
-    .order("updated_at", { ascending: false });
+  const response = await fetch(`${API_BASE_URL}/tracker`, {
+    method: "GET",
+    credentials: "include",
+    headers,
+  });
 
-  if (error) {
-    throw error;
+  if (!response.ok) {
+    let message = "Failed to load tracker resume.";
+
+    try {
+      const errorPayload = await response.json();
+      message = normalizeApiErrorMessage(errorPayload, message);
+    } catch {
+      try {
+        const text = await response.text();
+        if (text?.trim()) {
+          message = text;
+        }
+      } catch {
+        // Keep default message.
+      }
+    }
+
+    throw new Error(message);
   }
 
-  return data;
+  const payload = await response.json();
+  return payload?.resume && typeof payload.resume === "object"
+    ? payload.resume
+    : null;
+}
+
+/**
+ * Fetch the current resume record directly from the backend resume route.
+ *
+ * Returns:
+ *   Current resume record, or null if not found.
+ */
+export async function fetchCurrentResumeRecord() {
+  const headers = await buildAuthenticatedApiHeaders();
+
+  const response = await fetch(`${API_BASE_URL}/resume/current`, {
+    method: "GET",
+    credentials: "include",
+    headers,
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    let message = "Failed to load current resume.";
+
+    try {
+      const errorPayload = await response.json();
+      message = normalizeApiErrorMessage(errorPayload, message);
+    } catch {
+      try {
+        const text = await response.text();
+        if (text?.trim()) {
+          message = text;
+        }
+      } catch {
+        // Keep default message.
+      }
+    }
+
+    throw new Error(message);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Save a resume record, then verify the backend tracker can see it.
+ *
+ * Args:
+ *   params: Same parameters accepted by saveResumeRecord.
+ *
+ * Returns:
+ *   Verified resume record, preferably from backend tracker state.
+ */
+export async function saveAndVerifyResumeRecord(params) {
+  const savedResume = await saveResumeRecord(params);
+
+  let trackerResume = null;
+
+  try {
+    trackerResume = await fetchLatestTrackerResume();
+  } catch {
+    // Allow the direct save result to stand if tracker refresh is temporarily unavailable.
+  }
+
+  if (trackerResume?.id) {
+    return {
+      ...savedResume,
+      id: trackerResume.id,
+      original_filename:
+        trackerResume.original_filename || savedResume.original_filename,
+      file_type: trackerResume.file_type || savedResume.file_type,
+      parse_status: trackerResume.parse_status || savedResume.parse_status,
+      updated_at: trackerResume.updated_at || savedResume.updated_at,
+      ats_tags: Array.isArray(trackerResume.ats_tags)
+        ? trackerResume.ats_tags
+        : savedResume.ats_tags || [],
+    };
+  }
+
+  return savedResume;
+}
+
+/**
+ * Fetch all stored resumes for the authenticated user.
+ *
+ * Returns:
+ *   Resume records ordered by most recent.
+ */
+export async function fetchMyResumes() {
+  const currentResume = await fetchCurrentResumeRecord();
+  return currentResume ? [currentResume] : [];
 }

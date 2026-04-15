@@ -22,7 +22,10 @@ EMAIL_REGEX = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORE
 PHONE_REGEX = re.compile(
     r"(?:(?:\+?1[\s.-]*)?(?:\(?\d{3}\)?[\s.-]*)\d{3}[\s.-]*\d{4})"
 )
-URL_REGEX = re.compile(r"(https?://[^\s]+|www\.[^\s]+)", re.IGNORECASE)
+URL_REGEX = re.compile(
+    r"(https?://[^\s]+|www\.[^\s]+|linkedin\.com/[^\s]+|github\.com/[^\s]+|gitlab\.com/[^\s]+)",
+    re.IGNORECASE,
+)
 DATE_RANGE_REGEX = re.compile(
     r"(?P<start>(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{4}|\d{4})"
     r"\s*(?:-|–|—|to)\s*"
@@ -39,6 +42,23 @@ SECTION_PATTERNS: Dict[str, re.Pattern[str]] = {
     "projects": re.compile(r"^\s*(projects|project experience)\s*$", re.IGNORECASE),
     "skills": re.compile(r"^\s*(skills|technical skills|technologies)\s*$", re.IGNORECASE),
 }
+
+SECTION_HEADING_CANONICAL = [
+    "professional summary",
+    "summary",
+    "education",
+    "experience",
+    "work experience",
+    "professional experience",
+    "employment",
+    "projects",
+    "project experience",
+    "skills",
+    "technical skills",
+    "technologies",
+]
+
+HEADER_SPLIT_REGEX = re.compile(r"\s+[•|]\s+")
 
 DEGREE_HINTS = [
     "b.s",
@@ -105,12 +125,43 @@ SKILL_ALIASES = {
 
 KNOWN_SKILLS = sorted(set(SKILL_ALIASES.values()))
 
+CITY_PREFIX_WORDS = {
+    "new",
+    "los",
+    "las",
+    "san",
+    "saint",
+    "st",
+    "fort",
+    "el",
+}
+
 
 def normalize_whitespace(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def preprocess_resume_text(text: str) -> str:
+    text = normalize_whitespace(text)
+    text = HEADER_SPLIT_REGEX.sub("\n", text)
+
+    # Add clean line breaks before headings
+    for heading in sorted(SECTION_HEADING_CANONICAL, key=len, reverse=True):
+        pattern = re.compile(rf"\s+({re.escape(heading)})\b", re.IGNORECASE)
+        text = pattern.sub(r"\n\1", text)
+
+    # Add clean line breaks after headings
+    for heading in sorted(SECTION_HEADING_CANONICAL, key=len, reverse=True):
+        pattern = re.compile(rf"\b({re.escape(heading)})\s+", re.IGNORECASE)
+        text = pattern.sub(r"\1\n", text)
+
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
+
+    return normalize_whitespace(text)
 
 
 def split_lines(text: str) -> List[str]:
@@ -240,32 +291,100 @@ def infer_name(header_lines: Sequence[str]) -> str | None:
     if not header_lines:
         return None
 
-    first_line = header_lines[0].strip()
-    if len(first_line) > 80:
-        return None
-    if "@" in first_line or "http" in first_line.lower():
-        return None
-    if re.search(r"\d", first_line):
+    blocked_phrases = {
+        "professional summary",
+        "summary",
+        "experience",
+        "skills",
+        "education",
+        "projects",
+    }
+
+    location_pattern = re.compile(r"\b([A-Z][a-zA-Z]+),\s*([A-Z]{2})\b$")
+
+    for line in header_lines[:5]:
+        candidate = line.strip()
+        if not candidate:
+            continue
+
+        candidate = EMAIL_REGEX.sub("", candidate)
+        candidate = PHONE_REGEX.sub("", candidate)
+        candidate = URL_REGEX.sub("", candidate)
+        candidate = HEADER_SPLIT_REGEX.sub(" ", candidate)
+        candidate = re.sub(r"\s+", " ", candidate).strip(" ,|-•")
+
+        lowered = candidate.lower()
+        if lowered in blocked_phrases:
+            continue
+
+        if not candidate or re.search(r"\d", candidate):
+            continue
+
+        # If ends with City, ST remove only that tail
+        location_match = location_pattern.search(candidate)
+        if location_match:
+            city_start = location_match.start()
+            prefix = candidate[:city_start].strip(" ,|-•")
+            if prefix:
+                candidate = prefix
+
+        words = [w for w in candidate.split() if w]
+
+        if 2 <= len(words) <= 4 and all(
+            re.fullmatch(r"[A-Z][a-zA-Z'’-]*", word) for word in words
+        ):
+            return " ".join(words)
+
+    return None
+
+def normalize_city_from_trailing_words(words: Sequence[str]) -> str | None:
+    cleaned = [word.strip() for word in words if word.strip()]
+    if not cleaned:
         return None
 
-    return first_line
+    if len(cleaned) == 1:
+        return cleaned[0]
+
+    if len(cleaned) >= 2 and cleaned[-2].lower() in CITY_PREFIX_WORDS:
+        return f"{cleaned[-2]} {cleaned[-1]}"
+
+    return cleaned[-1]
 
 
 def infer_location(header_lines: Sequence[str]) -> ResumeLocation:
-    location_pattern = re.compile(
-        r"\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*),\s*([A-Z]{2})\b"
-    )
+    state_suffix_pattern = re.compile(r"\b([A-Z][a-zA-Z\s]+),\s*([A-Z]{2})\b$")
 
-    for line in header_lines[:4]:
-        match = location_pattern.search(line)
-        if match:
-            city, region = match.groups()
-            return ResumeLocation(
-                raw=match.group(0),
-                city=city,
-                region=region,
-                country="US",
-            )
+    for line in header_lines[:5]:
+        cleaned = EMAIL_REGEX.sub("", line)
+        cleaned = PHONE_REGEX.sub("", cleaned)
+        cleaned = URL_REGEX.sub("", cleaned)
+        cleaned = HEADER_SPLIT_REGEX.sub(" ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,|-•")
+
+        if not cleaned:
+            continue
+
+        match = state_suffix_pattern.search(cleaned)
+        if not match:
+            continue
+
+        left_side = match.group(1).strip()
+        region = match.group(2).strip()
+
+        words = [word for word in left_side.split() if word]
+        if not words:
+            continue
+
+        city = normalize_city_from_trailing_words(words)
+        if not city:
+            continue
+
+        return ResumeLocation(
+            raw=f"{city}, {region}",
+            city=city,
+            region=region,
+            country="US",
+        )
 
     return ResumeLocation()
 
@@ -342,6 +461,7 @@ def parse_education(section_lines: Sequence[str]) -> List[ResumeEducation]:
             lowered = line.lower()
             if any(hint in lowered for hint in DEGREE_HINTS):
                 degree = degree or line
+
             parsed_start, parsed_end, parsed_current = parse_date_range(line)
             if parsed_start or parsed_end or parsed_current:
                 start_date = start_date or parsed_start
@@ -371,7 +491,10 @@ def parse_education(section_lines: Sequence[str]) -> List[ResumeEducation]:
     return items[:5]
 
 
-def parse_experience(section_lines: Sequence[str], normalized_skills: Sequence[str]) -> List[ResumeExperience]:
+def parse_experience(
+    section_lines: Sequence[str],
+    normalized_skills: Sequence[str],
+) -> List[ResumeExperience]:
     items: List[ResumeExperience] = []
     chunks = chunk_section(section_lines)
 
@@ -395,7 +518,12 @@ def parse_experience(section_lines: Sequence[str], normalized_skills: Sequence[s
             role = parts[0] if parts else None
             company = parts[1] if len(parts) > 1 else None
         elif " at " in first_line.lower():
-            role_part, company_part = re.split(r"\bat\b", first_line, maxsplit=1, flags=re.IGNORECASE)
+            role_part, company_part = re.split(
+                r"\bat\b",
+                first_line,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )
             role = role_part.strip() or None
             company = company_part.strip() or None
         else:
@@ -419,7 +547,8 @@ def parse_experience(section_lines: Sequence[str], normalized_skills: Sequence[s
         bullet_points = dedupe_preserve_order(bullet_points)
 
         matched_skills = [
-            skill for skill in normalized_skills
+            skill
+            for skill in normalized_skills
             if any(skill in bullet.lower() for bullet in bullet_points)
         ]
 
@@ -439,7 +568,10 @@ def parse_experience(section_lines: Sequence[str], normalized_skills: Sequence[s
     return items[:10]
 
 
-def parse_projects(section_lines: Sequence[str], normalized_skills: Sequence[str]) -> List[ResumeProject]:
+def parse_projects(
+    section_lines: Sequence[str],
+    normalized_skills: Sequence[str],
+) -> List[ResumeProject]:
     items: List[ResumeProject] = []
     chunks = chunk_section(section_lines)
 
@@ -452,8 +584,10 @@ def parse_projects(section_lines: Sequence[str], normalized_skills: Sequence[str
         description = " ".join(description_lines).strip() or None
 
         tech_stack = [
-            skill for skill in normalized_skills
-            if title.lower().find(skill) >= 0 or (description and skill in description.lower())
+            skill
+            for skill in normalized_skills
+            if title.lower().find(skill) >= 0
+            or (description and skill in description.lower())
         ]
 
         links = extract_links(" ".join(chunk))
@@ -475,6 +609,13 @@ def chunk_section(lines: Sequence[str]) -> List[List[str]]:
     current_chunk: List[str] = []
 
     for line in lines:
+        is_heading_like = (
+            len(line) <= 90
+            and not line.startswith(("-", "•", "*"))
+            and line == line.title()
+            and not DATE_RANGE_REGEX.search(line)
+        )
+
         is_new_chunk = (
             not current_chunk
             or SECTION_PATTERNS["education"].match(line)
@@ -483,10 +624,7 @@ def chunk_section(lines: Sequence[str]) -> List[List[str]]:
             or SECTION_PATTERNS["skills"].match(line)
         )
 
-        if current_chunk and (
-            DATE_RANGE_REGEX.search(line)
-            or (len(line) <= 90 and not line.startswith(("-", "•", "*")) and line == line.title())
-        ):
+        if current_chunk and is_heading_like:
             chunks.append(current_chunk)
             current_chunk = [line]
             continue
@@ -521,6 +659,27 @@ def infer_years_experience(experience: Sequence[ResumeExperience]) -> int:
             total_years += max(0, end_year - start_year)
 
     return min(total_years, 50)
+
+
+def infer_years_experience_from_text(raw_text: str) -> int | None:
+    patterns = [
+        re.compile(r"\b(\d{1,2})\+?\s+years?\s+of\s+experience\b", re.IGNORECASE),
+        re.compile(r"\b(\d{1,2})\+?\s+years?\s+experience\b", re.IGNORECASE),
+    ]
+
+    matches: List[int] = []
+
+    for pattern in patterns:
+        for match in pattern.finditer(raw_text):
+            try:
+                matches.append(int(match.group(1)))
+            except (TypeError, ValueError):
+                continue
+
+    if not matches:
+        return None
+
+    return min(max(matches), 50)
 
 
 def extract_year(value: str | None) -> int | None:
@@ -571,7 +730,7 @@ def parse_resume_text(
     file_type: str = "application/pdf",
     extraction_method: str = "text",
 ) -> tuple[dict, List[str]]:
-    cleaned_text = normalize_whitespace(raw_text)
+    cleaned_text = preprocess_resume_text(raw_text)
     lines = split_lines(cleaned_text)
     sections = extract_sections(lines)
 
@@ -591,6 +750,11 @@ def parse_resume_text(
     projects = parse_projects(sections["projects"], skills.normalized)
 
     years_experience = infer_years_experience(experience)
+    if years_experience == 0:
+        fallback_years = infer_years_experience_from_text(cleaned_text)
+        if fallback_years is not None:
+            years_experience = fallback_years
+
     top_skill_keywords = [skill for skill, _ in Counter(skills.normalized).most_common(10)]
     primary_role_signals = infer_primary_role_signals(skills.normalized)
 

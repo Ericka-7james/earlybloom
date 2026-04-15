@@ -3,6 +3,7 @@ import Navbar from "./components/Navbar";
 import Home from "./pages/Home";
 import Jobs from "./pages/Jobs";
 import Tracker from "./pages/Tracker";
+import Profile from "./pages/Profile";
 import LearnMore from "./pages/LearnMore";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
@@ -13,12 +14,13 @@ import SignUp from "./pages/SignUp";
  * This component is responsible for:
  * - configuring client-side routing
  * - rendering the shared navigation bar
- * - providing a consistent page container for all screens
+ * - providing a consistent product-page shell
  *
  * Routes currently included:
  * - Home
  * - Jobs
  * - Tracker
+ * - Profile
  * - Learn More
  * - Sign In
  * - Sign Up
@@ -31,15 +33,18 @@ function App() {
       <div className="app-shell">
         <Navbar />
 
-        <main className="page-shell">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/jobs" element={<Jobs />} />
-            <Route path="/tracker" element={<Tracker />} />
-            <Route path="/learn-more" element={<LearnMore />} />
-            <Route path="/sign-in" element={<SignIn />} />
-            <Route path="/sign-up" element={<SignUp />} />
-          </Routes>
+        <main className="page-shell app-page-shell">
+          <div className="app-page-frame">
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/jobs" element={<Jobs />} />
+              <Route path="/tracker" element={<Tracker />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/learn-more" element={<LearnMore />} />
+              <Route path="/sign-in" element={<SignIn />} />
+              <Route path="/sign-up" element={<SignUp />} />
+            </Routes>
+          </div>
         </main>
       </div>
     </BrowserRouter>

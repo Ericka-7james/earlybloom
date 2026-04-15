@@ -14,6 +14,10 @@ def get_supabase_public_client() -> Client:
     """Returns a Supabase client for user-facing auth flows."""
     global _public_client
 
+    print("SUPABASE_URL:", repr(auth_settings.supabase_url))
+    print("HAS_PUBLISHABLE:", bool(auth_settings.supabase_publishable_key))
+    print("HAS_SECRET:", bool(auth_settings.supabase_secret_key))
+
     if _public_client is None:
         _public_client = create_client(
             auth_settings.supabase_url,

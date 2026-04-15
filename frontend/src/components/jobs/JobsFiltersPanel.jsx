@@ -39,7 +39,9 @@ function FilterSection({
   children,
 }) {
   return (
-    <section className={`jobs-filter-group ${isOpen ? "jobs-filter-group--open" : ""}`}>
+    <section
+      className={`jobs-filter-group ${isOpen ? "jobs-filter-group--open" : ""}`}
+    >
       <button
         type="button"
         className="jobs-filter-group__toggle"
@@ -56,10 +58,7 @@ function FilterSection({
               </span>
             ) : null}
 
-            <span
-              className="jobs-filter-group__chevron"
-              aria-hidden="true"
-            >
+            <span className="jobs-filter-group__chevron" aria-hidden="true">
               {isOpen ? "−" : "+"}
             </span>
           </div>
@@ -103,7 +102,7 @@ function JobsFiltersPanel({
   }
 
   return (
-    <>
+    <div className="jobs-filters-panel">
       <div className="jobs-filters__header">
         <div className="jobs-filters__title-row">
           <h2 className="jobs-results__title">Filters</h2>
@@ -122,9 +121,8 @@ function JobsFiltersPanel({
         </div>
 
         <p className="jobs-filters__text">
-          Entry-level and junior start selected by default right now so the
-          feed stays early-career focused, but you can widen it whenever you
-          want.
+          Entry-level and junior start selected by default so the feed stays
+          early-career focused, but you can widen it whenever you want.
         </p>
 
         {totalSelectedCount > 0 ? (
@@ -134,54 +132,56 @@ function JobsFiltersPanel({
         ) : null}
       </div>
 
-      <FilterSection
-        title="Experience level"
-        selectedCount={selectedExperienceLevels.length}
-        isOpen={openSections.experience}
-        onToggleOpen={() => toggleSection("experience")}
-      >
-        {renderFilterChips(
-          FILTER_GROUPS.experienceLevel,
-          selectedExperienceLevels,
-          (value) =>
-            setSelectedExperienceLevels((currentValues) =>
-              toggleSelectedValue(currentValues, value)
-            )
-        )}
-      </FilterSection>
+      <div className="jobs-filters-panel__groups">
+        <FilterSection
+          title="Experience level"
+          selectedCount={selectedExperienceLevels.length}
+          isOpen={openSections.experience}
+          onToggleOpen={() => toggleSection("experience")}
+        >
+          {renderFilterChips(
+            FILTER_GROUPS.experienceLevel,
+            selectedExperienceLevels,
+            (value) =>
+              setSelectedExperienceLevels((currentValues) =>
+                toggleSelectedValue(currentValues, value)
+              )
+          )}
+        </FilterSection>
 
-      <FilterSection
-        title="Workplace"
-        selectedCount={selectedWorkplaces.length}
-        isOpen={openSections.workplace}
-        onToggleOpen={() => toggleSection("workplace")}
-      >
-        {renderFilterChips(
-          FILTER_GROUPS.workplace,
-          selectedWorkplaces,
-          (value) =>
-            setSelectedWorkplaces((currentValues) =>
-              toggleSelectedValue(currentValues, value)
-            )
-        )}
-      </FilterSection>
+        <FilterSection
+          title="Workplace"
+          selectedCount={selectedWorkplaces.length}
+          isOpen={openSections.workplace}
+          onToggleOpen={() => toggleSection("workplace")}
+        >
+          {renderFilterChips(
+            FILTER_GROUPS.workplace,
+            selectedWorkplaces,
+            (value) =>
+              setSelectedWorkplaces((currentValues) =>
+                toggleSelectedValue(currentValues, value)
+              )
+          )}
+        </FilterSection>
 
-      <FilterSection
-        title="Role type"
-        selectedCount={selectedRoleTypes.length}
-        isOpen={openSections.roleType}
-        onToggleOpen={() => toggleSection("roleType")}
-      >
-        {renderFilterChips(
-          FILTER_GROUPS.roleType,
-          selectedRoleTypes,
-          (value) =>
-            setSelectedRoleTypes((currentValues) =>
-              toggleSelectedValue(currentValues, value)
-            )
-        )}
-      </FilterSection>
-    </>
+        <FilterSection
+          title="Role type"
+          selectedCount={selectedRoleTypes.length}
+          isOpen={openSections.roleType}
+          onToggleOpen={() => toggleSection("roleType")}
+        >
+          {renderFilterChips(
+            FILTER_GROUPS.roleType,
+            selectedRoleTypes,
+            (value) =>
+              setSelectedRoleTypes((currentValues) =>
+                toggleSelectedValue(currentValues, value)
+              )
+          )}
+        </FilterSection>
+      </div>
+    </div>
   );
 }
 

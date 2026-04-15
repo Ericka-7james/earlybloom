@@ -1,21 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 import app.api.routes.resume as resume_routes
-
-
-class FakeResponseModel:
-    """Simple stand-in for pydantic response models used in route unit tests."""
-
-    def __init__(self, **data):
-        self.__dict__.update(data)
-
-    def __eq__(self, other):
-        return isinstance(other, FakeResponseModel) and self.__dict__ == other.__dict__
 
 
 class FakeRepository:
@@ -38,7 +30,6 @@ class FakeRepository:
             "parsed_json": None,
             "ats_tags": [],
             "parse_warnings": [],
-            "latest_error": None,
             "created_at": now,
             "updated_at": now,
         }
@@ -79,10 +70,15 @@ class FakeRepository:
             "parsed_json": {"meta": {"confidence": 0.92}},
             "ats_tags": ["react", "python"],
             "parse_warnings": ["minor warning"],
-            "latest_error": None,
             "created_at": now,
             "updated_at": now,
         }
+
+        self.client = FakeSupabaseClient(self)
+
+    def get_latest_resume_for_user(self, *, user_id: str):
+        self.calls.append(("get_latest_resume_for_user", {"user_id": user_id}))
+        return self.resume_record
 
     def get_resume_for_user(self, *, resume_id: str, user_id: str):
         self.calls.append(
@@ -129,7 +125,6 @@ class FakeRepository:
         raw_text: str,
         parsed_json: dict,
         parse_warnings: list[str],
-        latest_error,
         ats_tags: list[str],
     ):
         self.calls.append(
@@ -142,12 +137,46 @@ class FakeRepository:
                     "raw_text": raw_text,
                     "parsed_json": parsed_json,
                     "parse_warnings": parse_warnings,
-                    "latest_error": latest_error,
                     "ats_tags": ats_tags,
                 },
             )
         )
         return self.updated_record
+
+
+class FakeSupabaseResult:
+    def __init__(self, data):
+        self.data = data
+
+
+class FakeTableQuery:
+    def __init__(self, repository: FakeRepository):
+        self.repository = repository
+
+    def upsert(self, row, on_conflict: str):
+        self.repository.calls.append(
+            (
+                "client.table.upsert",
+                {
+                    "table": "resumes",
+                    "row": row,
+                    "on_conflict": on_conflict,
+                },
+            )
+        )
+        return self
+
+    def execute(self):
+        return FakeSupabaseResult([self.repository.resume_record])
+
+
+class FakeSupabaseClient:
+    def __init__(self, repository: FakeRepository):
+        self.repository = repository
+
+    def table(self, name: str):
+        assert name == "resumes"
+        return FakeTableQuery(self.repository)
 
 
 @pytest.fixture
@@ -156,66 +185,121 @@ def fake_repo():
 
 
 @pytest.fixture
-def patch_response_models(monkeypatch):
-    monkeypatch.setattr(resume_routes, "ResumeRecordResponse", FakeResponseModel)
-    monkeypatch.setattr(resume_routes, "ResumeLogResponse", FakeResponseModel)
-    monkeypatch.setattr(resume_routes, "ParseResumeResponse", FakeResponseModel)
-
-
-def test_get_current_user_id_delegates_to_token_parser(monkeypatch):
-    captured = {}
-
-    def fake_get_user_id_from_bearer_token(authorization):
-        captured["authorization"] = authorization
-        return "user-xyz"
-
-    monkeypatch.setattr(
-        resume_routes,
-        "get_user_id_from_bearer_token",
-        fake_get_user_id_from_bearer_token,
+def current_context():
+    return SimpleNamespace(
+        refreshed=False,
+        session=None,
+        user=SimpleNamespace(id="user-123", email="test@example.com"),
     )
 
-    result = resume_routes.get_current_user_id("Bearer abc123")
 
-    assert result == "user-xyz"
-    assert captured["authorization"] == "Bearer abc123"
+@pytest.fixture
+def client(fake_repo, current_context):
+    app = FastAPI()
+    app.include_router(resume_routes.router)
 
-
-def test_get_resume_returns_resume_record_response(fake_repo, patch_response_models):
-    result = resume_routes.get_resume(
-        resume_id="resume-123",
-        user_id="user-123",
-        repository=fake_repo,
+    app.dependency_overrides[resume_routes.get_resume_repository] = lambda: fake_repo
+    app.dependency_overrides[resume_routes.get_current_session_context] = (
+        lambda: current_context
     )
 
-    assert isinstance(result, FakeResponseModel)
-    assert result.id == "resume-123"
-    assert result.user_id == "user-123"
-    assert result.parse_status == "uploaded"
+    with TestClient(app) as test_client:
+        yield test_client
+
+    app.dependency_overrides.clear()
+
+
+def test_get_current_resume_returns_latest_resume_record(client, fake_repo):
+    response = client.get("/resume/current")
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["id"] == "resume-123"
+    assert body["user_id"] == "user-123"
+    assert body["parse_status"] == "uploaded"
+
+    assert fake_repo.calls == [
+        ("get_latest_resume_for_user", {"user_id": "user-123"})
+    ]
+
+
+def test_create_or_update_current_resume_upserts_and_returns_record(client, fake_repo):
+    response = client.post(
+        "/resume/current",
+        json={
+            "original_filename": "resume.pdf",
+            "file_size_bytes": 2048,
+            "file_type": "application/pdf",
+            "upload_source": "manual",
+            "storage_path": "resumes/user-123/resume-123.pdf",
+            "parse_status": "uploaded",
+            "raw_text": None,
+            "parsed_json": None,
+            "ats_tags": [],
+            "parse_warnings": [],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["id"] == "resume-123"
+    assert body["user_id"] == "user-123"
+    assert body["original_filename"] == "resume.pdf"
+
+    assert fake_repo.calls == [
+        (
+            "client.table.upsert",
+            {
+                "table": "resumes",
+                "row": {
+                    "user_id": "user-123",
+                    "original_filename": "resume.pdf",
+                    "file_size_bytes": 2048,
+                    "file_type": "application/pdf",
+                    "upload_source": "manual",
+                    "storage_path": "resumes/user-123/resume-123.pdf",
+                    "parse_status": "uploaded",
+                    "raw_text": None,
+                    "parsed_json": None,
+                    "ats_tags": [],
+                    "parse_warnings": [],
+                },
+                "on_conflict": "user_id",
+            },
+        )
+    ]
+
+
+def test_get_resume_returns_resume_record(client, fake_repo):
+    response = client.get("/resume/resume-123")
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["id"] == "resume-123"
+    assert body["user_id"] == "user-123"
+    assert body["parse_status"] == "uploaded"
 
     assert fake_repo.calls == [
         ("get_resume_for_user", {"resume_id": "resume-123", "user_id": "user-123"})
     ]
 
 
-def test_get_resume_logs_validates_resume_then_returns_log_models(
-    fake_repo,
-    patch_response_models,
-):
-    result = resume_routes.get_resume_logs(
-        resume_id="resume-123",
-        user_id="user-123",
-        repository=fake_repo,
-    )
+def test_get_resume_logs_validates_resume_then_returns_logs(client, fake_repo):
+    response = client.get("/resume/resume-123/logs")
 
-    assert len(result) == 2
-    assert all(isinstance(item, FakeResponseModel) for item in result)
-    assert result[0].id == "log-1"
-    assert result[0].event_type == "parse_started"
-    assert result[0].event_status == "info"
-    assert result[1].id == "log-2"
-    assert result[1].event_type == "parse_completed"
-    assert result[1].event_status == "success"
+    assert response.status_code == 200
+    body = response.json()
+
+    assert len(body) == 2
+    assert body[0]["id"] == "log-1"
+    assert body[0]["event_type"] == "parse_started"
+    assert body[0]["event_status"] == "info"
+    assert body[1]["id"] == "log-2"
+    assert body[1]["event_type"] == "parse_completed"
+    assert body[1]["event_status"] == "success"
 
     assert fake_repo.calls == [
         ("get_resume_for_user", {"resume_id": "resume-123", "user_id": "user-123"}),
@@ -224,8 +308,8 @@ def test_get_resume_logs_validates_resume_then_returns_log_models(
 
 
 def test_parse_resume_creates_logs_updates_record_and_returns_response(
+    client,
     fake_repo,
-    patch_response_models,
     monkeypatch,
 ):
     parsed_json = {
@@ -248,26 +332,24 @@ def test_parse_resume_creates_logs_updates_record_and_returns_response(
     monkeypatch.setattr(resume_routes, "parse_resume_text", fake_parse_resume_text)
     monkeypatch.setattr(resume_routes, "extract_ats_tags", fake_extract_ats_tags)
 
-    payload = SimpleNamespace(
-        raw_text="A" * 400,
-        file_type="pdf",
-        extraction_method="plaintext",
+    response = client.post(
+        "/resume/resume-123/parse",
+        json={
+            "raw_text": "A" * 400,
+            "file_type": "pdf",
+            "extraction_method": "plaintext",
+        },
     )
 
-    result = resume_routes.parse_resume(
-        resume_id="resume-123",
-        payload=payload,
-        user_id="user-123",
-        repository=fake_repo,
-    )
+    assert response.status_code == 200
+    body = response.json()
 
-    assert isinstance(result, FakeResponseModel)
-    assert result.resume_id == "resume-123"
-    assert result.parse_status == "parsed"
-    assert result.warnings == warnings
-    assert result.parsed_json == parsed_json
-    assert result.raw_text_preview == "A" * 280
-    assert result.ats_tags == ats_tags
+    assert body["resume_id"] == "resume-123"
+    assert body["parse_status"] == "parsed"
+    assert body["warnings"] == warnings
+    assert body["parsed_json"] == parsed_json
+    assert body["raw_text_preview"] == "A" * 280
+    assert body["ats_tags"] == ats_tags
 
     assert fake_repo.calls[0] == (
         "get_resume_for_user",
@@ -298,7 +380,6 @@ def test_parse_resume_creates_logs_updates_record_and_returns_response(
             "raw_text": "A" * 400,
             "parsed_json": parsed_json,
             "parse_warnings": warnings,
-            "latest_error": None,
             "ats_tags": ats_tags,
         },
     )

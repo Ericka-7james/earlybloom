@@ -39,6 +39,26 @@ function stopCardEvent(event) {
   event.stopPropagation();
 }
 
+function getQuickTake(job) {
+  if (job?.qualificationSignal?.text) {
+    return job.qualificationSignal.text;
+  }
+
+  if (job.fitTag === "Real Junior") {
+    return "Looks realistically junior-friendly.";
+  }
+
+  if (job.fitTag === "Stretch Role") {
+    return "Possible fit, but double-check requirements.";
+  }
+
+  if (job.fitTag === "Misleading Junior") {
+    return "Labeled junior, but parts may lean more experienced.";
+  }
+
+  return "This may be more experienced than it first appears.";
+}
+
 function JobCard({
   job,
   onOpenDetails,
@@ -53,13 +73,10 @@ function JobCard({
   const company = job.company || "Unknown company";
   const fitTag = getSafeFitTag(job.fitTag);
   const matchScore = getSafeMatchScore(job.matchScore);
-  const hasWarningFlags =
-    Array.isArray(job.warningFlags) && job.warningFlags.length > 0;
-
-  const metaItems = Array.isArray(job.metadata) ? job.metadata.slice(0, 6) : [];
+  const metaItems = Array.isArray(job.cardMeta) ? job.cardMeta : [];
+  const quickTake = getQuickTake(job);
   const applyUrl = job.url || job.sourceUrl || null;
-  const resolvedHideLabel =
-    hideLabel || (job.isHidden ? "Hidden" : "Hide");
+  const resolvedHideLabel = hideLabel || (job.isHidden ? "Restore job" : "Hide job");
 
   function handleOpen() {
     if (typeof onOpenDetails === "function") {
@@ -101,10 +118,6 @@ function JobCard({
             {matchScore}% match
           </span>
 
-          {hasWarningFlags ? (
-            <span className="job-card__watchout-chip">Watchouts</span>
-          ) : null}
-
           {job.isSaved ? (
             <span className="job-card__saved-chip">Saved</span>
           ) : null}
@@ -145,32 +158,36 @@ function JobCard({
         onClick={handleOpen}
         aria-label={`Open details for ${title} at ${company}`}
       >
-        <div className="job-card__heading">
-          <h3 id={`job-card-title-${id}`} className="job-card__title">
-            {title}
-          </h3>
+        <div className="job-card__content">
+          <div className="job-card__heading">
+            <h3 id={`job-card-title-${id}`} className="job-card__title">
+              {title}
+            </h3>
 
-          <p className="job-card__company">{company}</p>
-        </div>
-
-        {metaItems.length > 0 ? (
-          <div className="job-card__compact-meta" aria-label="Job metadata">
-            {metaItems.map((item, index) => (
-              <span key={`${id}-meta-${index}`} className="job-card__tag">
-                {item}
-              </span>
-            ))}
+            <p className="job-card__company">{company}</p>
           </div>
-        ) : null}
+
+          <p className="job-card__quick-take">{quickTake}</p>
+
+          {metaItems.length > 0 ? (
+            <div className="job-card__compact-meta" aria-label="Job metadata">
+              {metaItems.map((item, index) => (
+                <span key={`${id}-meta-${index}`} className="job-card__tag">
+                  {item}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </button>
 
       <div className="job-card__footer-row">
         <button
           type="button"
-          className="jobs-chip job-card__details-button"
+          className="jobs-chip jobs-chip--muted job-card__details-button"
           onClick={handleOpen}
         >
-          View details
+          Quick view
         </button>
 
         {applyUrl ? (

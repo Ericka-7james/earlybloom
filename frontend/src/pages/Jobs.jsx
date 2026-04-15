@@ -11,6 +11,7 @@ import "../styles/components/jobs.css";
 import scoreJobsForUser from "../lib/jobs/scoreJobsForUser";
 import mapJobsForDisplay from "../lib/jobs/mapJobsForDisplay";
 import { readCachedResumeUiState } from "../lib/resumes";
+import { fetchTracker } from "../lib/tracker/trackerApi";
 import { useJobs } from "../hooks/useJobs";
 import { useAuth } from "../hooks/useAuth";
 import { hideJob, saveJob, unsaveJob } from "../lib/jobs/jobsApi";
@@ -78,7 +79,7 @@ function getPaginationConfig(viewportWidth) {
     };
   }
 
-    if (viewportWidth <= 600) {
+  if (viewportWidth <= 600) {
     return {
       nearStartCount: 4,
       middleNeighborCount: 0,
@@ -165,6 +166,23 @@ function getVisiblePageNumbers(currentPage, totalPages, viewportWidth) {
   return result;
 }
 
+function buildResumeUiStateFromTrackerResume(resume) {
+  if (!resume || typeof resume !== "object") {
+    return null;
+  }
+
+  return {
+    id: resume.id || null,
+    name: resume.original_filename || "Saved resume",
+    size: null,
+    type: resume.file_type || "application/pdf",
+    uploadedAt: resume.updated_at || null,
+    parseStatus: resume.parse_status || "pending",
+    atsTags: Array.isArray(resume.ats_tags) ? resume.ats_tags : [],
+    isLocalOnly: false,
+  };
+}
+
 function Jobs() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
@@ -177,6 +195,7 @@ function Jobs() {
     useState(false);
   const [loginRequiredIntent, setLoginRequiredIntent] = useState("resume");
   const [resumeFile, setResumeFile] = useState(() => readCachedResumeUiState());
+  const [trackerResume, setTrackerResume] = useState(null);
   const [selectedExperienceLevels, setSelectedExperienceLevels] = useState(
     DEFAULT_SELECTED_EXPERIENCE_LEVELS
   );
@@ -188,13 +207,50 @@ function Jobs() {
   const [actionError, setActionError] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadTrackerResume() {
+      if (!user) {
+        setTrackerResume(null);
+        return;
+      }
+
+      try {
+        const tracker = await fetchTracker();
+
+        if (!isMounted) {
+          return;
+        }
+
+        setTrackerResume(
+          tracker?.resume && typeof tracker.resume === "object"
+            ? buildResumeUiStateFromTrackerResume(tracker.resume)
+            : null
+        );
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+
+        setTrackerResume(null);
+      }
+    }
+
+    loadTrackerResume();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
   const visibleResumeFile = useMemo(() => {
     if (!user) {
       return null;
     }
 
-    return resumeFile;
-  }, [user, resumeFile]);
+    return trackerResume || resumeFile || null;
+  }, [user, trackerResume, resumeFile]);
 
   const hasUploadedResume = Boolean(visibleResumeFile);
   const hasCachedResume = Boolean(visibleResumeFile);
@@ -311,6 +367,7 @@ function Jobs() {
 
   function handleResumeSaved(savedResumeUiState) {
     setResumeFile(savedResumeUiState);
+    setTrackerResume(savedResumeUiState);
     setIsResumeModalOpen(false);
     setIsWelcomeModalOpen(false);
     window.sessionStorage.removeItem(WELCOME_MODAL_PENDING_KEY);
