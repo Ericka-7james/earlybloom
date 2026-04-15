@@ -4,12 +4,11 @@ import * as pdfjsLib from "pdfjs-dist";
 import CommonModal from "../common/CommonModal.jsx";
 import BloomHire from "../../assets/bloombug/BloomHire.png";
 import {
-  saveResumeRecord,
+  saveAndVerifyResumeRecord,
   buildResumeUiCache,
   cacheResumeUiState,
   parseResumeRecord,
-  getOptionalSession,
-  cacheResumeRawText,
+  requireAuthenticatedSession,
 } from "../../lib/resumes.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -132,25 +131,9 @@ function ResumeUploadModal({
         throw new Error("No extractable text found in PDF.");
       }
 
-      const session = await getOptionalSession();
+      await requireAuthenticatedSession();
 
-      if (!session) {
-        const cachedResume = buildResumeUiCache(file, {
-          id: null,
-          parse_status: "local_only",
-          isLocalOnly: true,
-        });
-
-        cacheResumeUiState(cachedResume);
-        cacheResumeRawText(rawText);
-
-        setUploadState("success");
-        setResumeError("");
-        onResumeSaved?.(cachedResume);
-        return;
-      }
-
-      const savedResume = await saveResumeRecord({
+      const savedResume = await saveAndVerifyResumeRecord({
         originalFilename: file.name,
         fileSizeBytes: file.size,
         fileType: file.type || "application/pdf",
