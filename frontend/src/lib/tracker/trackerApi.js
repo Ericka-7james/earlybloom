@@ -1,65 +1,73 @@
-import { requireAuthenticatedSession } from "../resumes";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-
-async function buildAuthHeaders() {
+function ensureApiBaseUrl() {
   if (!API_BASE_URL) {
     throw new Error("Missing VITE_API_BASE_URL.");
   }
+}
 
-  const session = await requireAuthenticatedSession();
+async function request(path, options = {}) {
+  ensureApiBaseUrl();
 
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${session.access_token}`,
-  };
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(options.headers || {}),
+      },
+      ...options,
+    });
+  } catch {
+    throw new Error(
+      "Unable to reach the server. Check that the backend is running and try again.",
+    );
+  }
+
+  if (!response.ok) {
+    let message =
+      path === "/tracker"
+        ? "Failed to load tracker."
+        : "Failed to save tracker preferences.";
+
+    try {
+      const errorPayload = await response.json();
+      message = errorPayload?.detail || message;
+    } catch {
+      try {
+        const text = await response.text();
+        if (text?.trim()) {
+          message = text;
+        }
+      } catch {
+        // keep fallback
+      }
+    }
+
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return await response.json();
 }
 
 export async function fetchTracker() {
-  const headers = await buildAuthHeaders();
-
-  const response = await fetch(`${API_BASE_URL}/tracker`, {
+  return request("/tracker", {
     method: "GET",
-    headers,
   });
-
-  if (!response.ok) {
-    let message = "Failed to load tracker.";
-
-    try {
-      const errorPayload = await response.json();
-      message = errorPayload?.detail || message;
-    } catch {
-      // keep default
-    }
-
-    throw new Error(message);
-  }
-
-  return await response.json();
 }
 
 export async function updateTrackerPreferences(payload) {
-  const headers = await buildAuthHeaders();
-
-  const response = await fetch(`${API_BASE_URL}/tracker/preferences`, {
+  return request("/tracker/preferences", {
     method: "PATCH",
-    headers,
     body: JSON.stringify(payload),
   });
-
-  if (!response.ok) {
-    let message = "Failed to save tracker preferences.";
-
-    try {
-      const errorPayload = await response.json();
-      message = errorPayload?.detail || message;
-    } catch {
-      // keep default
-    }
-
-    throw new Error(message);
-  }
-
-  return await response.json();
 }

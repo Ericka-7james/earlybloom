@@ -112,14 +112,7 @@ class ResumeMeta(BaseModel):
     @field_validator("confidence")
     @classmethod
     def validate_confidence(cls, value: float) -> float:
-        """Clamp parser confidence into the valid range.
-
-        Args:
-            value: Raw confidence value.
-
-        Returns:
-            A confidence value between 0.0 and 1.0.
-        """
+        """Clamp parser confidence into the valid range."""
         return max(0.0, min(1.0, value))
 
 
@@ -137,12 +130,25 @@ class ParsedResume(BaseModel):
     meta: ResumeMeta
 
     def to_jsonb(self) -> Dict[str, Any]:
-        """Convert the parsed resume into a JSON-serializable dictionary.
-
-        Returns:
-            JSON-serializable parsed resume data.
-        """
+        """Convert the parsed resume into a JSON-serializable dictionary."""
         return self.model_dump(mode="json")
+
+
+class UpsertResumeRecordRequest(BaseModel):
+    """Represents a request to create or update the user's active resume record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    original_filename: str = Field(min_length=1, max_length=512)
+    file_size_bytes: Optional[int] = Field(default=None, ge=0)
+    file_type: str = Field(default="application/pdf", max_length=128)
+    upload_source: str = Field(default="web", max_length=64)
+    storage_path: Optional[str] = Field(default=None, max_length=1024)
+    parse_status: str = Field(default="pending", max_length=64)
+    raw_text: Optional[str] = Field(default=None, max_length=500_000)
+    parsed_json: Optional[Dict[str, Any]] = None
+    ats_tags: List[str] = Field(default_factory=list)
+    parse_warnings: List[str] = Field(default_factory=list)
 
 
 class ParseResumeRequest(BaseModel):
@@ -200,6 +206,5 @@ class ResumeRecordResponse(BaseModel):
     parsed_json: Optional[Dict[str, Any]] = None
     ats_tags: List[str] = Field(default_factory=list)
     parse_warnings: List[str] = Field(default_factory=list)
-    latest_error: Optional[str] = None
     created_at: datetime
     updated_at: datetime

@@ -1,59 +1,114 @@
 from __future__ import annotations
 
-from typing import Optional
+from fastapi import APIRouter, Cookie, Depends, Response
 
-from fastapi import APIRouter, Depends, Header
-
-from app.db.database import ResumeRepository, get_user_id_from_bearer_token
+from app.core.auth_settings import auth_settings
+from app.db.database import ResumeRepository
 from app.schemas.resume import (
     ParseResumeRequest,
     ParseResumeResponse,
     ResumeLogResponse,
     ResumeRecordResponse,
+    UpsertResumeRecordRequest,
 )
+from app.services.auth_cookies import set_auth_cookies
+from app.services.auth_service import CurrentSessionContext, verify_or_refresh_session
 from app.services.parser import parse_resume_text
 from app.services.resumes.ats_tags import extract_ats_tags
 
 router = APIRouter(prefix="/resume", tags=["resume"])
 
 
-def get_current_user_id(authorization: Optional[str] = Header(default=None)) -> str:
-    """Resolve the authenticated user ID from the bearer token.
-
-    Args:
-        authorization: Authorization header value.
-
-    Returns:
-        Authenticated user ID.
-    """
-    return get_user_id_from_bearer_token(authorization)
+def get_current_session_context(
+    access_token: str | None = Cookie(
+        default=None,
+        alias=auth_settings.access_cookie_name,
+    ),
+    refresh_token: str | None = Cookie(
+        default=None,
+        alias=auth_settings.refresh_cookie_name,
+    ),
+) -> CurrentSessionContext:
+    """Resolve the authenticated user from secure auth cookies."""
+    return verify_or_refresh_session(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
 
 
 def get_resume_repository() -> ResumeRepository:
-    """Create a resume repository instance.
-
-    Returns:
-        Resume repository.
-    """
+    """Create a resume repository instance."""
     return ResumeRepository()
+
+
+@router.get("/current", response_model=ResumeRecordResponse)
+def get_current_resume(
+    response: Response,
+    current: CurrentSessionContext = Depends(get_current_session_context),
+    repository: ResumeRepository = Depends(get_resume_repository),
+) -> ResumeRecordResponse:
+    """Fetch the latest resume for the authenticated user."""
+    if current.refreshed and current.session is not None:
+        set_auth_cookies(response, current.session)
+
+    user_id = str(getattr(current.user, "id"))
+    record = repository.get_latest_resume_for_user(user_id=user_id)
+    return ResumeRecordResponse(**record)
+
+
+@router.post("/current", response_model=ResumeRecordResponse)
+def create_or_update_current_resume(
+    payload: UpsertResumeRecordRequest,
+    response: Response,
+    current: CurrentSessionContext = Depends(get_current_session_context),
+    repository: ResumeRepository = Depends(get_resume_repository),
+) -> ResumeRecordResponse:
+    """Create or update the authenticated user's active resume record."""
+    if current.refreshed and current.session is not None:
+        set_auth_cookies(response, current.session)
+
+    user_id = str(getattr(current.user, "id"))
+
+    row = {
+        "user_id": user_id,
+        "original_filename": payload.original_filename,
+        "file_size_bytes": payload.file_size_bytes,
+        "file_type": payload.file_type or "application/pdf",
+        "upload_source": payload.upload_source or "web",
+        "storage_path": payload.storage_path,
+        "parse_status": payload.parse_status or "pending",
+        "raw_text": payload.raw_text,
+        "parsed_json": payload.parsed_json,
+        "ats_tags": payload.ats_tags or [],
+        "parse_warnings": payload.parse_warnings or [],
+    }
+
+    result = (
+        repository.client.table("resumes")
+        .upsert(row, on_conflict="user_id")
+        .execute()
+    )
+
+    data = result.data or []
+    if not data:
+        record = repository.get_latest_resume_for_user(user_id=user_id)
+        return ResumeRecordResponse(**record)
+
+    return ResumeRecordResponse(**data[0])
 
 
 @router.get("/{resume_id}", response_model=ResumeRecordResponse)
 def get_resume(
     resume_id: str,
-    user_id: str = Depends(get_current_user_id),
+    response: Response,
+    current: CurrentSessionContext = Depends(get_current_session_context),
     repository: ResumeRepository = Depends(get_resume_repository),
 ) -> ResumeRecordResponse:
-    """Fetch a single stored resume for the authenticated user.
+    """Fetch a single stored resume for the authenticated user."""
+    if current.refreshed and current.session is not None:
+        set_auth_cookies(response, current.session)
 
-    Args:
-        resume_id: Resume record ID.
-        user_id: Authenticated user ID.
-        repository: Resume repository.
-
-    Returns:
-        Stored resume record.
-    """
+    user_id = str(getattr(current.user, "id"))
     record = repository.get_resume_for_user(resume_id=resume_id, user_id=user_id)
     return ResumeRecordResponse(**record)
 
@@ -61,19 +116,15 @@ def get_resume(
 @router.get("/{resume_id}/logs", response_model=list[ResumeLogResponse])
 def get_resume_logs(
     resume_id: str,
-    user_id: str = Depends(get_current_user_id),
+    response: Response,
+    current: CurrentSessionContext = Depends(get_current_session_context),
     repository: ResumeRepository = Depends(get_resume_repository),
 ) -> list[ResumeLogResponse]:
-    """Fetch processing logs for a stored resume.
+    """Fetch processing logs for a stored resume."""
+    if current.refreshed and current.session is not None:
+        set_auth_cookies(response, current.session)
 
-    Args:
-        resume_id: Resume record ID.
-        user_id: Authenticated user ID.
-        repository: Resume repository.
-
-    Returns:
-        Resume log entries.
-    """
+    user_id = str(getattr(current.user, "id"))
     repository.get_resume_for_user(resume_id=resume_id, user_id=user_id)
     logs = repository.list_resume_logs(resume_id=resume_id, user_id=user_id)
     return [ResumeLogResponse(**log) for log in logs]
@@ -83,20 +134,15 @@ def get_resume_logs(
 def parse_resume(
     resume_id: str,
     payload: ParseResumeRequest,
-    user_id: str = Depends(get_current_user_id),
+    response: Response,
+    current: CurrentSessionContext = Depends(get_current_session_context),
     repository: ResumeRepository = Depends(get_resume_repository),
 ) -> ParseResumeResponse:
-    """Parse extracted resume text and persist the result.
+    """Parse extracted resume text and persist the result."""
+    if current.refreshed and current.session is not None:
+        set_auth_cookies(response, current.session)
 
-    Args:
-        resume_id: Resume record ID.
-        payload: Resume parse request.
-        user_id: Authenticated user ID.
-        repository: Resume repository.
-
-    Returns:
-        Parse response including parsed JSON, warnings, and ATS tags.
-    """
+    user_id = str(getattr(current.user, "id"))
     repository.get_resume_for_user(resume_id=resume_id, user_id=user_id)
 
     repository.create_resume_log(
@@ -126,7 +172,6 @@ def parse_resume(
         raw_text=payload.raw_text,
         parsed_json=parsed_json,
         parse_warnings=warnings,
-        latest_error=None,
         ats_tags=ats_tags,
     )
 

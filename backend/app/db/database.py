@@ -828,13 +828,11 @@ class ResumeRepository:
         raw_text: Optional[str] = None,
         parsed_json: Optional[Dict[str, Any]] = None,
         parse_warnings: Optional[list[str]] = None,
-        latest_error: Optional[str] = None,
         ats_tags: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
         update_payload: Dict[str, Any] = {
             "parse_status": parse_status,
             "parse_warnings": parse_warnings or [],
-            "latest_error": latest_error,
         }
 
         if raw_text is not None:

@@ -5,14 +5,15 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
+from app.api.routes.auth import get_current_session_context
 from app.db.database import (
     JobCacheRepository,
     ResumeRepository,
     get_supabase_admin,
-    get_user_id_from_bearer_token,
 )
+from app.schemas.profile import ProfileSummary
 from app.schemas.tracker import (
     TrackerPreferences,
     TrackerResponse,
@@ -21,16 +22,15 @@ from app.schemas.tracker import (
     UpdateTrackerPreferencesRequest,
     UpdateTrackerPreferencesResponse,
 )
-from app.services.auth_service import fetch_profile_for_user_id
+from app.services.auth_cookies import set_auth_cookies
+from app.services.auth_service import (
+    CurrentSessionContext,
+    fetch_profile_for_user_id,
+)
 from app.services.jobs.user_profile import DEFAULT_RESOLVED_JOB_PROFILE
 
 router = APIRouter(prefix="/tracker", tags=["tracker"])
 logger = logging.getLogger(__name__)
-
-
-def get_current_user_id(authorization: str | None = Header(default=None)) -> str:
-    """Resolve the authenticated user ID from bearer auth."""
-    return get_user_id_from_bearer_token(authorization)
 
 
 def get_resume_repository() -> ResumeRepository:
@@ -92,7 +92,31 @@ def _build_preferences_from_profile(
         preferred_role_types=preferred_role_types,
         preferred_workplace_types=preferred_workplace_types,
         preferred_locations=preferred_locations,
-        is_lgbt_friendly_only=bool(profile_row.get("is_lgbt_friendly_only")),
+        is_lgbt_friendly_only=bool(
+            profile_row.get("is_lgbt_friendly_only")
+            or profile_row.get("is_lgbtq_friendly_only")
+        ),
+    )
+
+
+def _build_profile_summary(
+    *,
+    user_id: str,
+    user_email: str | None,
+    profile_row: dict[str, Any] | None,
+) -> ProfileSummary:
+    """Build the tracker profile summary from the stored profile row or defaults."""
+    if profile_row:
+        return ProfileSummary(**profile_row)
+
+    return ProfileSummary(
+        user_id=user_id,
+        email=user_email,
+        display_name=None,
+        desired_levels=list(DEFAULT_RESOLVED_JOB_PROFILE["desiredLevels"]),
+        is_lgbtq_friendly_only=False,
+        created_at=None,
+        updated_at=None,
     )
 
 
@@ -115,19 +139,38 @@ def _serialize_resume(record: dict[str, Any] | None) -> TrackerResumeSummary | N
 
 @router.get("", response_model=TrackerResponse)
 def get_tracker(
-    user_id: str = Depends(get_current_user_id),
+    response: Response,
+    current: CurrentSessionContext = Depends(get_current_session_context),
     resume_repository: ResumeRepository = Depends(get_resume_repository),
     job_repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> TrackerResponse:
     """Return combined tracker data for the authenticated user."""
     try:
+        if current.refreshed and current.session is not None:
+            set_auth_cookies(response, current.session)
+
+        user_id = str(getattr(current.user, "id"))
+        user_email = getattr(current.user, "email", None)
+
         profile_row = fetch_profile_for_user_id(user_id)
-        latest_resume = resume_repository.get_latest_resume_for_user(user_id)
+
+        try:
+            latest_resume = resume_repository.get_latest_resume_for_user(user_id)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                latest_resume = None
+            else:
+                raise
 
         saved_jobs = job_repository.list_saved_jobs_for_user(user_id=user_id)
         hidden_jobs = job_repository.list_hidden_jobs_for_user(user_id=user_id)
 
         return TrackerResponse(
+            profile=_build_profile_summary(
+                user_id=user_id,
+                user_email=user_email,
+                profile_row=profile_row,
+            ),
             preferences=_build_preferences_from_profile(profile_row),
             resume=_serialize_resume(latest_resume),
             stats=TrackerStats(
@@ -148,10 +191,15 @@ def get_tracker(
 @router.patch("/preferences", response_model=UpdateTrackerPreferencesResponse)
 def update_tracker_preferences(
     payload: UpdateTrackerPreferencesRequest,
-    user_id: str = Depends(get_current_user_id),
+    response: Response,
+    current: CurrentSessionContext = Depends(get_current_session_context),
 ) -> UpdateTrackerPreferencesResponse:
     """Persist tracker preferences for the authenticated user."""
     try:
+        if current.refreshed and current.session is not None:
+            set_auth_cookies(response, current.session)
+
+        user_id = str(getattr(current.user, "id"))
         admin = get_supabase_admin()
         current_profile = fetch_profile_for_user_id(user_id) or {}
 
@@ -183,7 +231,10 @@ def update_tracker_preferences(
             is_lgbt_friendly_only=(
                 payload.is_lgbt_friendly_only
                 if payload.is_lgbt_friendly_only is not None
-                else bool(current_profile.get("is_lgbt_friendly_only"))
+                else bool(
+                    current_profile.get("is_lgbt_friendly_only")
+                    or current_profile.get("is_lgbtq_friendly_only")
+                )
             ),
         )
 
