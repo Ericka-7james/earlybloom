@@ -22,7 +22,10 @@ EMAIL_REGEX = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORE
 PHONE_REGEX = re.compile(
     r"(?:(?:\+?1[\s.-]*)?(?:\(?\d{3}\)?[\s.-]*)\d{3}[\s.-]*\d{4})"
 )
-URL_REGEX = re.compile(r"(https?://[^\s]+|www\.[^\s]+)", re.IGNORECASE)
+URL_REGEX = re.compile(
+    r"(https?://[^\s]+|www\.[^\s]+|linkedin\.com/[^\s]+|github\.com/[^\s]+|gitlab\.com/[^\s]+)",
+    re.IGNORECASE,
+)
 DATE_RANGE_REGEX = re.compile(
     r"(?P<start>(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{4}|\d{4})"
     r"\s*(?:-|–|—|to)\s*"
@@ -122,6 +125,17 @@ SKILL_ALIASES = {
 
 KNOWN_SKILLS = sorted(set(SKILL_ALIASES.values()))
 
+CITY_PREFIX_WORDS = {
+    "new",
+    "los",
+    "las",
+    "san",
+    "saint",
+    "st",
+    "fort",
+    "el",
+}
+
 
 def normalize_whitespace(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -132,19 +146,20 @@ def normalize_whitespace(text: str) -> str:
 
 def preprocess_resume_text(text: str) -> str:
     text = normalize_whitespace(text)
-
-    # Split common inline header separators into separate lines.
     text = HEADER_SPLIT_REGEX.sub("\n", text)
 
-    # Force line breaks before known section headings when they appear inline.
+    # Add clean line breaks before headings
     for heading in sorted(SECTION_HEADING_CANONICAL, key=len, reverse=True):
-        pattern = re.compile(rf"\s+(?={re.escape(heading)}\b)", re.IGNORECASE)
-        text = pattern.sub("\n", text)
+        pattern = re.compile(rf"\s+({re.escape(heading)})\b", re.IGNORECASE)
+        text = pattern.sub(r"\n\1", text)
 
-    # Force line breaks after section headings if body text continues inline.
+    # Add clean line breaks after headings
     for heading in sorted(SECTION_HEADING_CANONICAL, key=len, reverse=True):
         pattern = re.compile(rf"\b({re.escape(heading)})\s+", re.IGNORECASE)
         text = pattern.sub(r"\1\n", text)
+
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
 
     return normalize_whitespace(text)
 
@@ -276,6 +291,17 @@ def infer_name(header_lines: Sequence[str]) -> str | None:
     if not header_lines:
         return None
 
+    blocked_phrases = {
+        "professional summary",
+        "summary",
+        "experience",
+        "skills",
+        "education",
+        "projects",
+    }
+
+    location_pattern = re.compile(r"\b([A-Z][a-zA-Z]+),\s*([A-Z]{2})\b$")
+
     for line in header_lines[:5]:
         candidate = line.strip()
         if not candidate:
@@ -287,38 +313,29 @@ def infer_name(header_lines: Sequence[str]) -> str | None:
         candidate = HEADER_SPLIT_REGEX.sub(" ", candidate)
         candidate = re.sub(r"\s+", " ", candidate).strip(" ,|-•")
 
+        lowered = candidate.lower()
+        if lowered in blocked_phrases:
+            continue
+
         if not candidate or re.search(r"\d", candidate):
             continue
 
-        # Remove trailing city/state if present.
-        candidate = re.sub(
-            r"\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s*[A-Z]{2}\b$",
-            "",
-            candidate,
-        ).strip(" ,|-•")
+        # If ends with City, ST remove only that tail
+        location_match = location_pattern.search(candidate)
+        if location_match:
+            city_start = location_match.start()
+            prefix = candidate[:city_start].strip(" ,|-•")
+            if prefix:
+                candidate = prefix
 
-        if not candidate:
-            continue
+        words = [w for w in candidate.split() if w]
 
-        words = [word for word in candidate.split() if word]
-
-        # Prefer likely human-name shapes.
-        if 2 <= len(words) <= 4 and all(re.fullmatch(r"[A-Z][a-zA-Z'’-]*", word) for word in words):
+        if 2 <= len(words) <= 4 and all(
+            re.fullmatch(r"[A-Z][a-zA-Z'’-]*", word) for word in words
+        ):
             return " ".join(words)
 
     return None
-    
-CITY_PREFIX_WORDS = {
-    "new",
-    "los",
-    "las",
-    "san",
-    "saint",
-    "st",
-    "fort",
-    "el",
-}
-
 
 def normalize_city_from_trailing_words(words: Sequence[str]) -> str | None:
     cleaned = [word.strip() for word in words if word.strip()]
@@ -332,6 +349,7 @@ def normalize_city_from_trailing_words(words: Sequence[str]) -> str | None:
         return f"{cleaned[-2]} {cleaned[-1]}"
 
     return cleaned[-1]
+
 
 def infer_location(header_lines: Sequence[str]) -> ResumeLocation:
     state_suffix_pattern = re.compile(r"\b([A-Z][a-zA-Z\s]+),\s*([A-Z]{2})\b$")
@@ -357,8 +375,6 @@ def infer_location(header_lines: Sequence[str]) -> ResumeLocation:
         if not words:
             continue
 
-        # If the line is "Ericka Smiley James Atlanta, GA",
-        # we only want the trailing city token(s), not the whole prefix.
         city = normalize_city_from_trailing_words(words)
         if not city:
             continue
@@ -371,6 +387,7 @@ def infer_location(header_lines: Sequence[str]) -> ResumeLocation:
         )
 
     return ResumeLocation()
+
 
 def parse_date_range(line: str) -> Tuple[str | None, str | None, bool]:
     match = DATE_RANGE_REGEX.search(line)
@@ -592,6 +609,13 @@ def chunk_section(lines: Sequence[str]) -> List[List[str]]:
     current_chunk: List[str] = []
 
     for line in lines:
+        is_heading_like = (
+            len(line) <= 90
+            and not line.startswith(("-", "•", "*"))
+            and line == line.title()
+            and not DATE_RANGE_REGEX.search(line)
+        )
+
         is_new_chunk = (
             not current_chunk
             or SECTION_PATTERNS["education"].match(line)
@@ -600,14 +624,7 @@ def chunk_section(lines: Sequence[str]) -> List[List[str]]:
             or SECTION_PATTERNS["skills"].match(line)
         )
 
-        if current_chunk and (
-            DATE_RANGE_REGEX.search(line)
-            or (
-                len(line) <= 90
-                and not line.startswith(("-", "•", "*"))
-                and line == line.title()
-            )
-        ):
+        if current_chunk and is_heading_like:
             chunks.append(current_chunk)
             current_chunk = [line]
             continue
