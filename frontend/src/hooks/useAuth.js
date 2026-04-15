@@ -1,110 +1,157 @@
 /**
- * @fileoverview Auth session hook for EarlyBloom.
+ * @fileoverview Authentication session hook for EarlyBloom.
  *
- * Uses backend cookie session as the app-shell source of truth.
+ * This hook treats the backend cookie session as the single source of truth
+ * for application authentication state.
  *
- * Principles:
- * - Public pages must remain usable while auth is being checked.
- * - Auth lookup should happen in the background.
- * - Restricted pages can still gate on resolved auth state.
+ * Design goals:
+ * - keep public pages usable while session lookup happens in the background
+ * - normalize auth refresh behavior across the app
+ * - avoid stale state updates after unmount
+ * - provide a small, production-safe API to components
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getSession, signOut } from "../lib/auth/authApi";
 
 const AUTH_CHANGED_EVENT = "earlybloom:auth-changed";
 
 /**
- * Broadcast that auth state changed somewhere in the app.
+ * Broadcasts an auth-state change event to the current browser window.
+ *
+ * Components using this hook listen for the event and refresh local session
+ * state when it occurs.
  *
  * @returns {void}
  */
 export function notifyAuthChanged() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
   window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
 
 /**
- * Auth hook.
- *
- * Returns:
- *   user: Current authenticated user or null.
- *   loading: Whether auth state is refreshing.
- *   refresh: Refresh auth state and return the current user.
- *   handleSignOut: Sign the user out.
+ * Reads and manages the current authenticated backend session.
  *
  * @returns {{
  *   user: object | null,
  *   loading: boolean,
  *   refresh: () => Promise<object | null>,
  *   handleSignOut: () => Promise<void>
- * }}
+ * }} Auth state and actions.
  */
 export function useAuth() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const fetchSession = useCallback(async () => {
-    setLoading(true);
+  const isMountedRef = useRef(true);
+  const hasBootstrappedRef = useRef(false);
+
+  /**
+   * Applies a user value only while the hook is mounted.
+   *
+   * @param {object | null} nextUser The next authenticated user value.
+   * @returns {void}
+   */
+  const applyUserSafely = useCallback((nextUser) => {
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    setUser(nextUser);
+  }, []);
+
+  /**
+   * Applies a loading value only while the hook is mounted.
+   *
+   * @param {boolean} nextLoading Whether auth loading is active.
+   * @returns {void}
+   */
+  const applyLoadingSafely = useCallback((nextLoading) => {
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    setLoading(nextLoading);
+  }, []);
+
+  /**
+   * Refreshes the current backend session and updates local auth state.
+   *
+   * @returns {Promise<object | null>} The authenticated user when available.
+   */
+  const refresh = useCallback(async () => {
+    applyLoadingSafely(true);
 
     try {
       const session = await getSession();
       const nextUser = session?.user || null;
-      setUser(nextUser);
+      applyUserSafely(nextUser);
       return nextUser;
     } catch {
-      setUser(null);
+      applyUserSafely(null);
       return null;
     } finally {
-      setLoading(false);
+      applyLoadingSafely(false);
     }
-  }, []);
+  }, [applyLoadingSafely, applyUserSafely]);
 
   useEffect(() => {
-    let isMounted = true;
+    isMountedRef.current = true;
 
+    /**
+     * Performs the initial auth bootstrap once for the hook instance.
+     *
+     * @returns {Promise<void>}
+     */
     async function bootstrapAuth() {
-      setLoading(true);
-
-      try {
-        const session = await getSession();
-        if (!isMounted) {
-          return;
-        }
-
-        setUser(session?.user || null);
-      } catch {
-        if (!isMounted) {
-          return;
-        }
-
-        setUser(null);
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+      if (hasBootstrappedRef.current) {
+        return;
       }
+
+      hasBootstrappedRef.current = true;
+      await refresh();
     }
 
-    bootstrapAuth();
-
+    /**
+     * Handles broadcast auth changes from elsewhere in the app.
+     *
+     * @returns {void}
+     */
     function handleAuthChanged() {
-      fetchSession();
+      void refresh();
     }
 
-    window.addEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
+    void bootstrapAuth();
+
+    if (typeof window !== "undefined") {
+      window.addEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
+    }
 
     return () => {
-      isMounted = false;
-      window.removeEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
-    };
-  }, [fetchSession]);
+      isMountedRef.current = false;
 
+      if (typeof window !== "undefined") {
+        window.removeEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
+      }
+    };
+  }, [refresh]);
+
+  /**
+   * Signs the current user out through the backend and clears local state.
+   *
+   * @returns {Promise<void>}
+   */
   async function handleSignOut() {
+    applyLoadingSafely(true);
+
     try {
       await signOut();
     } finally {
-      setUser(null);
-      setLoading(false);
+      applyUserSafely(null);
+      applyLoadingSafely(false);
       notifyAuthChanged();
     }
   }
@@ -112,7 +159,9 @@ export function useAuth() {
   return {
     user,
     loading,
-    refresh: fetchSession,
+    refresh,
     handleSignOut,
   };
 }
+
+export default useAuth;

@@ -47,7 +47,6 @@ function renderPreferenceChips(
 
 function PreferenceSection({
   title,
-  selectedCount,
   isOpen,
   onToggleOpen,
   sectionKey,
@@ -69,12 +68,6 @@ function PreferenceSection({
           <h3 className="tracker-filter-group__title">{title}</h3>
 
           <div className="tracker-filter-group__header-meta">
-            {selectedCount > 0 ? (
-              <span className="tracker-filter-group__count">
-                {selectedCount} selected
-              </span>
-            ) : null}
-
             <span className="tracker-filter-group__chevron" aria-hidden="true">
               {isOpen ? "−" : "+"}
             </span>
@@ -163,7 +156,6 @@ function TrackerPreferencesPanel({
       <PreferenceSection
         sectionKey="levels"
         title="Experience level"
-        selectedCount={preferencesDraft.desired_levels?.length || 0}
         isOpen={openSections.levels}
         onToggleOpen={() => toggleSection("levels")}
       >
@@ -177,7 +169,6 @@ function TrackerPreferencesPanel({
       <PreferenceSection
         sectionKey="workplace"
         title="Workplace"
-        selectedCount={preferencesDraft.preferred_workplace_types?.length || 0}
         isOpen={openSections.workplace}
         onToggleOpen={() => toggleSection("workplace")}
       >
@@ -191,7 +182,6 @@ function TrackerPreferencesPanel({
       <PreferenceSection
         sectionKey="role-type"
         title="Role type"
-        selectedCount={preferencesDraft.preferred_role_types?.length || 0}
         isOpen={openSections.roleType}
         onToggleOpen={() => toggleSection("roleType")}
       >
@@ -206,7 +196,6 @@ function TrackerPreferencesPanel({
       <PreferenceSection
         sectionKey="location"
         title="Location"
-        selectedCount={preferencesDraft.preferred_locations?.length || 0}
         isOpen={openSections.location}
         onToggleOpen={() => toggleSection("location")}
       >

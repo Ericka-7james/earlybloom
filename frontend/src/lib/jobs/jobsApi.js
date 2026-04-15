@@ -1,3 +1,18 @@
+/**
+ * @fileoverview Jobs API client for EarlyBloom.
+ *
+ * This module is responsible for:
+ * - loading jobs data
+ * - loading the resolved scoring profile used by the jobs page
+ * - performing save/hide tracker mutations
+ * - normalizing backend payloads into a stable frontend shape
+ *
+ * Authentication:
+ * - The backend cookie session is the primary auth mechanism.
+ * - Requests use `credentials: "include"` for backend-owned session cookies.
+ * - This module intentionally does not depend on browser-local Supabase tokens.
+ */
+
 import { MOCK_RAW_JOBS } from "../../mock/jobs/jobs.raw";
 import { MOCK_USER_PROFILE } from "../../mock/jobs/jobs.user-profile";
 
@@ -9,14 +24,38 @@ const DEFAULT_RESOLVED_USER_PROFILE = {
   desiredLevels: ["entry-level", "junior"],
   preferredRoleTypes: [],
   preferredWorkplaceTypes: [],
+  preferredLocations: [],
   skills: [],
   isLgbtFriendlyOnly: false,
 };
 
+/**
+ * Returns whether jobs requests should use mock data.
+ *
+ * @returns {boolean} True when mock jobs mode is enabled.
+ */
 export function shouldUseMockJobs() {
   return USE_MOCK_JOBS;
 }
 
+/**
+ * Ensures the backend API base URL exists.
+ *
+ * @throws {Error} When VITE_API_BASE_URL is missing.
+ * @returns {void}
+ */
+function ensureApiBaseUrl() {
+  if (!API_BASE_URL) {
+    throw new Error("Missing VITE_API_BASE_URL.");
+  }
+}
+
+/**
+ * Extracts an array of jobs from a flexible backend payload shape.
+ *
+ * @param {any} payload Raw jobs payload.
+ * @returns {Array<object>} Jobs array.
+ */
 function extractJobsArray(payload) {
   if (Array.isArray(payload)) {
     return payload;
@@ -33,98 +72,89 @@ function extractJobsArray(payload) {
   return [];
 }
 
-function getStoredSupabaseAccessToken() {
-  if (typeof window === "undefined" || !window.localStorage) {
-    return "";
-  }
-
-  try {
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index);
-
-      if (!key || !key.startsWith("sb-") || !key.endsWith("-auth-token")) {
-        continue;
-      }
-
-      const rawValue = window.localStorage.getItem(key);
-      if (!rawValue) {
-        continue;
-      }
-
-      const parsedValue = JSON.parse(rawValue);
-
-      if (Array.isArray(parsedValue) && parsedValue[0]?.access_token) {
-        return String(parsedValue[0].access_token);
-      }
-
-      if (parsedValue?.access_token) {
-        return String(parsedValue.access_token);
-      }
-
-      if (parsedValue?.currentSession?.access_token) {
-        return String(parsedValue.currentSession.access_token);
-      }
-    }
-  } catch {
-    return "";
-  }
-
-  return "";
-}
-
-function buildAuthHeaders() {
-  const accessToken = getStoredSupabaseAccessToken();
-  if (!accessToken) {
-    return {};
-  }
-
-  return {
-    Authorization: `Bearer ${accessToken}`,
-  };
-}
-
-async function readJsonOrThrow(response, fallbackMessage) {
-  if (response.ok) {
-    if (response.status === 204) {
-      return null;
-    }
-
-    return response.json();
-  }
-
-  let message = fallbackMessage;
-
+/**
+ * Reads a readable error message from a failed fetch response.
+ *
+ * @param {Response} response Fetch response object.
+ * @param {string} fallbackMessage Fallback message.
+ * @returns {Promise<string>} Readable error message.
+ */
+async function readErrorMessage(response, fallbackMessage) {
   try {
     const errorPayload = await response.json();
-    message = errorPayload?.detail || errorPayload?.message || message;
+
+    if (typeof errorPayload?.detail === "string" && errorPayload.detail.trim()) {
+      return errorPayload.detail;
+    }
+
+    if (typeof errorPayload?.message === "string" && errorPayload.message.trim()) {
+      return errorPayload.message;
+    }
+  } catch {
+    // Fall through to text parsing.
+  }
+
+  try {
+    const text = await response.text();
+    if (text?.trim()) {
+      return text;
+    }
   } catch {
     // Keep fallback message.
   }
 
-  throw new Error(message);
+  return fallbackMessage;
 }
 
+/**
+ * Performs a backend jobs request and returns parsed JSON.
+ *
+ * @param {string} path Backend API path.
+ * @param {RequestInit} [options] Fetch options.
+ * @returns {Promise<any>} Parsed JSON payload or null for 204 responses.
+ */
 async function requestJson(path, options = {}) {
-  if (!API_BASE_URL) {
-    throw new Error("Missing VITE_API_BASE_URL.");
+  ensureApiBaseUrl();
+
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      credentials: "include",
+      ...options,
+      headers: {
+        Accept: "application/json",
+        ...(options.headers || {}),
+      },
+    });
+  } catch {
+    throw new Error(
+      "Unable to reach the server. Check that the backend is running and try again."
+    );
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: "include",
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...buildAuthHeaders(),
-      ...(options.headers || {}),
-    },
-  });
+  if (!response.ok) {
+    const fallbackMessage = `${options.method || "GET"} ${path} failed (${response.status}).`;
+    const message = await readErrorMessage(response, fallbackMessage);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
 
-  return readJsonOrThrow(
-    response,
-    `${options.method || "GET"} ${path} failed (${response.status}).`
-  );
+  if (response.status === 204) {
+    return null;
+  }
+
+  return await response.json();
 }
 
+/**
+ * Normalizes a backend job payload into the frontend display shape.
+ *
+ * @param {object} job Raw backend job object.
+ * @param {number} index Fallback index used for synthetic IDs.
+ * @returns {object} Normalized frontend job object.
+ */
 function normalizeBackendJob(job, index) {
   const normalizedRemoteType = job.remote_type ?? job.remoteType ?? null;
   const normalizedCurrency =
@@ -179,10 +209,10 @@ function normalizeBackendJob(job, index) {
       typeof job.remote === "boolean"
         ? job.remote
         : normalizedRemoteType === "remote"
-        ? true
-        : normalizedRemoteType === "hybrid" || normalizedRemoteType === "onsite"
-        ? false
-        : null,
+          ? true
+          : normalizedRemoteType === "hybrid" || normalizedRemoteType === "onsite"
+            ? false
+            : null,
 
     roleType: job.roleType ?? job.role_type ?? null,
     role_type: job.role_type ?? job.roleType ?? null,
@@ -247,27 +277,38 @@ function normalizeBackendJob(job, index) {
   };
 }
 
+/**
+ * Normalizes the resolved jobs profile returned by the backend.
+ *
+ * @param {object | null | undefined} profile Raw resolved profile payload.
+ * @returns {object} Stable frontend resolved-profile shape.
+ */
 function normalizeResolvedJobProfile(profile) {
   if (!profile || typeof profile !== "object") {
-    return DEFAULT_RESOLVED_USER_PROFILE;
+    return { ...DEFAULT_RESOLVED_USER_PROFILE };
   }
 
   return {
     desiredLevels: Array.isArray(profile.desiredLevels)
       ? profile.desiredLevels
       : Array.isArray(profile.desired_levels)
-      ? profile.desired_levels
-      : DEFAULT_RESOLVED_USER_PROFILE.desiredLevels,
+        ? profile.desired_levels
+        : DEFAULT_RESOLVED_USER_PROFILE.desiredLevels,
     preferredRoleTypes: Array.isArray(profile.preferredRoleTypes)
       ? profile.preferredRoleTypes
       : Array.isArray(profile.preferred_role_types)
-      ? profile.preferred_role_types
-      : DEFAULT_RESOLVED_USER_PROFILE.preferredRoleTypes,
+        ? profile.preferred_role_types
+        : DEFAULT_RESOLVED_USER_PROFILE.preferredRoleTypes,
     preferredWorkplaceTypes: Array.isArray(profile.preferredWorkplaceTypes)
       ? profile.preferredWorkplaceTypes
       : Array.isArray(profile.preferred_workplace_types)
-      ? profile.preferred_workplace_types
-      : DEFAULT_RESOLVED_USER_PROFILE.preferredWorkplaceTypes,
+        ? profile.preferred_workplace_types
+        : DEFAULT_RESOLVED_USER_PROFILE.preferredWorkplaceTypes,
+    preferredLocations: Array.isArray(profile.preferredLocations)
+      ? profile.preferredLocations
+      : Array.isArray(profile.preferred_locations)
+        ? profile.preferred_locations
+        : DEFAULT_RESOLVED_USER_PROFILE.preferredLocations,
     skills: Array.isArray(profile.skills)
       ? profile.skills
       : DEFAULT_RESOLVED_USER_PROFILE.skills,
@@ -275,51 +316,74 @@ function normalizeResolvedJobProfile(profile) {
       typeof profile.isLgbtFriendlyOnly === "boolean"
         ? profile.isLgbtFriendlyOnly
         : typeof profile.is_lgbt_friendly_only === "boolean"
-        ? profile.is_lgbt_friendly_only
-        : DEFAULT_RESOLVED_USER_PROFILE.isLgbtFriendlyOnly,
+          ? profile.is_lgbt_friendly_only
+          : DEFAULT_RESOLVED_USER_PROFILE.isLgbtFriendlyOnly,
   };
 }
 
+/**
+ * Normalizes the mock jobs profile used during mock mode.
+ *
+ * @param {object | null | undefined} mockProfile Raw mock user profile.
+ * @returns {object} Stable frontend resolved-profile shape.
+ */
 function normalizeMockUserProfile(mockProfile) {
   if (!mockProfile || typeof mockProfile !== "object") {
-    return DEFAULT_RESOLVED_USER_PROFILE;
+    return { ...DEFAULT_RESOLVED_USER_PROFILE };
   }
 
   return {
     desiredLevels: Array.isArray(mockProfile.desiredLevels)
       ? mockProfile.desiredLevels
       : Array.isArray(mockProfile.desired_levels)
-      ? mockProfile.desired_levels
-      : DEFAULT_RESOLVED_USER_PROFILE.desiredLevels,
+        ? mockProfile.desired_levels
+        : DEFAULT_RESOLVED_USER_PROFILE.desiredLevels,
     preferredRoleTypes: Array.isArray(mockProfile.preferredRoleTypes)
       ? mockProfile.preferredRoleTypes
       : Array.isArray(mockProfile.preferred_role_types)
-      ? mockProfile.preferred_role_types
-      : DEFAULT_RESOLVED_USER_PROFILE.preferredRoleTypes,
+        ? mockProfile.preferred_role_types
+        : DEFAULT_RESOLVED_USER_PROFILE.preferredRoleTypes,
     preferredWorkplaceTypes: Array.isArray(mockProfile.preferredWorkplaceTypes)
       ? mockProfile.preferredWorkplaceTypes
       : Array.isArray(mockProfile.preferred_workplace_types)
-      ? mockProfile.preferred_workplace_types
-      : DEFAULT_RESOLVED_USER_PROFILE.preferredWorkplaceTypes,
+        ? mockProfile.preferred_workplace_types
+        : DEFAULT_RESOLVED_USER_PROFILE.preferredWorkplaceTypes,
+    preferredLocations: Array.isArray(mockProfile.preferredLocations)
+      ? mockProfile.preferredLocations
+      : Array.isArray(mockProfile.preferred_locations)
+        ? mockProfile.preferred_locations
+        : DEFAULT_RESOLVED_USER_PROFILE.preferredLocations,
     skills: Array.isArray(mockProfile.skills)
       ? mockProfile.skills
       : Array.isArray(mockProfile.topSkills)
-      ? mockProfile.topSkills
-      : DEFAULT_RESOLVED_USER_PROFILE.skills,
+        ? mockProfile.topSkills
+        : DEFAULT_RESOLVED_USER_PROFILE.skills,
     isLgbtFriendlyOnly:
       typeof mockProfile.isLgbtFriendlyOnly === "boolean"
         ? mockProfile.isLgbtFriendlyOnly
         : typeof mockProfile.is_lgbt_friendly_only === "boolean"
-        ? mockProfile.is_lgbt_friendly_only
-        : DEFAULT_RESOLVED_USER_PROFILE.isLgbtFriendlyOnly,
+          ? mockProfile.is_lgbt_friendly_only
+          : DEFAULT_RESOLVED_USER_PROFILE.isLgbtFriendlyOnly,
   };
 }
 
+/**
+ * Normalizes a backend jobs payload into a frontend jobs array.
+ *
+ * @param {any} payload Raw jobs payload.
+ * @returns {Array<object>} Normalized jobs.
+ */
 function normalizeJobsPayload(payload) {
   const jobs = extractJobsArray(payload);
   return jobs.map(normalizeBackendJob);
 }
 
+/**
+ * Fetches the public jobs feed.
+ *
+ * @param {{ signal?: AbortSignal }} [options] Fetch options.
+ * @returns {Promise<Array<object>>} Normalized jobs array.
+ */
 export async function fetchJobs(options = {}) {
   const { signal } = options;
 
@@ -335,6 +399,12 @@ export async function fetchJobs(options = {}) {
   return normalizeJobsPayload(payload);
 }
 
+/**
+ * Fetches the resolved jobs profile used for scoring and filtering.
+ *
+ * @param {{ signal?: AbortSignal }} [options] Fetch options.
+ * @returns {Promise<object>} Resolved jobs profile.
+ */
 export async function fetchResolvedJobProfile(options = {}) {
   const { signal } = options;
 
@@ -350,6 +420,12 @@ export async function fetchResolvedJobProfile(options = {}) {
   return normalizeResolvedJobProfile(payload);
 }
 
+/**
+ * Saves a job for the current authenticated user.
+ *
+ * @param {string} jobId Public job ID.
+ * @returns {Promise<object>} Save mutation response.
+ */
 export async function saveJob(jobId) {
   return requestJson("/jobs/saved", {
     method: "POST",
@@ -360,12 +436,24 @@ export async function saveJob(jobId) {
   });
 }
 
+/**
+ * Removes a saved-job relationship for the current authenticated user.
+ *
+ * @param {string} jobId Public job ID.
+ * @returns {Promise<object>} Unsave mutation response.
+ */
 export async function unsaveJob(jobId) {
   return requestJson(`/jobs/saved/${encodeURIComponent(jobId)}`, {
     method: "DELETE",
   });
 }
 
+/**
+ * Hides a job for the current authenticated user.
+ *
+ * @param {string} jobId Public job ID.
+ * @returns {Promise<object>} Hide mutation response.
+ */
 export async function hideJob(jobId) {
   return requestJson("/jobs/hidden", {
     method: "POST",
@@ -376,12 +464,24 @@ export async function hideJob(jobId) {
   });
 }
 
+/**
+ * Removes a hidden-job relationship for the current authenticated user.
+ *
+ * @param {string} jobId Public job ID.
+ * @returns {Promise<object>} Unhide mutation response.
+ */
 export async function unhideJob(jobId) {
   return requestJson(`/jobs/hidden/${encodeURIComponent(jobId)}`, {
     method: "DELETE",
   });
 }
 
+/**
+ * Fetches saved jobs for the current authenticated user.
+ *
+ * @param {{ signal?: AbortSignal }} [options] Fetch options.
+ * @returns {Promise<Array<object>>} Normalized saved jobs.
+ */
 export async function fetchSavedJobs(options = {}) {
   const { signal } = options;
 
@@ -397,6 +497,12 @@ export async function fetchSavedJobs(options = {}) {
   return normalizeJobsPayload(payload);
 }
 
+/**
+ * Fetches hidden jobs for the current authenticated user.
+ *
+ * @param {{ signal?: AbortSignal }} [options] Fetch options.
+ * @returns {Promise<Array<object>>} Normalized hidden jobs.
+ */
 export async function fetchHiddenJobs(options = {}) {
   const { signal } = options;
 
@@ -413,9 +519,7 @@ export async function fetchHiddenJobs(options = {}) {
     return normalizeJobsPayload(payload);
   } catch (error) {
     if (error instanceof Error) {
-      throw new Error(
-        error.message || "Unable to load hidden jobs right now."
-      );
+      throw new Error(error.message || "Unable to load hidden jobs right now.");
     }
 
     throw new Error("Unable to load hidden jobs right now.");

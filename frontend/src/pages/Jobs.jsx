@@ -1,5 +1,24 @@
+/**
+ * @fileoverview Jobs page for EarlyBloom.
+ *
+ * This page is responsible for:
+ * - rendering the main jobs discovery experience
+ * - loading scored/filterable jobs through shared hooks
+ * - supporting save and hide mutations
+ * - gating signed-in-only actions
+ * - managing resume upload entry points
+ * - presenting filters, pagination, and job details
+ *
+ * Design goals:
+ * - keep the public jobs feed usable for guests
+ * - degrade gracefully when tracker or resume data is unavailable
+ * - keep UI state predictable during auth and mutation transitions
+ * - preserve launch-focused simplicity without overengineering
+ */
+
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
 import JobCard from "../components/jobs/JobCard.jsx";
 import JobsFiltersPanel from "../components/jobs/JobsFiltersPanel.jsx";
 import JobsActiveFilters from "../components/jobs/JobsActiveFilters.jsx";
@@ -28,6 +47,46 @@ import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
 const RESUME_MODAL_DISMISSED_KEY = "earlybloom_resume_modal_dismissed";
 const WELCOME_MODAL_PENDING_KEY = "earlybloom_welcome_modal_pending";
 const JOBS_PER_PAGE = 12;
+
+function canUseBrowserStorage() {
+  return typeof window !== "undefined";
+}
+
+function readSessionStorageValue(key) {
+  if (!canUseBrowserStorage()) {
+    return null;
+  }
+
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionStorageValue(key, value) {
+  if (!canUseBrowserStorage()) {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {
+    // Ignore storage write failures.
+  }
+}
+
+function removeSessionStorageValue(key) {
+  if (!canUseBrowserStorage()) {
+    return;
+  }
+
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore storage removal failures.
+  }
+}
 
 function getLoginRequiredContent(intent) {
   switch (intent) {
@@ -59,12 +118,19 @@ function useViewportWidth() {
   );
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
     function handleResize() {
       setViewportWidth(window.innerWidth);
     }
 
     window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
   }, []);
 
   return viewportWidth;
@@ -206,13 +272,32 @@ function Jobs() {
   const [pendingActions, setPendingActions] = useState({});
   const [actionError, setActionError] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(() => {
+    const welcomePending =
+      readSessionStorageValue(WELCOME_MODAL_PENDING_KEY) === "true";
+    const cachedResume = readCachedResumeUiState();
+    const hasCachedResume = Boolean(cachedResume);
+
+    return welcomePending && !hasCachedResume;
+  });
+
+  const {
+    jobs: rawJobs,
+    resolvedUserProfile,
+    isLoading,
+    error,
+    isMockMode,
+    retry,
+  } = useJobs({ viewerKey });
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadTrackerResume() {
       if (!user) {
-        setTrackerResume(null);
+        if (isMounted) {
+          setTrackerResume(null);
+        }
         return;
       }
 
@@ -237,7 +322,7 @@ function Jobs() {
       }
     }
 
-    loadTrackerResume();
+    void loadTrackerResume();
 
     return () => {
       isMounted = false;
@@ -252,23 +337,14 @@ function Jobs() {
     return trackerResume || resumeFile || null;
   }, [user, trackerResume, resumeFile]);
 
-  const hasUploadedResume = Boolean(visibleResumeFile);
-  const hasCachedResume = Boolean(visibleResumeFile);
-  const welcomePending =
-    window.sessionStorage.getItem(WELCOME_MODAL_PENDING_KEY) === "true";
+  const hasVisibleResume = Boolean(visibleResumeFile);
 
-  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(
-    welcomePending && !hasCachedResume && !hasUploadedResume
-  );
-
-  const {
-    jobs: rawJobs,
-    resolvedUserProfile,
-    isLoading,
-    error,
-    isMockMode,
-    retry,
-  } = useJobs({ viewerKey });
+  useEffect(() => {
+    if (hasVisibleResume) {
+      setIsWelcomeModalOpen(false);
+      removeSessionStorageValue(WELCOME_MODAL_PENDING_KEY);
+    }
+  }, [hasVisibleResume]);
 
   useEffect(() => {
     setJobViewerOverrides({});
@@ -321,7 +397,8 @@ function Jobs() {
     return getVisiblePageNumbers(currentPage, totalPages, viewportWidth);
   }, [currentPage, totalPages, viewportWidth]);
 
-  const pageStartCount = jobs.length === 0 ? 0 : (currentPage - 1) * JOBS_PER_PAGE + 1;
+  const pageStartCount =
+    jobs.length === 0 ? 0 : (currentPage - 1) * JOBS_PER_PAGE + 1;
   const pageEndCount = Math.min(currentPage * JOBS_PER_PAGE, jobs.length);
 
   const filtersSummary = useMemo(() => {
@@ -352,6 +429,8 @@ function Jobs() {
     });
   }, [selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes]);
 
+  const loginContent = getLoginRequiredContent(loginRequiredIntent);
+
   function handleOpenDetails(job) {
     setActiveJob(job);
   }
@@ -362,7 +441,7 @@ function Jobs() {
 
   function handleCloseResumeModal() {
     setIsResumeModalOpen(false);
-    window.sessionStorage.setItem(RESUME_MODAL_DISMISSED_KEY, "true");
+    writeSessionStorageValue(RESUME_MODAL_DISMISSED_KEY, "true");
   }
 
   function handleResumeSaved(savedResumeUiState) {
@@ -370,13 +449,13 @@ function Jobs() {
     setTrackerResume(savedResumeUiState);
     setIsResumeModalOpen(false);
     setIsWelcomeModalOpen(false);
-    window.sessionStorage.removeItem(WELCOME_MODAL_PENDING_KEY);
-    window.sessionStorage.removeItem(RESUME_MODAL_DISMISSED_KEY);
+    removeSessionStorageValue(WELCOME_MODAL_PENDING_KEY);
+    removeSessionStorageValue(RESUME_MODAL_DISMISSED_KEY);
   }
 
   function handleCloseWelcomeModal() {
     setIsWelcomeModalOpen(false);
-    window.sessionStorage.removeItem(WELCOME_MODAL_PENDING_KEY);
+    removeSessionStorageValue(WELCOME_MODAL_PENDING_KEY);
   }
 
   function handleOpenResumeFromWelcome() {
@@ -511,7 +590,7 @@ function Jobs() {
       if (nextViewerState) {
         applyViewerOverride(jobId, nextViewerState);
       }
-    } catch (err) {
+    } catch (error) {
       if (previousOverride) {
         applyViewerOverride(jobId, previousOverride);
       } else {
@@ -519,8 +598,8 @@ function Jobs() {
       }
 
       setActionError(
-        err instanceof Error
-          ? err.message
+        error instanceof Error
+          ? error.message
           : "We could not update that saved job right now."
       );
     } finally {
@@ -555,7 +634,7 @@ function Jobs() {
       if (nextViewerState) {
         applyViewerOverride(jobId, nextViewerState);
       }
-    } catch (err) {
+    } catch (error) {
       if (previousOverride) {
         applyViewerOverride(jobId, previousOverride);
       } else {
@@ -563,8 +642,8 @@ function Jobs() {
       }
 
       setActionError(
-        err instanceof Error
-          ? err.message
+        error instanceof Error
+          ? error.message
           : "We could not hide that job right now."
       );
     } finally {
@@ -578,13 +657,14 @@ function Jobs() {
     }
 
     setCurrentPage(nextPage);
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth",
-    });
-  }
 
-  const loginContent = getLoginRequiredContent(loginRequiredIntent);
+    if (typeof window !== "undefined") {
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    }
+  }
 
   return (
     <main className="jobs-page">

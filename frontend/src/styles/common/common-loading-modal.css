@@ -1,0 +1,115 @@
+.common-loading-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.common-loading-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top, rgba(255, 214, 235, 0.24), transparent 40%),
+    rgba(255, 250, 252, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.common-loading-modal__panel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 420px);
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  padding: 28px 24px;
+  border: 1px solid rgba(214, 164, 190, 0.24);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    0 24px 70px rgba(126, 84, 112, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  text-align: center;
+}
+
+.common-loading-modal__art-wrap {
+  width: 140px;
+  height: 140px;
+  display: grid;
+  place-items: center;
+  border-radius: 24px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 245, 250, 0.95),
+    rgba(255, 250, 252, 0.82)
+  );
+}
+
+.common-loading-modal__art {
+  width: min(100%, 116px);
+  max-height: 116px;
+  object-fit: contain;
+  user-select: none;
+  pointer-events: none;
+}
+
+.common-loading-modal__content {
+  display: grid;
+  gap: 8px;
+}
+
+.common-loading-modal__eyebrow {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted, #7b6271);
+}
+
+.common-loading-modal__title {
+  margin: 0;
+  font-size: clamp(1.15rem, 1rem + 0.5vw, 1.45rem);
+  line-height: 1.2;
+  color: var(--color-text, #2d1f29);
+}
+
+.common-loading-modal__caption {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--color-text-soft, #6c5864);
+}
+
+@media (max-width: 640px) {
+  .common-loading-modal {
+    padding: 18px;
+  }
+
+  .common-loading-modal__panel {
+    width: 100%;
+    padding: 24px 20px;
+    border-radius: 24px;
+  }
+
+  .common-loading-modal__art-wrap {
+    width: 124px;
+    height: 124px;
+  }
+
+  .common-loading-modal__art {
+    width: min(100%, 104px);
+    max-height: 104px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .common-loading-modal__backdrop,
+  .common-loading-modal__panel,
+  .common-loading-modal__art {
+    transition: none;
+    animation: none;
+  }
+}
