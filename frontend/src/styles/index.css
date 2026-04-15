@@ -324,6 +324,36 @@ select {
   padding-bottom: var(--space-7);
 }
 
+.app-page__hero-card {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.app-page__hero-content {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.app-page__hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.app-page__hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.app-page__hero-aside {
+  display: grid;
+  gap: var(--space-4);
+}
+
 .app-page__content {
   display: grid;
   gap: var(--space-10);
@@ -593,6 +623,55 @@ select {
   background: var(--gradient-surface-tinted);
 }
 
+/* Shared info panel primitive */
+
+.info-panel {
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: var(--blur-surface);
+}
+
+.info-panel--soft {
+  background: var(--gradient-surface-soft);
+}
+
+.info-panel--tinted {
+  background: var(--gradient-surface-tinted);
+}
+
+.info-panel__header {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.info-panel__header--inline {
+  grid-template-columns: 1fr auto;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.info-panel__content {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.info-panel__meta {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.info-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
 /* Hero card primitive */
 
 .hero-card {
@@ -731,6 +810,46 @@ select {
   color: var(--color-text-muted);
   font-size: var(--text-sm);
   line-height: 1.6;
+}
+
+/* Shared settings section primitive */
+
+.settings-section {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.settings-section__header {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.settings-section__header--inline {
+  grid-template-columns: 1fr auto;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.settings-section__body {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.settings-section__group {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.settings-section__group + .settings-section__group {
+  padding-top: var(--space-5);
+  border-top: 1px solid rgba(124, 92, 163, 0.12);
+}
+
+.settings-section__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
 }
 
 /* Filter trigger card primitive */
@@ -992,6 +1111,61 @@ select {
   box-shadow: none;
 }
 
+/* Shared chip selector primitives */
+
+.chip-selector {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.chip-selector__header {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.chip-selector__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.chip-selector__list--scrollable {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+  scrollbar-gutter: stable;
+}
+
+.chip-selector__chip {
+  gap: 0.45rem;
+}
+
+.chip-selector__chip--active {
+  border-color: rgba(110, 86, 166, 0.42);
+  background: linear-gradient(
+    180deg,
+    rgba(218, 205, 255, 0.92),
+    rgba(242, 236, 255, 0.98)
+  );
+  color: var(--color-heading);
+  box-shadow:
+    0 0 0 1px rgba(145, 119, 201, 0.16) inset,
+    0 10px 24px rgba(124, 92, 255, 0.1);
+}
+
+.chip-selector__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: rgba(124, 92, 255, 0.14);
+  color: var(--color-primary-deep);
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
 /* Form controls */
 
 .input,
@@ -1042,6 +1216,116 @@ textarea:disabled,
 select:disabled {
   background: rgba(255, 255, 255, 0.52);
   opacity: 0.8;
+}
+
+/* Shared form field primitives */
+
+.form-stack {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.form-grid {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.form-grid--two {
+  grid-template-columns: 1fr;
+}
+
+.form-section {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.form-row {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.form-row--inline {
+  grid-template-columns: 1fr;
+}
+
+.form-field {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.form-field--full {
+  grid-column: 1 / -1;
+}
+
+.form-field__label {
+  margin: 0;
+  color: var(--color-heading);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.form-field__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.form-field__control {
+  width: 100%;
+}
+
+.form-field__input,
+.form-field__select,
+.form-field__textarea {
+  width: 100%;
+}
+
+.form-field__hint {
+  margin: 0;
+  color: var(--color-text-soft);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+.form-field__meta {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.form-field__error {
+  margin: 0;
+  color: #a34867;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  font-weight: 600;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.form-actions--end {
+  justify-content: flex-end;
+}
+
+.form-actions--between {
+  justify-content: space-between;
+}
+
+.form-note {
+  margin: 0;
+  color: var(--color-text-soft);
+  font-size: var(--text-sm);
+  line-height: 1.6;
 }
 
 /* Modal utility hooks */
@@ -1233,6 +1517,11 @@ select:disabled {
   .app-card--roomy {
     padding: var(--space-7);
   }
+
+  .app-panel-card,
+  .info-panel {
+    padding: var(--space-6);
+  }
 }
 
 @media (min-width: 640px) {
@@ -1284,9 +1573,15 @@ select:disabled {
 
   .hero__actions,
   .hero-card__actions,
-  .empty-state-card__actions {
+  .empty-state-card__actions,
+  .app-page__hero-actions {
     flex-direction: row;
     flex-wrap: wrap;
+  }
+
+  .form-grid--two,
+  .form-row--inline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1326,6 +1621,11 @@ select:disabled {
 
   .app-split-layout--sidebar {
     grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .app-page__hero-card {
+    grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
     align-items: start;
   }
 
