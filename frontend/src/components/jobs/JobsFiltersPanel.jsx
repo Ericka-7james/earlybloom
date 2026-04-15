@@ -13,10 +13,17 @@ import {
  * @returns {JSX.Element}
  */
 function renderFilterChips(options, selectedValues, onToggle) {
+  const safeOptions = Array.isArray(options) ? options : [];
+  const safeSelectedValues = Array.isArray(selectedValues) ? selectedValues : [];
+
+  if (safeOptions.length === 0) {
+    return null;
+  }
+
   return (
     <div className="jobs-chip-list">
-      {options.map((option) => {
-        const isSelected = selectedValues.includes(option.value);
+      {safeOptions.map((option) => {
+        const isSelected = safeSelectedValues.includes(option.value);
 
         return (
           <button
@@ -116,10 +123,10 @@ function FilterSection({ title, isOpen, onToggleOpen, children }) {
  */
 function JobsFiltersPanel({
   hasActiveFilters,
-  selectedExperienceLevels,
-  selectedWorkplaces,
-  selectedRoleTypes,
-  selectedSkills,
+  selectedExperienceLevels = [],
+  selectedWorkplaces = [],
+  selectedRoleTypes = [],
+  selectedSkills = [],
   availableSkills = [],
   setSelectedExperienceLevels,
   setSelectedWorkplaces,
@@ -135,6 +142,10 @@ function JobsFiltersPanel({
   });
 
   const [showAllSkills, setShowAllSkills] = useState(false);
+
+  const safeAvailableSkills = useMemo(() => {
+    return Array.isArray(availableSkills) ? availableSkills.filter(Boolean) : [];
+  }, [availableSkills]);
 
   const totalSelectedCount = useMemo(() => {
     return (
@@ -152,11 +163,11 @@ function JobsFiltersPanel({
 
   const visibleSkillOptions = useMemo(() => {
     if (showAllSkills) {
-      return availableSkills;
+      return safeAvailableSkills;
     }
 
-    return availableSkills.slice(0, 10);
-  }, [availableSkills, showAllSkills]);
+    return safeAvailableSkills.slice(0, 10);
+  }, [safeAvailableSkills, showAllSkills]);
 
   function toggleSection(sectionKey) {
     setOpenSections((current) => ({
@@ -166,8 +177,12 @@ function JobsFiltersPanel({
   }
 
   function toggleSkills(value) {
+    if (typeof setSelectedSkills !== "function") {
+      return;
+    }
+
     setSelectedSkills((currentValues) =>
-      toggleSelectedValue(currentValues, value)
+      toggleSelectedValue(Array.isArray(currentValues) ? currentValues : [], value)
     );
   }
 
@@ -212,7 +227,7 @@ function JobsFiltersPanel({
             selectedExperienceLevels,
             (value) =>
               setSelectedExperienceLevels((currentValues) =>
-                toggleSelectedValue(currentValues, value)
+                toggleSelectedValue(Array.isArray(currentValues) ? currentValues : [], value)
               )
           )}
         </FilterSection>
@@ -227,7 +242,7 @@ function JobsFiltersPanel({
             selectedWorkplaces,
             (value) =>
               setSelectedWorkplaces((currentValues) =>
-                toggleSelectedValue(currentValues, value)
+                toggleSelectedValue(Array.isArray(currentValues) ? currentValues : [], value)
               )
           )}
         </FilterSection>
@@ -242,7 +257,7 @@ function JobsFiltersPanel({
             selectedRoleTypes,
             (value) =>
               setSelectedRoleTypes((currentValues) =>
-                toggleSelectedValue(currentValues, value)
+                toggleSelectedValue(Array.isArray(currentValues) ? currentValues : [], value)
               )
           )}
         </FilterSection>
@@ -252,7 +267,7 @@ function JobsFiltersPanel({
           isOpen={openSections.skills}
           onToggleOpen={() => toggleSection("skills")}
         >
-          {availableSkills.length > 0 ? (
+          {safeAvailableSkills.length > 0 ? (
             <>
               <p
                 className="jobs-filters__text"
@@ -267,14 +282,12 @@ function JobsFiltersPanel({
                 toggleSkills
               )}
 
-              {availableSkills.length > 10 ? (
+              {safeAvailableSkills.length > 10 ? (
                 <div style={{ marginTop: "0.875rem" }}>
                   <button
                     type="button"
                     className="jobs-chip jobs-chip--muted"
-                    onClick={() =>
-                      setShowAllSkills((current) => !current)
-                    }
+                    onClick={() => setShowAllSkills((current) => !current)}
                   >
                     {showAllSkills ? "Show less" : "Show more"}
                   </button>
