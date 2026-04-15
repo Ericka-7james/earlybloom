@@ -18,6 +18,11 @@ from app.schemas.resume import (
     ResumeSummary,
 )
 
+from app.services.jobs.common.skills_taxonomy import (
+    extract_skills_from_text,
+    categorize_skills,
+)
+
 EMAIL_REGEX = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 PHONE_REGEX = re.compile(
     r"(?:(?:\+?1[\s.-]*)?(?:\(?\d{3}\)?[\s.-]*)\d{3}[\s.-]*\d{4})"
@@ -228,32 +233,20 @@ def normalize_skill_token(token: str) -> str | None:
 
 
 def extract_skills(raw_text: str, skill_lines: Sequence[str]) -> ResumeSkills:
-    candidate_tokens: List[str] = []
+    focused_text = "\n".join(skill_lines) if skill_lines else ""
+    merged_text = f"{focused_text}\n{raw_text}".strip()
 
-    if skill_lines:
-        joined_skill_text = " ".join(skill_lines)
-        candidate_tokens.extend(re.split(r"[,|/•·]+", joined_skill_text))
+    normalized = extract_skills_from_text(merged_text)
 
-    candidate_tokens.extend(re.split(r"[,|/•·\n]+", raw_text))
+    raw = list(normalized)
 
-    normalized: List[str] = []
-    raw: List[str] = []
+    categorized = categorize_skills(normalized)
 
-    for token in candidate_tokens:
-        compact = token.strip()
-        if not compact:
-            continue
-
-        normalized_value = normalize_skill_token(compact)
-        if normalized_value:
-            normalized.append(normalized_value)
-            raw.append(compact)
-
-    normalized = dedupe_preserve_order(normalized)
-    raw = dedupe_preserve_order(raw)
-
-    return ResumeSkills(raw=raw, normalized=normalized)
-
+    return ResumeSkills(
+        raw=raw,
+        normalized=normalized,
+        categorized=categorized,
+    )
 
 def extract_email(text: str) -> str | None:
     match = EMAIL_REGEX.search(text)
@@ -718,8 +711,15 @@ def compute_confidence(parsed_resume: ParsedResume) -> float:
         score += 0.20
     if parsed_resume.projects:
         score += 0.10
-    if parsed_resume.skills.normalized:
-        score += 0.15
+        
+    skill_count = len(parsed_resume.skills.normalized)
+
+    if skill_count >= 1:
+        score += 0.08
+    if skill_count >= 5:
+        score += 0.05
+    if skill_count >= 10:
+        score += 0.02
 
     return round(min(score, 1.0), 2)
 
