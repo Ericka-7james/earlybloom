@@ -12,21 +12,33 @@
   gap: 0.9rem;
 }
 
+button.tracker-stat--preferences,
+.tracker-stat.tracker-stat--preferences,
+.tracker-stat--preferences.section-card {
+  padding: 1.05rem 1.15rem;
+  align-content: center;
+}
+
+button.tracker-stat--preferences .tracker-stat__value,
+.tracker-stat--preferences .tracker-stat__value {
+  margin-top: 0.15rem;
+}
+
 .tracker-main-layout {
   display: grid;
   grid-template-columns: minmax(268px, 308px) minmax(0, 1fr);
-  gap: 0.95rem;
+  gap: 1rem;
   align-items: start;
 }
 
 .tracker-sidebar {
   position: sticky;
-  top: 0.9rem;
+  top: 1rem;
 }
 
 .tracker-content {
   display: grid;
-  gap: 0.9rem;
+  gap: 1rem;
   min-width: 0;
 }
 
@@ -191,6 +203,13 @@ button.tracker-stat--preferences .tracker-stat__value,
   gap: 0.55rem;
 }
 
+.tracker-preferences-panel .card-meta {
+  margin: 0.55rem 0 0;
+  color: var(--color-primary-deep);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
 .tracker-preferences-panel__title-row {
   display: flex;
   align-items: flex-start;
@@ -304,15 +323,17 @@ button.tracker-stat--preferences .tracker-stat__value,
 }
 
 .tracker-chip--active {
+  border-color: rgba(110, 86, 166, 0.42);
   background: linear-gradient(
-    135deg,
-    rgba(217, 198, 255, 0.48) 0%,
-    rgba(255, 206, 223, 0.42) 55%,
-    rgba(201, 242, 199, 0.4) 100%
+    180deg,
+    rgba(218, 205, 255, 0.92),
+    rgba(242, 236, 255, 0.98)
   );
-  border-color: rgba(143, 109, 227, 0.3);
   color: var(--color-heading);
-  box-shadow: 0 8px 18px rgba(111, 84, 201, 0.12);
+  box-shadow:
+    0 0 0 1px rgba(145, 119, 201, 0.16) inset,
+    0 10px 24px rgba(124, 92, 255, 0.1);
+  font-weight: 800;
 }
 
 .tracker-chip--muted {
@@ -325,7 +346,15 @@ button.tracker-stat--preferences .tracker-stat__value,
 }
 
 .tracker-chip__check {
-  font-size: 0.92rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: rgba(124, 92, 255, 0.14);
+  color: var(--color-primary-deep);
+  font-size: 0.78rem;
   line-height: 1;
 }
 
@@ -467,9 +496,13 @@ button.tracker-stat--preferences .tracker-stat__value,
   }
 }
 
-@media (max-width: 920px) {
+@media (max-width: 768px) {
   .tracker-main-layout {
     grid-template-columns: 1fr;
+  }
+
+  .tracker-page .tracker-sidebar {
+    display: none;
   }
 
   .tracker-stats {
@@ -491,12 +524,6 @@ button.tracker-stat--preferences .tracker-stat__value,
     font-size: 1.15rem;
   }
 
-  .tracker-page .tracker-sidebar {
-    display: none;
-  }
-}
-
-@media (max-width: 720px) {
   .tracker-page .section-pad {
     padding-top: 0.7rem;
     padding-bottom: 1.5rem;

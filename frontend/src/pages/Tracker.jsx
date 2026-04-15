@@ -112,6 +112,10 @@ function useViewportWidth() {
   );
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
     function handleResize() {
       setViewportWidth(window.innerWidth);
     }
@@ -127,7 +131,7 @@ function Tracker() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const viewportWidth = useViewportWidth();
-  const isMobile = viewportWidth <= 920;
+  const isMobile = viewportWidth < 768;
 
   const [activeTab, setActiveTab] = useState(TRACKER_TABS.SAVED);
   const [savedJobsRaw, setSavedJobsRaw] = useState([]);
@@ -255,7 +259,7 @@ function Tracker() {
       setIsLoading(false);
     }
 
-    loadTrackerData();
+    void loadTrackerData();
 
     return () => {
       isMounted = false;
@@ -341,7 +345,7 @@ function Tracker() {
   );
 
   function resetPreferencesDraft() {
-    setPreferencesDraft(DEFAULT_PREFERENCES);
+    setPreferencesDraft(trackerData?.preferences || DEFAULT_PREFERENCES);
   }
 
   async function handleToggleSave(job) {
@@ -445,6 +449,8 @@ function Tracker() {
         ...current,
         preferences: nextPreferences,
       }));
+
+      setPreferencesDraft(nextPreferences);
 
       setResolvedUserProfile((current) => ({
         ...current,
@@ -662,15 +668,15 @@ function Tracker() {
                   </strong>
                 </article>
 
-                  <button
-                    type="button"
-                    className="tracker-stat tracker-stat--preferences section-card"
-                    onClick={() => setIsPreferencesModalOpen(true)}
-                    aria-label="Edit tracker preferences"
-                  >
-                    <span className="tracker-stat__label">Preferences</span>
-                    <strong className="tracker-stat__value">Edit →</strong>
-                  </button>
+                <button
+                  type="button"
+                  className="tracker-stat tracker-stat--preferences section-card"
+                  onClick={() => setIsPreferencesModalOpen(true)}
+                  aria-label="Edit tracker preferences"
+                >
+                  <span className="tracker-stat__label">Preferences</span>
+                  <strong className="tracker-stat__value">Edit →</strong>
+                </button>
               </div>
 
               <section className="section-card tracker-resume-card">
