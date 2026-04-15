@@ -1,3 +1,16 @@
+/**
+ * @fileoverview Shared frontend job filtering utilities for EarlyBloom.
+ *
+ * This module powers client-side filtering on the jobs page.
+ *
+ * Responsibilities:
+ * - define filter option groups used by the UI
+ * - normalize and toggle selected filter values
+ * - infer job metadata when backend fields are incomplete
+ * - filter jobs by experience level, workplace, role type, and skills
+ * - derive active filter tags and summary text for compact UI display
+ */
+
 const FILTER_GROUPS = {
   experienceLevel: [
     { label: "Entry-level", value: "entry-level" },
@@ -41,11 +54,27 @@ const FILTER_GROUPS = {
 };
 
 const DEFAULT_SELECTED_EXPERIENCE_LEVELS = ["entry-level", "junior"];
+const MAX_VISIBLE_SKILL_OPTIONS = 16;
 
+/**
+ * Normalizes a scalar value into a lowercase comparison-friendly string.
+ *
+ * @param {unknown} value Raw value.
+ * @returns {string} Normalized string value.
+ */
 function normalizeValue(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+/**
+ * Compares two arrays as sets.
+ *
+ * Ordering is ignored. Duplicate values are treated as a single logical item.
+ *
+ * @param {string[]} left Left list.
+ * @param {string[]} right Right list.
+ * @returns {boolean} Whether both arrays contain the same values.
+ */
 function arraysEqualAsSets(left, right) {
   if (left.length !== right.length) {
     return false;
@@ -55,6 +84,13 @@ function arraysEqualAsSets(left, right) {
   return right.every((value) => leftSet.has(value));
 }
 
+/**
+ * Toggles a selected value in a list while preserving insertion order.
+ *
+ * @param {string[]} currentValues Existing selected values.
+ * @param {string} value Value to toggle.
+ * @returns {string[]} Updated selected values.
+ */
 function toggleSelectedValue(currentValues, value) {
   if (currentValues.includes(value)) {
     return currentValues.filter((item) => item !== value);
@@ -63,6 +99,14 @@ function toggleSelectedValue(currentValues, value) {
   return [...currentValues, value];
 }
 
+/**
+ * Returns a normalized experience level for a job.
+ *
+ * Prefers explicit structured job fields but falls back to text heuristics.
+ *
+ * @param {object} job Job object.
+ * @returns {string} Normalized experience level.
+ */
 function getJobExperienceLevel(job) {
   const directLevel = normalizeValue(
     job.experienceLevel || job.experience_level || job.level
@@ -133,6 +177,12 @@ function getJobExperienceLevel(job) {
   return "unknown";
 }
 
+/**
+ * Returns a normalized workplace type for a job.
+ *
+ * @param {object} job Job object.
+ * @returns {string} Workplace type.
+ */
 function getJobWorkplace(job) {
   const directRemoteType = normalizeValue(job.remoteType || job.remote_type);
 
@@ -152,10 +202,7 @@ function getJobWorkplace(job) {
     `${job.location || ""} ${job.location_display || ""} ${job.cardLocation || ""} ${job.summary || ""} ${job.description || ""}`
   );
 
-  if (
-    haystack.includes("hybrid") ||
-    haystack.includes("flexible hybrid")
-  ) {
+  if (haystack.includes("hybrid") || haystack.includes("flexible hybrid")) {
     return "hybrid";
   }
 
@@ -179,6 +226,12 @@ function getJobWorkplace(job) {
   return "unknown";
 }
 
+/**
+ * Infers a normalized role type for a job.
+ *
+ * @param {object} job Job object.
+ * @returns {string} Role type.
+ */
 function inferRoleType(job) {
   const directRoleType = normalizeValue(job.roleType || job.role_type);
 
@@ -389,9 +442,85 @@ function inferRoleType(job) {
   return "unknown";
 }
 
+/**
+ * Returns a deduplicated canonical job skill list from available frontend fields.
+ *
+ * This prefers already-normalized backend-provided `skills` arrays, then
+ * falls back to required and preferred skill lists.
+ *
+ * @param {object} job Job object.
+ * @returns {string[]} Ordered canonical skills.
+ */
+function getJobSkills(job) {
+  const sources = [
+    ...(Array.isArray(job.skills) ? job.skills : []),
+    ...(Array.isArray(job.required_skills) ? job.required_skills : []),
+    ...(Array.isArray(job.preferred_skills) ? job.preferred_skills : []),
+    ...(Array.isArray(job.requiredSkills) ? job.requiredSkills : []),
+    ...(Array.isArray(job.preferredSkills) ? job.preferredSkills : []),
+  ];
+
+  const deduped = [];
+  const seen = new Set();
+
+  sources.forEach((skill) => {
+    const text = String(skill || "").trim();
+    if (!text) {
+      return;
+    }
+
+    const key = normalizeValue(text);
+    if (!key || seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    deduped.push(text);
+  });
+
+  return deduped;
+}
+
+/**
+ * Returns whether a job matches the selected skills filter.
+ *
+ * V1 behavior is "match any selected skill."
+ *
+ * @param {object} job Job object.
+ * @param {string[]} selectedSkills Selected canonical skills.
+ * @returns {boolean} Whether the job should pass the skill filter.
+ */
+function matchesSelectedSkills(job, selectedSkills = []) {
+  if (!Array.isArray(selectedSkills) || selectedSkills.length === 0) {
+    return true;
+  }
+
+  const selectedSkillSet = new Set(selectedSkills.map(normalizeValue));
+  const jobSkills = getJobSkills(job);
+
+  return jobSkills.some((skill) => selectedSkillSet.has(normalizeValue(skill)));
+}
+
+/**
+ * Filters jobs using selected experience, workplace, role type, and skills.
+ *
+ * @param {object[]} jobs Jobs array.
+ * @param {{
+ *   selectedExperienceLevels: string[],
+ *   selectedWorkplaces: string[],
+ *   selectedRoleTypes: string[],
+ *   selectedSkills?: string[],
+ * }} filters Selected filter state.
+ * @returns {object[]} Filtered jobs.
+ */
 function filterJobs(
   jobs,
-  { selectedExperienceLevels, selectedWorkplaces, selectedRoleTypes }
+  {
+    selectedExperienceLevels,
+    selectedWorkplaces,
+    selectedRoleTypes,
+    selectedSkills = [],
+  }
 ) {
   return jobs.filter((job) => {
     const experienceLevel = getJobExperienceLevel(job);
@@ -410,14 +539,33 @@ function filterJobs(
       selectedRoleTypes.length === 0 ||
       selectedRoleTypes.includes(roleType);
 
-    return matchesExperienceLevel && matchesWorkplace && matchesRoleType;
+    const matchesSkills = matchesSelectedSkills(job, selectedSkills);
+
+    return (
+      matchesExperienceLevel &&
+      matchesWorkplace &&
+      matchesRoleType &&
+      matchesSkills
+    );
   });
 }
 
+/**
+ * Builds compact summary text for the mobile filters trigger.
+ *
+ * @param {{
+ *   selectedExperienceLevels: string[],
+ *   selectedWorkplaces: string[],
+ *   selectedRoleTypes: string[],
+ *   selectedSkills?: string[],
+ * }} filters Current filter state.
+ * @returns {string} Summary text.
+ */
 function getFilterSummary({
   selectedExperienceLevels,
   selectedWorkplaces,
   selectedRoleTypes,
+  selectedSkills = [],
 }) {
   const parts = [];
 
@@ -433,6 +581,10 @@ function getFilterSummary({
     parts.push(`${selectedRoleTypes.length} role type`);
   }
 
+  if (selectedSkills.length > 0) {
+    parts.push(`${selectedSkills.length} skill`);
+  }
+
   if (parts.length === 0) {
     return "All roles";
   }
@@ -440,10 +592,22 @@ function getFilterSummary({
   return parts.join(" • ");
 }
 
+/**
+ * Builds visible active-filter tags for the jobs page.
+ *
+ * @param {{
+ *   selectedExperienceLevels: string[],
+ *   selectedWorkplaces: string[],
+ *   selectedRoleTypes: string[],
+ *   selectedSkills?: string[],
+ * }} filters Current filter state.
+ * @returns {Array<{group:string,label:string,value:string,type:string}>} Active tags.
+ */
 function getActiveFilterTags({
   selectedExperienceLevels,
   selectedWorkplaces,
   selectedRoleTypes,
+  selectedSkills = [],
 }) {
   const tags = [];
 
@@ -480,18 +644,119 @@ function getActiveFilterTags({
     }
   });
 
+  selectedSkills.forEach((skill) => {
+    tags.push({
+      group: "Skills",
+      label: skill,
+      value: skill,
+      type: "skill",
+    });
+  });
+
   return tags;
+}
+
+/**
+ * Builds visible skill filter options.
+ *
+ * Source priority:
+ * 1. resume/profile skills
+ * 2. most common current job-result skills
+ *
+ * This keeps the UI personalized while still surfacing relevant market skills.
+ *
+ * @param {object[]} jobs Current mapped jobs.
+ * @param {string[]} profileSkills Resume or resolved profile skills.
+ * @param {number} [maxVisible=MAX_VISIBLE_SKILL_OPTIONS] Maximum number of visible skills.
+ * @returns {Array<{label:string,value:string,count:number,source:"profile"|"jobs"}>} Visible skill options.
+ */
+function getAvailableSkillOptions(
+  jobs = [],
+  profileSkills = [],
+  maxVisible = MAX_VISIBLE_SKILL_OPTIONS
+) {
+  const counts = new Map();
+
+  jobs.forEach((job) => {
+    getJobSkills(job).forEach((skill) => {
+      const key = normalizeValue(skill);
+      if (!key) {
+        return;
+      }
+
+      const existing = counts.get(key);
+      if (existing) {
+        existing.count += 1;
+        return;
+      }
+
+      counts.set(key, {
+        label: skill,
+        value: skill,
+        count: 1,
+      });
+    });
+  });
+
+  const normalizedProfileSkills = [];
+  const seenProfile = new Set();
+
+  profileSkills.forEach((skill) => {
+    const text = String(skill || "").trim();
+    const key = normalizeValue(text);
+    if (!text || !key || seenProfile.has(key)) {
+      return;
+    }
+
+    seenProfile.add(key);
+    normalizedProfileSkills.push(text);
+  });
+
+  const prioritized = [];
+
+  normalizedProfileSkills.forEach((skill) => {
+    const key = normalizeValue(skill);
+    const existing = counts.get(key);
+
+    prioritized.push({
+      label: existing?.label || skill,
+      value: existing?.value || skill,
+      count: existing?.count || 0,
+      source: "profile",
+    });
+  });
+
+  const remaining = Array.from(counts.entries())
+    .filter(([key]) => !seenProfile.has(key))
+    .sort((left, right) => {
+      const countDelta = right[1].count - left[1].count;
+      if (countDelta !== 0) {
+        return countDelta;
+      }
+
+      return left[1].label.localeCompare(right[1].label);
+    })
+    .map(([, value]) => ({
+      ...value,
+      source: "jobs",
+    }));
+
+  return [...prioritized, ...remaining].slice(0, maxVisible);
 }
 
 export {
   FILTER_GROUPS,
   DEFAULT_SELECTED_EXPERIENCE_LEVELS,
+  MAX_VISIBLE_SKILL_OPTIONS,
   arraysEqualAsSets,
   toggleSelectedValue,
   getJobExperienceLevel,
   getJobWorkplace,
   inferRoleType,
+  getJobSkills,
+  matchesSelectedSkills,
   filterJobs,
   getFilterSummary,
   getActiveFilterTags,
+  getAvailableSkillOptions,
 };

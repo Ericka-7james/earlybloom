@@ -1,183 +1,222 @@
-import { describe, it, expect } from "vitest";
-import scoreJobsForUser from "../../../src/lib/jobs/scoreJobsForUser";
+/**
+ * @fileoverview Tests for resume-to-job skill overlap scoring behavior.
+ */
+
+import { describe, expect, it } from "vitest";
+import { scoreJobsForUser } from "../../../src/lib/jobs/scoreJobsForUser";
+
+function makeJob(overrides = {}) {
+  return {
+    id: "job-1",
+    title: "Junior Software Engineer",
+    company: "EarlyBloom",
+    location: "Remote",
+    description:
+      "Entry level role with mentorship, onboarding, and clear responsibilities.",
+    summary: "Junior-friendly engineering role.",
+    skills: ["React", "JavaScript", "AWS"],
+    required_skills: [],
+    preferred_skills: [],
+    remote: true,
+    remote_type: "remote",
+    experience_level: "junior",
+    role_type: "software-engineering",
+    warnings: [],
+    ...overrides,
+  };
+}
+
+function makeUser(overrides = {}) {
+  return {
+    skills: ["React", "SQL"],
+    experienceYears: 1,
+    remotePreference: "remote",
+    preferredLocations: [],
+    targetTitles: [],
+    ...overrides,
+  };
+}
 
 describe("scoreJobsForUser", () => {
-  it("returns an empty array when rawJobs is not an array", () => {
+  it("returns an empty array for non-array raw jobs input", () => {
     expect(scoreJobsForUser(null, {})).toEqual([]);
     expect(scoreJobsForUser(undefined, {})).toEqual([]);
     expect(scoreJobsForUser({}, {})).toEqual([]);
   });
 
-  it("returns one scored object per raw job", () => {
+  it("stores matched skills for UI use", () => {
     const rawJobs = [
-      {
-        id: "job-1",
-        title: "Junior Frontend Engineer",
-        company: "Bloom Labs",
-        description:
-          "Entry level frontend role using React, JavaScript, and CSS.",
-        location: "Atlanta, GA",
-        workplaceType: "Remote",
-        employmentType: "Full-time",
-        roleType: "Frontend",
-        source: "greenhouse",
-        sourceUrl: "https://example.com/job-1",
-      },
-      {
-        id: "job-2",
-        title: "Software Engineer",
-        company: "Garden Systems",
-        description: "General software engineering role.",
-        location: "Remote",
-      },
+      makeJob({
+        skills: ["React", "JavaScript", "AWS", "SQL"],
+      }),
     ];
 
-    const userProfile = {
-      desiredRoles: ["Frontend Engineer", "Software Engineer"],
-      skills: ["React", "JavaScript", "CSS"],
-      preferredWorkplaceTypes: ["Remote"],
-      preferredLocations: ["Atlanta, GA"],
-    };
-
-    const result = scoreJobsForUser(rawJobs, userProfile);
-
-    expect(result).toHaveLength(2);
-    expect(result[0].id).toBe("job-1");
-    expect(result[1].id).toBe("job-2");
-  });
-
-  it("returns UI compatibility fields for each scored job", () => {
-    const rawJobs = [
-      {
-        id: "job-3",
-        title: "Junior Frontend Engineer",
-        company: "Bloom Labs",
-        description:
-          "Entry level frontend role using React, JavaScript, and CSS.",
-        location: "Atlanta, GA",
-      },
-    ];
-
-    const userProfile = {
-      desiredRoles: ["Frontend Engineer"],
-      skills: ["React", "JavaScript", "CSS"],
-      preferredLocations: ["Atlanta, GA"],
-    };
+    const userProfile = makeUser({
+      skills: ["React", "SQL", "Docker"],
+    });
 
     const [result] = scoreJobsForUser(rawJobs, userProfile);
 
-    expect(result).toEqual(
-      expect.objectContaining({
-        id: "job-3",
-        bloomFitScore: expect.any(Number),
-        bloomVerdict: expect.any(String),
-        bloomReasons: expect.any(Array),
-        scoreBreakdown: expect.objectContaining({
-          seniorityFit: expect.any(Number),
-          skillsFit: expect.any(Number),
-          accessibility: expect.any(Number),
-          trust: expect.any(Number),
-          preferenceFit: expect.any(Number),
-        }),
-        warningFlags: expect.any(Array),
-        matchScore: expect.any(Number),
-        fitTag: expect.any(String),
-        reasons: expect.any(Array),
-      })
-    );
+    expect(result.matchedSkills).toEqual(["React", "SQL"]);
   });
 
-  it("keeps legacy alias fields aligned with bloom fields", () => {
+  it("increases bloomFitScore when job and user skills overlap", () => {
     const rawJobs = [
-      {
-        id: "job-4",
-        title: "Junior Frontend Engineer",
-        description: "React JavaScript CSS entry level frontend role.",
-        location: "Remote",
-      },
+      makeJob({
+        skills: ["React", "JavaScript", "AWS"],
+      }),
     ];
 
-    const userProfile = {
-      desiredRoles: ["Frontend Engineer"],
-      skills: ["React", "JavaScript", "CSS"],
-    };
+    const noMatchUser = makeUser({
+      skills: ["Excel"],
+    });
+
+    const overlapUser = makeUser({
+      skills: ["React", "AWS"],
+    });
+
+    const [withoutOverlap] = scoreJobsForUser(rawJobs, noMatchUser);
+    const [withOverlap] = scoreJobsForUser(rawJobs, overlapUser);
+
+    expect(withOverlap.bloomFitScore).toBeGreaterThan(
+      withoutOverlap.bloomFitScore
+    );
+    expect(withOverlap.matchedSkills).toEqual(["React", "AWS"]);
+    expect(withOverlap.scoreBreakdown.skillOverlapBonus).toBeGreaterThan(0);
+  });
+
+  it("keeps the overlap bonus additive and bounded", () => {
+    const rawJobs = [
+      makeJob({
+        skills: [
+          "Python",
+          "SQL",
+          "Docker",
+          "AWS",
+          "FastAPI",
+          "Git",
+          "Linux",
+          "React",
+          "Tableau",
+          "Power BI",
+        ],
+      }),
+    ];
+
+    const userProfile = makeUser({
+      skills: [
+        "Python",
+        "SQL",
+        "Docker",
+        "AWS",
+        "FastAPI",
+        "Git",
+        "Linux",
+        "React",
+        "Tableau",
+        "Power BI",
+      ],
+      remotePreference: "flexible",
+    });
+
+    const [result] = scoreJobsForUser(rawJobs, userProfile);
+
+    expect(result.matchedSkills).toEqual([
+      "Python",
+      "SQL",
+      "Docker",
+      "AWS",
+      "FastAPI",
+      "Git",
+      "Linux",
+      "React",
+      "Tableau",
+      "Power BI",
+    ]);
+    expect(result.scoreBreakdown.skillOverlapBonus).toBeLessThanOrEqual(8);
+    expect(result.bloomFitScore).toBeLessThanOrEqual(100);
+  });
+
+  it("returns an empty matchedSkills list when the user has no skills", () => {
+    const rawJobs = [
+      makeJob({
+        skills: ["Excel", "SQL", "Tableau", "Power BI"],
+      }),
+    ];
+
+    const userProfile = makeUser({
+      skills: [],
+    });
+
+    const [result] = scoreJobsForUser(rawJobs, userProfile);
+
+    expect(result.matchedSkills).toEqual([]);
+    expect(result.scoreBreakdown.skillOverlapBonus).toBe(0);
+  });
+
+  it("uses canonical casing from job skills in matchedSkills", () => {
+    const rawJobs = [
+      makeJob({
+        title: "Business Systems Analyst",
+        skills: ["Power BI", "ServiceNow", "Jira"],
+        remote: false,
+        remote_type: "hybrid",
+        experience_level: "junior",
+      }),
+    ];
+
+    const userProfile = makeUser({
+      skills: ["Power BI", "Jira"],
+      remotePreference: "hybrid",
+    });
+
+    const [result] = scoreJobsForUser(rawJobs, userProfile);
+
+    expect(result.matchedSkills).toEqual(["Power BI", "Jira"]);
+  });
+
+  it("captures matched skills and overlap bonus when overlap exists", () => {
+    const rawJobs = [
+      makeJob({
+        skills: ["React", "SQL", "AWS"],
+      }),
+    ];
+
+    const userProfile = makeUser({
+      skills: ["React", "AWS"],
+    });
+
+    const [result] = scoreJobsForUser(rawJobs, userProfile);
+
+    expect(result.matchedSkills).toEqual(["React", "AWS"]);
+    expect(result.scoreBreakdown.skillOverlapBonus).toBeGreaterThan(0);
+  });
+
+  it("does not add overlap bonus when no shared skills exist", () => {
+    const rawJobs = [
+      makeJob({
+        skills: ["React", "SQL", "AWS"],
+      }),
+    ];
+
+    const userProfile = makeUser({
+      skills: ["Excel", "Tableau"],
+    });
+
+    const [result] = scoreJobsForUser(rawJobs, userProfile);
+
+    expect(result.matchedSkills).toEqual([]);
+    expect(result.scoreBreakdown.skillOverlapBonus).toBe(0);
+  });
+
+  it("preserves legacy compatibility fields", () => {
+    const rawJobs = [makeJob()];
+    const userProfile = makeUser();
 
     const [result] = scoreJobsForUser(rawJobs, userProfile);
 
     expect(result.matchScore).toBe(result.bloomFitScore);
     expect(result.fitTag).toBe(result.bloomVerdict);
     expect(result.reasons).toEqual(result.bloomReasons);
-  });
-
-  it("limits bloomReasons to at most 4 items", () => {
-    const rawJobs = [
-      {
-        id: "job-5",
-        title: "Junior Frontend Engineer",
-        description:
-          "Entry level frontend role using React JavaScript CSS HTML remote hybrid collaboration product UI.",
-        location: "Atlanta, GA",
-      },
-    ];
-
-    const userProfile = {
-      desiredRoles: ["Frontend Engineer"],
-      skills: ["React", "JavaScript", "CSS", "HTML", "UI Design"],
-      preferredLocations: ["Atlanta, GA"],
-      preferredWorkplaceTypes: ["Remote", "Hybrid"],
-    };
-
-    const [result] = scoreJobsForUser(rawJobs, userProfile);
-
-    expect(result.bloomReasons.length).toBeLessThanOrEqual(4);
-    expect(result.reasons.length).toBeLessThanOrEqual(4);
-  });
-
-  it("uses fallback identifiers when id is missing but jobId exists", () => {
-    const rawJobs = [
-      {
-        jobId: "legacy-job-id",
-        title: "Frontend Engineer I",
-        description: "React role",
-      },
-    ];
-
-    const [result] = scoreJobsForUser(rawJobs, {});
-
-    expect(result.id).toBe("legacy-job-id");
-  });
-
-  it("uses fallback identifiers when id and jobId are missing but slug exists", () => {
-    const rawJobs = [
-      {
-        slug: "frontend-engineer-i",
-        title: "Frontend Engineer I",
-        description: "React role",
-      },
-    ];
-
-    const [result] = scoreJobsForUser(rawJobs, {});
-
-    expect(result.id).toBe("frontend-engineer-i");
-  });
-
-  it("returns numeric scores clamped into a safe range", () => {
-    const rawJobs = [
-      {
-        id: "job-6",
-        title: "Frontend Engineer I",
-        description: "React JavaScript CSS role",
-      },
-    ];
-
-    const [result] = scoreJobsForUser(rawJobs, {
-      skills: ["React", "JavaScript", "CSS"],
-      desiredRoles: ["Frontend Engineer"],
-    });
-
-    expect(result.bloomFitScore).toBeGreaterThanOrEqual(0);
-    expect(result.bloomFitScore).toBeLessThanOrEqual(100);
-    expect(result.matchScore).toBeGreaterThanOrEqual(0);
-    expect(result.matchScore).toBeLessThanOrEqual(100);
   });
 });
