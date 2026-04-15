@@ -9,12 +9,6 @@ import BloombugCareerGarden from "../assets/bloombug/BloombugCareerGarden.png";
  * for the product. It introduces the mission, shows the mascot, and
  * gives structure that future product pages can visually follow.
  *
- * Sections included:
- * - hero banner
- * - mission and value proposition
- * - simple "how it works" overview
- * - future tools preview
- *
  * @returns {JSX.Element} The home page content.
  */
 function Home() {
@@ -23,7 +17,7 @@ function Home() {
       <section className="hero container section-pad">
         <div className="hero__content">
           <div className="eyebrow-pill">
-            Mobile-first job matching for early careers
+            Mobile-first job matching for people building careers in tech
           </div>
 
           <h1 className="hero__title">
@@ -31,9 +25,10 @@ function Home() {
           </h1>
 
           <p className="hero__description">
-            EarlyBloom helps entry-level and junior candidates cut through fake
-            “entry-level” listings, focus on realistic opportunities, and build
-            a cleaner job search strategy with less noise.
+            EarlyBloom is tailored for people trying to break into or grow
+            within the tech field, including software engineering, IT, UX, data,
+            and related paths. It is built to make the job search feel clearer,
+            more realistic, and easier to manage.
           </p>
 
           <div className="hero__actions">
@@ -47,8 +42,8 @@ function Home() {
           </div>
 
           <div className="hero__tags" aria-label="Product highlights">
-            <span className="tag-chip">Real fit scoring</span>
-            <span className="tag-chip">Junior-friendly filtering</span>
+            <span className="tag-chip">Fit scoring</span>
+            <span className="tag-chip">Early-career filtering</span>
             <span className="tag-chip">Application tracking</span>
           </div>
         </div>
@@ -67,12 +62,14 @@ function Home() {
       <section id="mission" className="container section-pad">
         <div className="section-card">
           <p className="section-label">Mission</p>
-          <h2 className="section-title">Entry-level should mean entry-level.</h2>
+          <h2 className="section-title">
+            Early-career tech roles should feel easier to find.
+          </h2>
           <p className="section-copy">
-            Too many job boards flood early-career candidates with listings that
-            say “junior” but ask for senior-level expectations. EarlyBloom is
-            built to filter the weeds, surface realistic matches, and make the
-            search feel less chaotic.
+            Too many job boards overwhelm people in the tech field with roles
+            that look entry-level on the surface but ask for far more than they
+            should. EarlyBloom is designed to surface more realistic
+            opportunities and make the search feel less chaotic.
           </p>
         </div>
       </section>
@@ -80,7 +77,7 @@ function Home() {
       <section id="how-it-works" className="container section-pad">
         <div className="section-heading">
           <p className="section-label">How it works</p>
-          <h2 className="section-title">A simpler path through the job mess.</h2>
+          <h2 className="section-title">A simpler path through the job search.</h2>
         </div>
 
         <div className="feature-grid">
@@ -88,8 +85,7 @@ function Home() {
             <div className="feature-card__number">01</div>
             <h3 className="feature-card__title">Read the resume</h3>
             <p className="feature-card__copy">
-              Parse resume details to understand skills, experience, and role
-              fit.
+              Parse experience, skills, and tools to better understand role fit.
             </p>
           </article>
 
@@ -97,8 +93,8 @@ function Home() {
             <div className="feature-card__number">02</div>
             <h3 className="feature-card__title">Score the listings</h3>
             <p className="feature-card__copy">
-              Flag hidden seniority signals and prioritize roles that actually
-              match.
+              Highlight roles that better match early-career candidates and flag
+              listings with misleading expectations.
             </p>
           </article>
 
@@ -106,8 +102,8 @@ function Home() {
             <div className="feature-card__number">03</div>
             <h3 className="feature-card__title">Track progress</h3>
             <p className="feature-card__copy">
-              Save roles, manage applications, and keep your job search
-              organized.
+              Save roles, manage applications, and keep your search organized in
+              one place.
             </p>
           </article>
         </div>
@@ -125,16 +121,18 @@ function Home() {
 
           <div className="callout-card__content">
             <p className="section-label">What is coming next</p>
-            <h2 className="section-title">A growing toolkit for job seekers.</h2>
+            <h2 className="section-title">
+              Built for tech careers now, with room to grow over time.
+            </h2>
             <p className="section-copy">
-              EarlyBloom is growing into a cleaner, kinder way to search for
-              work. The goal is to help people spot realistic opportunities,
-              understand why a role fits, and stay organized without drowning in
-              noise.
+              EarlyBloom is currently focused on helping people navigate the
+              tech field more clearly, especially in early-career spaces. Over
+              time, it can grow into a broader toolkit with more support,
+              features, and pathways if that becomes useful.
             </p>
 
             <ul className="soft-list" aria-label="Upcoming features">
-              <li>Jobs page with fit labels and filters</li>
+              <li>Job search with fit labels and filters</li>
               <li>Resume upload and skill extraction</li>
               <li>Application tracker with status updates</li>
             </ul>
