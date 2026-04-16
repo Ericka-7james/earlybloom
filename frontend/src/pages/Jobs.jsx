@@ -21,7 +21,6 @@ import { useNavigate } from "react-router-dom";
 
 import JobCard from "../components/jobs/JobCard.jsx";
 import JobsFiltersPanel from "../components/jobs/JobsFiltersPanel.jsx";
-import JobsActiveFilters from "../components/jobs/JobsActiveFilters.jsx";
 import JobDetailsModal from "../components/jobs/JobDetailsModal.jsx";
 import ResumeUploadModal from "../components/jobs/ResumeUploadModal.jsx";
 import CommonModal from "../components/common/CommonModal.jsx";
@@ -457,14 +456,14 @@ function Jobs() {
     selectedRoleTypes.length > 0 ||
     selectedSkills.length > 0;
 
-  const isUsingDefaultExperiencePreset = useMemo(() => {
+  useMemo(() => {
     return arraysEqualAsSets(
       selectedExperienceLevels,
       DEFAULT_SELECTED_EXPERIENCE_LEVELS
     );
   }, [selectedExperienceLevels]);
 
-  const activeFilterTags = useMemo(() => {
+  useMemo(() => {
     return getActiveFilterTags({
       selectedExperienceLevels,
       selectedWorkplaces,
@@ -569,35 +568,6 @@ function Jobs() {
     setSelectedWorkplaces([]);
     setSelectedRoleTypes([]);
     setSelectedSkills([]);
-  }, []);
-
-  const removeActiveFilterTag = useCallback((tag) => {
-    if (tag.type === "experience") {
-      setSelectedExperienceLevels((currentValues) =>
-        currentValues.filter((value) => value !== tag.value)
-      );
-      return;
-    }
-
-    if (tag.type === "workplace") {
-      setSelectedWorkplaces((currentValues) =>
-        currentValues.filter((value) => value !== tag.value)
-      );
-      return;
-    }
-
-    if (tag.type === "role") {
-      setSelectedRoleTypes((currentValues) =>
-        currentValues.filter((value) => value !== tag.value)
-      );
-      return;
-    }
-
-    if (tag.type === "skill") {
-      setSelectedSkills((currentValues) =>
-        currentValues.filter((value) => value !== tag.value)
-      );
-    }
   }, []);
 
   const updatePendingAction = useCallback((jobId, nextState) => {
@@ -798,22 +768,24 @@ function Jobs() {
               ) : null}
             </div>
 
-            <button
-              type="button"
-              className="jobs-hero__upload"
-              onClick={handleRequestResumeUpload}
-            >
-              <div className="jobs-hero__upload-box">
-                <p className="jobs-hero__upload-title">
-                  {visibleResumeFile ? "Resume uploaded" : "Upload your resume"}
-                </p>
-                <p className="jobs-hero__upload-subtext">
-                  {visibleResumeFile
-                    ? visibleResumeFile.name
-                    : "PDF only • click to upload"}
-                </p>
-              </div>
-            </button>
+            <div className="jobs-hero__aside">
+              <button
+                type="button"
+                className="jobs-hero__upload"
+                onClick={handleRequestResumeUpload}
+              >
+                <div className="jobs-hero__upload-box">
+                  <p className="jobs-hero__upload-title">
+                    {visibleResumeFile ? "Resume uploaded" : "Upload your resume"}
+                  </p>
+                  <p className="jobs-hero__upload-subtext">
+                    {visibleResumeFile
+                      ? visibleResumeFile.name
+                      : "PDF only • click to upload"}
+                  </p>
+                </div>
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -853,16 +825,6 @@ function Jobs() {
                 </span>
               </button>
             </div>
-
-            <JobsActiveFilters
-              hasActiveFilters={hasActiveFilters}
-              isUsingDefaultExperiencePreset={isUsingDefaultExperiencePreset}
-              selectedWorkplaces={selectedWorkplaces}
-              selectedRoleTypes={selectedRoleTypes}
-              activeFilterTags={activeFilterTags}
-              onClearAll={clearAllFilters}
-              onRemoveTag={removeActiveFilterTag}
-            />
 
             <div className="jobs-results__header">
               <div>
