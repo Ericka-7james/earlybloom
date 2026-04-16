@@ -126,6 +126,37 @@ SKILL_ALIASES = {
     "figma": "figma",
     "terraform": "terraform",
     "jenkins": "jenkins",
+    "powerbi": "power bi",
+    "power bi": "power bi",
+    "servicenow": "servicenow",
+}
+
+CANONICAL_SKILL_LABELS = {
+    "javascript": "JavaScript",
+    "typescript": "TypeScript",
+    "react": "React",
+    "node.js": "Node.js",
+    "python": "Python",
+    "postgresql": "PostgreSQL",
+    "aws": "AWS",
+    "html": "HTML",
+    "css": "CSS",
+    "fastapi": "FastAPI",
+    "rest": "REST",
+    "sql": "SQL",
+    "docker": "Docker",
+    "git": "Git",
+    "github": "GitHub",
+    "pandas": "Pandas",
+    "numpy": "NumPy",
+    "java": "Java",
+    "spring boot": "Spring Boot",
+    "supabase": "Supabase",
+    "figma": "Figma",
+    "terraform": "Terraform",
+    "jenkins": "Jenkins",
+    "power bi": "Power BI",
+    "servicenow": "ServiceNow",
 }
 
 KNOWN_SKILLS = sorted(set(SKILL_ALIASES.values()))
@@ -153,12 +184,10 @@ def preprocess_resume_text(text: str) -> str:
     text = normalize_whitespace(text)
     text = HEADER_SPLIT_REGEX.sub("\n", text)
 
-    # Add clean line breaks before headings
     for heading in sorted(SECTION_HEADING_CANONICAL, key=len, reverse=True):
         pattern = re.compile(rf"\s+({re.escape(heading)})\b", re.IGNORECASE)
         text = pattern.sub(r"\n\1", text)
 
-    # Add clean line breaks after headings
     for heading in sorted(SECTION_HEADING_CANONICAL, key=len, reverse=True):
         pattern = re.compile(rf"\b({re.escape(heading)})\s+", re.IGNORECASE)
         text = pattern.sub(r"\1\n", text)
@@ -232,14 +261,71 @@ def normalize_skill_token(token: str) -> str | None:
     return None
 
 
+def canonicalize_skill_label(skill: str) -> str:
+    normalized = normalize_skill_token(skill) or skill.strip().lower()
+    return CANONICAL_SKILL_LABELS.get(normalized, skill.strip())
+
+
+def _extract_skills_in_order(text: str) -> List[str]:
+    if not text:
+        return []
+
+    ordered_matches: List[tuple[int, str]] = []
+
+    for alias, canonical in SKILL_ALIASES.items():
+        pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])", re.IGNORECASE)
+        for match in pattern.finditer(text):
+            ordered_matches.append((match.start(), canonical))
+
+    ordered_matches.sort(key=lambda item: item[0])
+
+    return dedupe_preserve_order(
+        canonicalize_skill_label(skill_name)
+        for _, skill_name in ordered_matches
+    )
+
+
+def _skill_present_in_text(skill: str, text: str) -> bool:
+    if not skill or not text:
+        return False
+
+    canonical = normalize_skill_token(skill) or skill.strip().lower()
+    alias_candidates = {canonical}
+
+    for alias, alias_canonical in SKILL_ALIASES.items():
+        if alias_canonical == canonical:
+            alias_candidates.add(alias)
+
+    for candidate in alias_candidates:
+        pattern = re.compile(
+            rf"(?<![A-Za-z0-9]){re.escape(candidate)}(?![A-Za-z0-9])",
+            re.IGNORECASE,
+        )
+        if pattern.search(text):
+            return True
+
+    return False
+
+
 def extract_skills(raw_text: str, skill_lines: Sequence[str]) -> ResumeSkills:
     focused_text = "\n".join(skill_lines) if skill_lines else ""
-    merged_text = f"{focused_text}\n{raw_text}".strip()
 
-    normalized = extract_skills_from_text(merged_text)
+    sanitized_raw_text = URL_REGEX.sub(" ", raw_text)
+    sanitized_focused_text = URL_REGEX.sub(" ", focused_text)
 
+    merged_text = f"{sanitized_focused_text}\n{sanitized_raw_text}".strip()
+
+    taxonomy_skills = [
+        canonicalize_skill_label(skill)
+        for skill in extract_skills_from_text(merged_text)
+    ]
+    ordered_line_skills = _extract_skills_in_order(sanitized_focused_text)
+    ordered_raw_skills = _extract_skills_in_order(sanitized_raw_text)
+
+    normalized = dedupe_preserve_order(
+        [*ordered_line_skills, *ordered_raw_skills, *taxonomy_skills]
+    )
     raw = list(normalized)
-
     categorized = categorize_skills(normalized)
 
     return ResumeSkills(
@@ -313,7 +399,6 @@ def infer_name(header_lines: Sequence[str]) -> str | None:
         if not candidate or re.search(r"\d", candidate):
             continue
 
-        # If ends with City, ST remove only that tail
         location_match = location_pattern.search(candidate)
         if location_match:
             city_start = location_match.start()
@@ -329,6 +414,7 @@ def infer_name(header_lines: Sequence[str]) -> str | None:
             return " ".join(words)
 
     return None
+
 
 def normalize_city_from_trailing_words(words: Sequence[str]) -> str | None:
     cleaned = [word.strip() for word in words if word.strip()]
@@ -538,11 +624,12 @@ def parse_experience(
                 bullet_points.append(clean_bullet(line))
 
         bullet_points = dedupe_preserve_order(bullet_points)
+        bullet_text = "\n".join(bullet_points)
 
         matched_skills = [
-            skill
+            canonicalize_skill_label(skill)
             for skill in normalized_skills
-            if any(skill in bullet.lower() for bullet in bullet_points)
+            if _skill_present_in_text(skill, bullet_text)
         ]
 
         if role or company or bullet_points:
@@ -575,12 +662,12 @@ def parse_projects(
         title = chunk[0]
         description_lines = [clean_bullet(line) for line in chunk[1:]]
         description = " ".join(description_lines).strip() or None
+        searchable_text = f"{title}\n{description or ''}"
 
         tech_stack = [
-            skill
+            canonicalize_skill_label(skill)
             for skill in normalized_skills
-            if title.lower().find(skill) >= 0
-            or (description and skill in description.lower())
+            if _skill_present_in_text(skill, searchable_text)
         ]
 
         links = extract_links(" ".join(chunk))
@@ -683,7 +770,7 @@ def extract_year(value: str | None) -> int | None:
 
 
 def infer_primary_role_signals(normalized_skills: Sequence[str]) -> List[str]:
-    skill_set = set(normalized_skills)
+    skill_set = {normalize_skill_token(skill) or skill.lower() for skill in normalized_skills}
     matched_roles: List[str] = []
 
     for role_name, keywords in ROLE_SIGNAL_KEYWORDS.items():
@@ -711,13 +798,13 @@ def compute_confidence(parsed_resume: ParsedResume) -> float:
         score += 0.20
     if parsed_resume.projects:
         score += 0.10
-        
+
     skill_count = len(parsed_resume.skills.normalized)
 
     if skill_count >= 1:
-        score += 0.08
+        score += 0.15
     if skill_count >= 5:
-        score += 0.05
+        score += 0.03
     if skill_count >= 10:
         score += 0.02
 

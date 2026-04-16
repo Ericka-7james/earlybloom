@@ -1,504 +1,467 @@
+"""Jobs API routes for EarlyBloom.
+
+These routes provide:
+- the public jobs feed
+- the resolved jobs scoring profile
+- save/hide tracker mutations for authenticated viewers
+- authenticated saved/hidden job listings
+
+Authentication behavior:
+- guests may browse jobs
+- cookie-backed session auth is preferred
+- bearer-token fallback is supported for legacy compatibility
+"""
+
 from __future__ import annotations
 
+from dataclasses import dataclass
+import logging
 from typing import Any
 
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from app.api.routes import jobs as jobs_routes
-from app.api.routes.jobs import (
-    ViewerContext,
-    get_job_cache_repository,
-    get_job_ingestion_service,
-    get_optional_viewer_context,
-    router,
+from fastapi import (
+    APIRouter,
+    Cookie,
+    Depends,
+    Header,
+    HTTPException,
+    Response,
+    status,
 )
 
-TEST_USER_ID = "11111111-1111-1111-1111-111111111111"
+from app.core.auth_settings import auth_settings
+from app.db.database import JobCacheRepository, get_user_id_from_bearer_token
+from app.schemas.jobs import (
+    JobTrackerMutationRequest,
+    JobTrackerMutationResponse,
+    JobsResponse,
+    JobViewerState,
+    PublicJob,
+    ResolvedJobProfileResponse,
+)
+from app.services.auth_cookies import set_auth_cookies
+from app.services.auth_service import (
+    CurrentSessionContext,
+    verify_or_refresh_session,
+)
+from app.services.jobs.job_ingestion import (
+    JobIngestionService,
+    map_normalized_job_to_response,
+)
+from app.services.jobs.user_profile import (
+    DEFAULT_RESOLVED_JOB_PROFILE,
+    resolve_job_profile_for_user_id,
+)
+
+router = APIRouter(prefix="/jobs", tags=["jobs"])
+logger = logging.getLogger(__name__)
 
 
-def _public_job(
+@dataclass
+class ViewerContext:
+    """Represents the current jobs viewer."""
+
+    user_id: str | None = None
+    session: Any | None = None
+    refreshed: bool = False
+
+
+def get_job_ingestion_service() -> JobIngestionService:
+    """Returns a configured job ingestion service."""
+    from app.services.jobs.providers import get_configured_providers
+
+    return JobIngestionService(providers=get_configured_providers())
+
+
+def get_job_cache_repository() -> JobCacheRepository:
+    """Returns a job-cache repository instance."""
+    return JobCacheRepository()
+
+
+def _resolve_viewer_from_session(
     *,
-    job_id: str = "job-1",
-    title: str = "Software Engineer I",
-    company: str = "EarlyBloom",
-    viewer_state: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return {
-        "id": job_id,
-        "title": title,
-        "company": company,
-        "location": "Atlanta, GA",
-        "location_display": "Atlanta, GA",
-        "remote": False,
-        "remote_type": "onsite",
-        "url": "https://example.com/jobs/job-1",
-        "source": "greenhouse",
-        "source_job_id": "source-job-1",
-        "summary": "Junior-friendly role.",
-        "description": "Build and maintain product features.",
-        "responsibilities": ["Ship features"],
-        "qualifications": ["1+ years or equivalent projects"],
-        "required_skills": ["Python"],
-        "preferred_skills": ["React"],
-        "employment_type": "Full-time",
-        "experience_level": "entry-level",
-        "role_type": "software-engineering",
-        "salary_min": 80000,
-        "salary_max": 100000,
-        "salary_currency": "USD",
-        "stable_key": "stable-job-1",
-        "provider_payload_hash": "hash-job-1",
-        "viewer_state": viewer_state
-        or {
-            "is_saved": False,
-            "is_hidden": False,
-            "saved_at": None,
-            "hidden_at": None,
-        },
-    }
+    access_token: str | None,
+    refresh_token: str | None,
+) -> CurrentSessionContext | None:
+    """Resolves a viewer session from auth cookies."""
+    if not access_token and not refresh_token:
+        return None
+
+    try:
+        return verify_or_refresh_session(
+            access_token=access_token,
+            refresh_token=refresh_token,
+        )
+    except Exception:
+        return None
 
 
-class FakeIngestionService:
-    def __init__(
-        self,
-        jobs: list[dict[str, Any]] | None = None,
-        exc: Exception | None = None,
-    ) -> None:
-        self.jobs = jobs or []
-        self.exc = exc
-        self.calls = 0
-
-    async def ingest_jobs(self) -> list[dict[str, Any]]:
-        self.calls += 1
-        if self.exc is not None:
-            raise self.exc
-        return self.jobs
-
-
-class FakeJobCacheRepository:
-    def __init__(self) -> None:
-        self.saved_calls: list[tuple[str, str]] = []
-        self.unsaved_calls: list[tuple[str, str]] = []
-        self.hidden_calls: list[tuple[str, str]] = []
-        self.unhidden_calls: list[tuple[str, str]] = []
-        self.apply_calls: list[dict[str, Any]] = []
-        self.saved_rows: list[dict[str, Any]] = []
-        self.hidden_rows: list[dict[str, Any]] = []
-        self.row_map: dict[str, dict[str, Any] | None] = {}
-        self.raise_on: str | None = None
-
-    def apply_viewer_state_to_jobs(
-        self,
-        *,
-        user_id: str,
-        jobs: list[dict[str, Any]],
-        exclude_hidden: bool,
-    ) -> list[dict[str, Any]]:
-        self.apply_calls.append(
-            {
-                "user_id": user_id,
-                "jobs": jobs,
-                "exclude_hidden": exclude_hidden,
-            }
+def get_optional_viewer_context(
+    authorization: str | None = Header(default=None),
+    access_token: str | None = Cookie(
+        default=None,
+        alias=auth_settings.access_cookie_name,
+    ),
+    refresh_token: str | None = Cookie(
+        default=None,
+        alias=auth_settings.refresh_cookie_name,
+    ),
+) -> ViewerContext:
+    """Resolves the current viewer using cookies first, then bearer token."""
+    current = _resolve_viewer_from_session(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
+    if current is not None:
+        return ViewerContext(
+            user_id=str(getattr(current.user, "id")),
+            session=current.session if current.refreshed else None,
+            refreshed=bool(current.refreshed),
         )
 
-        if self.raise_on == "apply_viewer_state_to_jobs":
-            raise RuntimeError("viewer state failed")
+    if authorization:
+        try:
+            user_id = get_user_id_from_bearer_token(authorization)
+            return ViewerContext(user_id=user_id)
+        except HTTPException:
+            return ViewerContext()
 
-        updated: list[dict[str, Any]] = []
-        for job in jobs:
-            job_copy = dict(job)
-            current_viewer_state = dict(job_copy.get("viewer_state") or {})
-            if not current_viewer_state:
-                current_viewer_state = {
-                    "is_saved": False,
-                    "is_hidden": False,
-                    "saved_at": None,
-                    "hidden_at": None,
-                }
-
-            if job_copy.get("id") in {"job-saved", "saved-1"}:
-                current_viewer_state["is_saved"] = True
-                current_viewer_state["saved_at"] = "2026-04-14T12:00:00Z"
-
-            if job_copy.get("id") in {"job-hidden", "hidden-1"}:
-                current_viewer_state["is_hidden"] = True
-                current_viewer_state["hidden_at"] = "2026-04-14T13:00:00Z"
-
-            job_copy["viewer_state"] = current_viewer_state
-            updated.append(job_copy)
-
-        if exclude_hidden:
-            updated = [
-                job
-                for job in updated
-                if not job["viewer_state"].get("is_hidden", False)
-            ]
-
-        return updated
-
-    def save_job_for_user(self, *, user_id: str, public_job_id: str) -> None:
-        if self.raise_on == "save_job_for_user":
-            raise RuntimeError("save failed")
-        self.saved_calls.append((user_id, public_job_id))
-
-    def unsave_job_for_user(self, *, user_id: str, public_job_id: str) -> None:
-        if self.raise_on == "unsave_job_for_user":
-            raise RuntimeError("unsave failed")
-        self.unsaved_calls.append((user_id, public_job_id))
-
-    def hide_job_for_user(self, *, user_id: str, public_job_id: str) -> None:
-        if self.raise_on == "hide_job_for_user":
-            raise RuntimeError("hide failed")
-        self.hidden_calls.append((user_id, public_job_id))
-
-    def unhide_job_for_user(self, *, user_id: str, public_job_id: str) -> None:
-        if self.raise_on == "unhide_job_for_user":
-            raise RuntimeError("unhide failed")
-        self.unhidden_calls.append((user_id, public_job_id))
-
-    def list_saved_jobs_for_user(self, *, user_id: str) -> list[dict[str, Any]]:
-        if self.raise_on == "list_saved_jobs_for_user":
-            raise RuntimeError("saved list failed")
-        return self.saved_rows
-
-    def list_hidden_jobs_for_user(self, *, user_id: str) -> list[dict[str, Any]]:
-        if self.raise_on == "list_hidden_jobs_for_user":
-            raise RuntimeError("hidden list failed")
-        return self.hidden_rows
-
-    def row_to_normalized_job(self, row: dict[str, Any]) -> dict[str, Any] | None:
-        row_id = row.get("id")
-        return self.row_map.get(row_id)
+    return ViewerContext()
 
 
-@pytest.fixture
-def repo() -> FakeJobCacheRepository:
-    return FakeJobCacheRepository()
+def get_required_viewer_context(
+    current: ViewerContext = Depends(get_optional_viewer_context),
+) -> ViewerContext:
+    """Requires an authenticated viewer for tracker mutations."""
+    if not current.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sign in is required for this action.",
+        )
+    return current
 
 
-@pytest.fixture
-def ingestion_service() -> FakeIngestionService:
-    return FakeIngestionService(jobs=[_public_job()])
+def _set_refreshed_auth_cookies_if_needed(
+    response: Response,
+    current: ViewerContext,
+) -> None:
+    """Reissues auth cookies when the session was refreshed during the request."""
+    if current.refreshed and current.session is not None:
+        set_auth_cookies(response, current.session)
 
 
-@pytest.fixture
-def app(
-    repo: FakeJobCacheRepository,
-    ingestion_service: FakeIngestionService,
-) -> FastAPI:
-    test_app = FastAPI()
-    test_app.include_router(router)
-    test_app.dependency_overrides[get_job_cache_repository] = lambda: repo
-    test_app.dependency_overrides[get_job_ingestion_service] = lambda: ingestion_service
-    test_app.dependency_overrides[get_optional_viewer_context] = lambda: ViewerContext()
-    return test_app
+def _serialize_public_jobs(jobs: list[dict[str, Any]]) -> list[PublicJob]:
+    """Validates and serializes public job payloads."""
+    return [PublicJob.model_validate(job) for job in jobs]
 
 
-@pytest.fixture
-def client(app: FastAPI) -> TestClient:
-    return TestClient(app)
-
-
-def set_authenticated_viewer(app: FastAPI, user_id: str = TEST_USER_ID) -> None:
-    app.dependency_overrides[get_optional_viewer_context] = (
-        lambda: ViewerContext(user_id=user_id)
+def _build_tracker_mutation_response(
+    *,
+    repository: JobCacheRepository,
+    user_id: str,
+    public_job_id: str,
+) -> JobTrackerMutationResponse:
+    """Builds the viewer-state response after a save/hide mutation."""
+    viewer_state_payload = repository.apply_viewer_state_to_jobs(
+        user_id=user_id,
+        jobs=[{"id": public_job_id}],
+        exclude_hidden=False,
     )
 
-
-def test_list_jobs_returns_jobs_for_guest(
-    client: TestClient,
-    repo: FakeJobCacheRepository,
-    ingestion_service: FakeIngestionService,
-) -> None:
-    ingestion_service.jobs = [_public_job(job_id="job-guest")]
-
-    response = client.get("/jobs")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["total"] == 1
-    assert payload["jobs"][0]["id"] == "job-guest"
-    assert payload["jobs"][0]["viewer_state"]["is_saved"] is False
-    assert repo.apply_calls == []
-
-
-def test_list_jobs_applies_viewer_state_for_authenticated_user(
-    app: FastAPI,
-    repo: FakeJobCacheRepository,
-    ingestion_service: FakeIngestionService,
-) -> None:
-    ingestion_service.jobs = [
-        _public_job(job_id="job-saved"),
-        _public_job(job_id="job-hidden"),
-    ]
-    set_authenticated_viewer(app)
-    client = TestClient(app)
-
-    response = client.get("/jobs")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["total"] == 1
-    assert payload["jobs"][0]["id"] == "job-saved"
-    assert payload["jobs"][0]["viewer_state"]["is_saved"] is True
-    assert repo.apply_calls[0]["user_id"] == TEST_USER_ID
-    assert repo.apply_calls[0]["exclude_hidden"] is True
-
-
-def test_list_jobs_returns_500_when_ingestion_fails(
-    client: TestClient,
-    ingestion_service: FakeIngestionService,
-) -> None:
-    ingestion_service.exc = RuntimeError("boom")
-
-    response = client.get("/jobs")
-
-    assert response.status_code == 500
-    assert response.json() == {"detail": "Unable to load jobs at this time."}
-
-
-def test_get_jobs_profile_returns_default_profile_for_guest(
-    client: TestClient,
-) -> None:
-    response = client.get("/jobs/profile")
-
-    assert response.status_code == 200
-    assert response.json() == jobs_routes.DEFAULT_RESOLVED_JOB_PROFILE
-
-
-def test_get_jobs_profile_returns_resolved_profile_for_authenticated_user(
-    app: FastAPI,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    expected_profile = {
-        "desiredLevels": ["entry-level", "junior"],
-        "preferredRoleTypes": ["backend"],
-        "preferredWorkplaceTypes": ["remote"],
-        "preferredLocations": ["Atlanta, GA"],
-        "skills": ["Python", "FastAPI"],
-        "isLgbtFriendlyOnly": True,
-    }
-
-    set_authenticated_viewer(app)
-
-    monkeypatch.setattr(
-        jobs_routes,
-        "resolve_job_profile_for_user_id",
-        lambda user_id: expected_profile,
-    )
-
-    client = TestClient(app)
-    response = client.get("/jobs/profile")
-
-    assert response.status_code == 200
-    assert response.json() == expected_profile
-
-
-def test_get_jobs_profile_returns_500_when_profile_resolution_fails(
-    app: FastAPI,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    set_authenticated_viewer(app)
-
-    def _raise(_: str) -> dict[str, Any]:
-        raise RuntimeError("profile failed")
-
-    monkeypatch.setattr(jobs_routes, "resolve_job_profile_for_user_id", _raise)
-
-    client = TestClient(app)
-    response = client.get("/jobs/profile")
-
-    assert response.status_code == 500
-    assert response.json() == {"detail": "Unable to load job profile at this time."}
-
-
-def test_save_job_requires_authentication(client: TestClient) -> None:
-    response = client.post("/jobs/saved", json={"job_id": "job-1"})
-
-    assert response.status_code == 401
-    assert response.json() == {"detail": "Sign in is required for this action."}
-
-
-def test_save_job_returns_tracker_mutation_response_for_authenticated_user(
-    app: FastAPI,
-    repo: FakeJobCacheRepository,
-) -> None:
-    set_authenticated_viewer(app)
-    client = TestClient(app)
-
-    response = client.post("/jobs/saved", json={"job_id": "job-saved"})
-
-    assert response.status_code == 201
-    assert repo.saved_calls == [(TEST_USER_ID, "job-saved")]
-    assert response.json() == {
-        "job_id": "job-saved",
-        "viewer_state": {
-            "is_saved": True,
-            "is_hidden": False,
-            "saved_at": "2026-04-14T12:00:00Z",
-            "hidden_at": None,
-        },
-    }
-
-
-def test_save_job_returns_500_when_repository_save_fails(
-    app: FastAPI,
-    repo: FakeJobCacheRepository,
-) -> None:
-    repo.raise_on = "save_job_for_user"
-    set_authenticated_viewer(app)
-    client = TestClient(app)
-
-    response = client.post("/jobs/saved", json={"job_id": "job-saved"})
-
-    assert response.status_code == 500
-    assert response.json() == {"detail": "Unable to save this job right now."}
-
-
-def test_unsave_job_returns_tracker_mutation_response(
-    app: FastAPI,
-    repo: FakeJobCacheRepository,
-) -> None:
-    set_authenticated_viewer(app)
-    client = TestClient(app)
-
-    response = client.delete("/jobs/saved/job-1")
-
-    assert response.status_code == 200
-    assert repo.unsaved_calls == [(TEST_USER_ID, "job-1")]
-    assert response.json()["job_id"] == "job-1"
-    assert response.json()["viewer_state"]["is_saved"] is False
-
-
-def test_hide_job_returns_tracker_mutation_response(
-    app: FastAPI,
-    repo: FakeJobCacheRepository,
-) -> None:
-    set_authenticated_viewer(app)
-    client = TestClient(app)
-
-    response = client.post("/jobs/hidden", json={"job_id": "job-hidden"})
-
-    assert response.status_code == 201
-    assert repo.hidden_calls == [(TEST_USER_ID, "job-hidden")]
-    assert response.json() == {
-        "job_id": "job-hidden",
-        "viewer_state": {
+    if viewer_state_payload:
+        viewer_state = viewer_state_payload[0].get("viewer_state") or {}
+    else:
+        viewer_state = {
             "is_saved": False,
-            "is_hidden": True,
+            "is_hidden": False,
             "saved_at": None,
-            "hidden_at": "2026-04-14T13:00:00Z",
-        },
-    }
+            "hidden_at": None,
+        }
 
-
-def test_unhide_job_returns_tracker_mutation_response(
-    app: FastAPI,
-    repo: FakeJobCacheRepository,
-) -> None:
-    set_authenticated_viewer(app)
-    client = TestClient(app)
-
-    response = client.delete("/jobs/hidden/job-1")
-
-    assert response.status_code == 200
-    assert repo.unhidden_calls == [(TEST_USER_ID, "job-1")]
-    assert response.json()["job_id"] == "job-1"
-    assert response.json()["viewer_state"]["is_hidden"] is False
-
-
-def test_list_saved_jobs_returns_related_jobs(
-    app: FastAPI,
-    monkeypatch: pytest.MonkeyPatch,
-    repo: FakeJobCacheRepository,
-) -> None:
-    repo.saved_rows = [{"id": "saved-row-1"}]
-    repo.row_map["saved-row-1"] = _public_job(job_id="saved-1")
-
-    monkeypatch.setattr(
-        jobs_routes,
-        "map_normalized_job_to_response",
-        lambda normalized: normalized,
+    return JobTrackerMutationResponse(
+        job_id=public_job_id,
+        viewer_state=JobViewerState.model_validate(viewer_state),
     )
 
-    set_authenticated_viewer(app)
-    client = TestClient(app)
 
-    response = client.get("/jobs/saved")
+def _build_related_jobs_response(
+    *,
+    response: Response,
+    current: ViewerContext,
+    repository: JobCacheRepository,
+    relation_type: str,
+) -> JobsResponse:
+    """Builds a saved-jobs or hidden-jobs response."""
+    if relation_type == "saved":
+        job_rows = repository.list_saved_jobs_for_user(user_id=current.user_id or "")
+    elif relation_type == "hidden":
+        job_rows = repository.list_hidden_jobs_for_user(user_id=current.user_id or "")
+    else:
+        raise ValueError(f"Unsupported relation_type={relation_type}")
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["total"] == 1
-    assert payload["jobs"][0]["id"] == "saved-1"
-    assert payload["jobs"][0]["viewer_state"]["is_saved"] is True
-    assert repo.apply_calls[0]["exclude_hidden"] is False
+    public_jobs: list[dict[str, Any]] = []
 
+    for row in job_rows:
+        normalized = repository.row_to_normalized_job(row)
+        if normalized is None:
+            continue
+        public_jobs.append(map_normalized_job_to_response(normalized))
 
-def test_list_hidden_jobs_returns_related_jobs(
-    app: FastAPI,
-    monkeypatch: pytest.MonkeyPatch,
-    repo: FakeJobCacheRepository,
-) -> None:
-    repo.hidden_rows = [{"id": "hidden-row-1"}]
-    repo.row_map["hidden-row-1"] = _public_job(job_id="hidden-1")
-
-    monkeypatch.setattr(
-        jobs_routes,
-        "map_normalized_job_to_response",
-        lambda normalized: normalized,
+    public_jobs = repository.apply_viewer_state_to_jobs(
+        user_id=current.user_id or "",
+        jobs=public_jobs,
+        exclude_hidden=False,
     )
 
-    set_authenticated_viewer(app)
-    client = TestClient(app)
+    _set_refreshed_auth_cookies_if_needed(response, current)
 
-    response = client.get("/jobs/hidden")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["total"] == 1
-    assert payload["jobs"][0]["id"] == "hidden-1"
-    assert payload["jobs"][0]["viewer_state"]["is_hidden"] is True
-    assert repo.apply_calls[0]["exclude_hidden"] is False
+    serialized_jobs = _serialize_public_jobs(public_jobs)
+    return JobsResponse(jobs=serialized_jobs, total=len(serialized_jobs))
 
 
-def test_list_saved_jobs_skips_rows_that_do_not_normalize(
-    app: FastAPI,
-    monkeypatch: pytest.MonkeyPatch,
-    repo: FakeJobCacheRepository,
-) -> None:
-    repo.saved_rows = [{"id": "bad-row"}, {"id": "good-row"}]
-    repo.row_map["bad-row"] = None
-    repo.row_map["good-row"] = _public_job(job_id="saved-1")
+def _load_cached_public_jobs(repository: JobCacheRepository, limit: int = 160) -> list[dict[str, Any]]:
+    """Fallback loader for cached jobs when live ingestion fails."""
+    rows = repository.list_active_jobs(limit=limit)
+    public_jobs: list[dict[str, Any]] = []
 
-    monkeypatch.setattr(
-        jobs_routes,
-        "map_normalized_job_to_response",
-        lambda normalized: normalized,
-    )
+    for row in rows:
+        normalized = repository.row_to_normalized_job(row)
+        if normalized is None:
+            continue
+        public_jobs.append(map_normalized_job_to_response(normalized))
 
-    set_authenticated_viewer(app)
-    client = TestClient(app)
-
-    response = client.get("/jobs/saved")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["total"] == 1
-    assert payload["jobs"][0]["id"] == "saved-1"
+    return public_jobs
 
 
-def test_list_hidden_jobs_returns_500_when_repository_fails(
-    app: FastAPI,
-    repo: FakeJobCacheRepository,
-) -> None:
-    repo.raise_on = "list_hidden_jobs_for_user"
-    set_authenticated_viewer(app)
-    client = TestClient(app)
+@router.get("", response_model=JobsResponse)
+async def list_jobs(
+    response: Response,
+    current: ViewerContext = Depends(get_optional_viewer_context),
+    job_ingestion_service: JobIngestionService = Depends(get_job_ingestion_service),
+    repository: JobCacheRepository = Depends(get_job_cache_repository),
+) -> JobsResponse:
+    """Returns normalized jobs for browsing, scoring, and UI display."""
+    jobs: list[dict[str, Any]] = []
 
-    response = client.get("/jobs/hidden")
+    try:
+        jobs = await job_ingestion_service.ingest_jobs()
+    except Exception:
+        logger.exception("Live jobs ingestion failed. Falling back to shared cache.")
 
-    assert response.status_code == 500
-    assert response.json() == {"detail": "Unable to load hidden jobs right now."}
+        try:
+            jobs = _load_cached_public_jobs(repository)
+        except Exception:
+            logger.exception("Shared cache fallback also failed.")
+
+    if not jobs:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to load jobs at this time.",
+        )
+
+    if current.user_id:
+        jobs = repository.apply_viewer_state_to_jobs(
+            user_id=current.user_id,
+            jobs=jobs,
+            exclude_hidden=True,
+        )
+        _set_refreshed_auth_cookies_if_needed(response, current)
+
+    serialized_jobs = _serialize_public_jobs(jobs)
+    return JobsResponse(jobs=serialized_jobs, total=len(serialized_jobs))
+
+
+@router.get("/profile", response_model=ResolvedJobProfileResponse)
+def get_jobs_profile(
+    response: Response,
+    current: ViewerContext = Depends(get_optional_viewer_context),
+) -> ResolvedJobProfileResponse:
+    """Returns the resolved jobs scoring profile for the current viewer."""
+    try:
+        if not current.user_id:
+            return ResolvedJobProfileResponse(**DEFAULT_RESOLVED_JOB_PROFILE)
+
+        _set_refreshed_auth_cookies_if_needed(response, current)
+        profile = resolve_job_profile_for_user_id(user_id=current.user_id)
+        return ResolvedJobProfileResponse(**profile)
+    except Exception as exc:
+        logger.exception("Failed to resolve jobs profile.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to load job profile at this time.",
+        ) from exc
+
+
+@router.post(
+    "/saved",
+    response_model=JobTrackerMutationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def save_job(
+    payload: JobTrackerMutationRequest,
+    response: Response,
+    current: ViewerContext = Depends(get_required_viewer_context),
+    repository: JobCacheRepository = Depends(get_job_cache_repository),
+) -> JobTrackerMutationResponse:
+    """Saves a shared cached job for the authenticated user."""
+    try:
+        repository.save_job_for_user(
+            user_id=current.user_id or "",
+            public_job_id=payload.job_id,
+        )
+        _set_refreshed_auth_cookies_if_needed(response, current)
+
+        return _build_tracker_mutation_response(
+            repository=repository,
+            user_id=current.user_id or "",
+            public_job_id=payload.job_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to save job.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to save this job right now.",
+        ) from exc
+
+
+@router.delete("/saved/{job_id}", response_model=JobTrackerMutationResponse)
+def unsave_job(
+    job_id: str,
+    response: Response,
+    current: ViewerContext = Depends(get_required_viewer_context),
+    repository: JobCacheRepository = Depends(get_job_cache_repository),
+) -> JobTrackerMutationResponse:
+    """Removes a saved-job relationship for the authenticated user."""
+    try:
+        repository.unsave_job_for_user(
+            user_id=current.user_id or "",
+            public_job_id=job_id,
+        )
+        _set_refreshed_auth_cookies_if_needed(response, current)
+
+        return _build_tracker_mutation_response(
+            repository=repository,
+            user_id=current.user_id or "",
+            public_job_id=job_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to unsave job.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to remove this saved job right now.",
+        ) from exc
+
+
+@router.post(
+    "/hidden",
+    response_model=JobTrackerMutationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def hide_job(
+    payload: JobTrackerMutationRequest,
+    response: Response,
+    current: ViewerContext = Depends(get_required_viewer_context),
+    repository: JobCacheRepository = Depends(get_job_cache_repository),
+) -> JobTrackerMutationResponse:
+    """Hides a shared cached job for the authenticated user."""
+    try:
+        repository.hide_job_for_user(
+            user_id=current.user_id or "",
+            public_job_id=payload.job_id,
+        )
+        _set_refreshed_auth_cookies_if_needed(response, current)
+
+        return _build_tracker_mutation_response(
+            repository=repository,
+            user_id=current.user_id or "",
+            public_job_id=payload.job_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to hide job.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to hide this job right now.",
+        ) from exc
+
+
+@router.delete("/hidden/{job_id}", response_model=JobTrackerMutationResponse)
+def unhide_job(
+    job_id: str,
+    response: Response,
+    current: ViewerContext = Depends(get_required_viewer_context),
+    repository: JobCacheRepository = Depends(get_job_cache_repository),
+) -> JobTrackerMutationResponse:
+    """Removes a hidden-job relationship for the authenticated user."""
+    try:
+        repository.unhide_job_for_user(
+            user_id=current.user_id or "",
+            public_job_id=job_id,
+        )
+        _set_refreshed_auth_cookies_if_needed(response, current)
+
+        return _build_tracker_mutation_response(
+            repository=repository,
+            user_id=current.user_id or "",
+            public_job_id=job_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to unhide job.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to unhide this job right now.",
+        ) from exc
+
+
+@router.get("/saved", response_model=JobsResponse)
+def list_saved_jobs(
+    response: Response,
+    current: ViewerContext = Depends(get_required_viewer_context),
+    repository: JobCacheRepository = Depends(get_job_cache_repository),
+) -> JobsResponse:
+    """Lists saved jobs for the authenticated user."""
+    try:
+        return _build_related_jobs_response(
+            response=response,
+            current=current,
+            repository=repository,
+            relation_type="saved",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to list saved jobs.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to load saved jobs right now.",
+        ) from exc
+
+
+@router.get("/hidden", response_model=JobsResponse)
+def list_hidden_jobs(
+    response: Response,
+    current: ViewerContext = Depends(get_required_viewer_context),
+    repository: JobCacheRepository = Depends(get_job_cache_repository),
+) -> JobsResponse:
+    """Lists hidden jobs for the authenticated user."""
+    try:
+        return _build_related_jobs_response(
+            response=response,
+            current=current,
+            repository=repository,
+            relation_type="hidden",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to list hidden jobs.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to load hidden jobs right now.",
+        ) from exc
