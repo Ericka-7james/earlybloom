@@ -9,23 +9,35 @@ import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
 
 /**
- * Renders the top-level application shell.
+ * Shared application route definitions.
  *
- * This component is responsible for:
- * - configuring client-side routing
- * - rendering the shared navigation bar
- * - providing a consistent product-page shell
+ * Keeping route metadata together makes the shell easier to maintain
+ * without changing routing behavior.
+ */
+const APP_ROUTES = [
+  { path: "/", element: <Home /> },
+  { path: "/jobs", element: <Jobs /> },
+  { path: "/tracker", element: <Tracker /> },
+  { path: "/profile", element: <Profile /> },
+  { path: "/learn-more", element: <LearnMore /> },
+  { path: "/sign-in", element: <SignIn /> },
+  { path: "/sign-up", element: <SignUp /> },
+];
+
+/**
+ * Renders the top-level EarlyBloom application shell.
  *
- * Routes currently included:
- * - Home
- * - Jobs
- * - Tracker
- * - Profile
- * - Learn More
- * - Sign In
- * - Sign Up
+ * Responsibilities:
+ * - configure client-side routing
+ * - render the shared navigation shell
+ * - provide the primary page region
  *
- * @returns {JSX.Element} The full application router and shell.
+ * This stays intentionally low-risk:
+ * - routes are preserved
+ * - page business logic is unchanged
+ * - structure is made easier to maintain
+ *
+ * @returns {JSX.Element} The full routed application shell.
  */
 function App() {
   return (
@@ -33,16 +45,16 @@ function App() {
       <div className="app-shell">
         <Navbar />
 
-        <main className="page-shell app-page-shell">
-          <div className="app-page-frame">
+        <main className="app-main" id="main-content">
+          <div className="app-page-shell">
             <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/jobs" element={<Jobs />} />
-              <Route path="/tracker" element={<Tracker />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/learn-more" element={<LearnMore />} />
-              <Route path="/sign-in" element={<SignIn />} />
-              <Route path="/sign-up" element={<SignUp />} />
+              {APP_ROUTES.map((route) => (
+                <Route
+                  key={route.path}
+                  path={route.path}
+                  element={route.element}
+                />
+              ))}
             </Routes>
           </div>
         </main>
