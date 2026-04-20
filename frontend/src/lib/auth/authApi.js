@@ -71,6 +71,7 @@ export async function signUp(payload) {
       email: payload.email,
       password: payload.password,
       display_name: payload.displayName || null,
+      avatar: payload.profileIcon || "petaloo",
     }),
   });
 }

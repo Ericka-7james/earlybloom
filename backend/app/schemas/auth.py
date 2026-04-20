@@ -7,7 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 _ALLOWED_LEVELS = {"entry-level", "junior", "mid-level", "senior"}
-_PASSWORD_SPECIAL_PATTERN = re.compile(r"""[!@#$%^&*(),.?":{}|<>_\-+=/\\[\]~`';]""")
+_ALLOWED_AVATARS = {"petaloo", "bloomi", "nibblet", "spriglet"}
+_PASSWORD_SPECIAL_PATTERN = re.compile(
+    r"""[!@#$%^&*(),.?":{}|<>_\-+=/\\[\]~`';]"""
+)
 
 
 class SignUpRequest(BaseModel):
@@ -16,8 +19,9 @@ class SignUpRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     email: str = Field(min_length=5, max_length=320)
-    password: str = Field(min_length=10, max_length=128)
+    password: str = Field(min_length=12, max_length=128)
     display_name: Optional[str] = Field(default=None, max_length=80)
+    avatar: str = Field(default="petaloo", max_length=32)
     desired_levels: list[str] = Field(
         default_factory=lambda: ["entry-level", "junior"]
     )
@@ -36,8 +40,8 @@ class SignUpRequest(BaseModel):
     @classmethod
     def validate_password(cls, value: str) -> str:
         """Enforces stronger password rules on the backend."""
-        if len(value) < 10:
-            raise ValueError("Password must be at least 10 characters long.")
+        if len(value) < 12:
+            raise ValueError("Password must be at least 12 characters long.")
         if any(ch.isspace() for ch in value):
             raise ValueError("Password cannot contain spaces.")
         if not any(ch.islower() for ch in value):
@@ -51,6 +55,30 @@ class SignUpRequest(BaseModel):
 
         return value
 
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, value: Optional[str]) -> Optional[str]:
+        """Normalizes and validates display name if provided."""
+        if value is None:
+            return value
+
+        cleaned = " ".join(value.split()).strip()
+        if not cleaned:
+            return None
+        if len(cleaned) < 2:
+            raise ValueError("Name must be at least 2 characters long.")
+
+        return cleaned
+
+    @field_validator("avatar")
+    @classmethod
+    def validate_avatar(cls, value: str) -> str:
+        """Restricts avatar to supported local asset keys."""
+        cleaned = value.strip().lower()
+        if cleaned not in _ALLOWED_AVATARS:
+            raise ValueError("Unsupported avatar selected.")
+        return cleaned
+
     @field_validator("desired_levels")
     @classmethod
     def validate_desired_levels(cls, value: list[str]) -> list[str]:
@@ -58,8 +86,8 @@ class SignUpRequest(BaseModel):
         if not value:
             raise ValueError("Choose at least one desired level.")
 
-        normalized = []
-        seen = set()
+        normalized: list[str] = []
+        seen: set[str] = set()
 
         for item in value:
             cleaned = item.strip().lower()
@@ -96,12 +124,43 @@ class UpdateProfileRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     display_name: Optional[str] = Field(default=None, max_length=80)
+    avatar: Optional[str] = Field(default=None, max_length=32)
     desired_levels: Optional[list[str]] = None
     is_lgbtq_friendly_only: Optional[bool] = None
 
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, value: Optional[str]) -> Optional[str]:
+        """Normalizes and validates display name if provided."""
+        if value is None:
+            return value
+
+        cleaned = " ".join(value.split()).strip()
+        if not cleaned:
+            return None
+        if len(cleaned) < 2:
+            raise ValueError("Name must be at least 2 characters long.")
+
+        return cleaned
+
+    @field_validator("avatar")
+    @classmethod
+    def validate_avatar(cls, value: Optional[str]) -> Optional[str]:
+        """Restricts avatar to supported local asset keys."""
+        if value is None:
+            return value
+
+        cleaned = value.strip().lower()
+        if cleaned not in _ALLOWED_AVATARS:
+            raise ValueError("Unsupported avatar selected.")
+
+        return cleaned
+
     @field_validator("desired_levels")
     @classmethod
-    def validate_desired_levels(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+    def validate_desired_levels(
+        cls, value: Optional[list[str]]
+    ) -> Optional[list[str]]:
         """Validates desired role levels if provided."""
         if value is None:
             return value
@@ -109,8 +168,8 @@ class UpdateProfileRequest(BaseModel):
         if not value:
             raise ValueError("Choose at least one desired level.")
 
-        normalized = []
-        seen = set()
+        normalized: list[str] = []
+        seen: set[str] = set()
 
         for item in value:
             cleaned = item.strip().lower()
@@ -129,6 +188,7 @@ class ProfileResponse(BaseModel):
     user_id: str
     email: Optional[str] = None
     display_name: Optional[str] = None
+    avatar: str = "petaloo"
     desired_levels: list[str] = Field(default_factory=list)
     is_lgbtq_friendly_only: bool = False
     created_at: Optional[str] = None

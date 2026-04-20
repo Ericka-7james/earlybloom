@@ -1,35 +1,102 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import "../styles/components/auth.css";
+import "../styles/components/signup-page.css";
 import { signUp } from "../lib/auth/authApi";
 import PetalloMascot from "../assets/bloombug/bloombugFam/Petaloo.png";
+import BloomiIcon from "../assets/bloombug/bloombugFam/Bloomi.png";
+import NibbletIcon from "../assets/bloombug/bloombugFam/Nibblet.png";
+import PetalooIcon from "../assets/bloombug/bloombugFam/Petaloo.png";
+import SprigletIcon from "../assets/bloombug/bloombugFam/Spriglet.png";
 
 const WELCOME_MODAL_PENDING_KEY = "earlybloom_welcome_modal_pending";
 
-/**
- * Validates password strength for the sign-up flow.
- *
- * @param {string} password Raw password value.
- * @returns {string} Validation message or empty string.
- */
-function validatePassword(password) {
-  if (password.length < 10) {
-    return "Password must be at least 10 characters.";
+const PROFILE_ICON_OPTIONS = [
+  {
+    id: "petaloo",
+    label: "Petaloo",
+    image: PetalooIcon,
+    isDefault: true,
+  },
+  {
+    id: "bloomi",
+    label: "Bloomi",
+    image: BloomiIcon,
+  },
+  {
+    id: "nibblet",
+    label: "Nibblet",
+    image: NibbletIcon,
+  },
+  {
+    id: "spriglet",
+    label: "Spriglet",
+    image: SprigletIcon,
+  },
+];
+
+function normalizeName(name) {
+  return name.replace(/\s+/g, " ").trim();
+}
+
+function validateEmail(email) {
+  const trimmedEmail = email.trim();
+
+  if (!trimmedEmail) {
+    return "Enter your email.";
   }
 
-  if (!/[A-Z]/.test(password)) {
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailPattern.test(trimmedEmail)) {
+    return "Enter a valid email address.";
+  }
+
+  return "";
+}
+
+function getPasswordChecks(password) {
+  return {
+    length: password.length >= 12,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    number: /[0-9]/.test(password),
+    special: /[!@#$%^&*(),.?":{}|<>_\-[\]/+=~`';]/.test(password),
+  };
+}
+
+function getPasswordStrength(checks) {
+  const passedChecks = Object.values(checks).filter(Boolean).length;
+
+  if (passedChecks <= 2) {
+    return { label: "Weak", tone: "weak" };
+  }
+
+  if (passedChecks <= 4) {
+    return { label: "Good", tone: "good" };
+  }
+
+  return { label: "Strong", tone: "strong" };
+}
+
+function validatePassword(password) {
+  const checks = getPasswordChecks(password);
+
+  if (!checks.length) {
+    return "Password must be at least 12 characters.";
+  }
+
+  if (!checks.uppercase) {
     return "Include at least one uppercase letter.";
   }
 
-  if (!/[a-z]/.test(password)) {
+  if (!checks.lowercase) {
     return "Include at least one lowercase letter.";
   }
 
-  if (!/[0-9]/.test(password)) {
+  if (!checks.number) {
     return "Include at least one number.";
   }
 
-  if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+  if (!checks.special) {
     return "Include at least one special character.";
   }
 
@@ -39,45 +106,92 @@ function validatePassword(password) {
 /**
  * Renders the sign-up page.
  *
+ * Features:
+ * - responsive two-column layout
+ * - stronger password validation
+ * - duplicate-submit protection
+ * - honeypot bot trap
+ * - local profile icon selection with a default option
+ *
  * @returns {JSX.Element} Sign-up page.
  */
 function SignUp() {
   const navigate = useNavigate();
+
+  const defaultIcon =
+    PROFILE_ICON_OPTIONS.find((icon) => icon.isDefault)?.id ||
+    PROFILE_ICON_OPTIONS[0].id;
 
   const [form, setForm] = useState({
     name: "",
     email: "",
     password: "",
     confirm: "",
+    profileIcon: defaultIcon,
+    website: "",
   });
+
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
-  /**
-   * Updates local form state.
-   *
-   * @param {React.ChangeEvent<HTMLInputElement>} event Input change event.
-   * @returns {void}
-   */
+  const passwordChecks = useMemo(
+    () => getPasswordChecks(form.password),
+    [form.password]
+  );
+
+  const passwordStrength = useMemo(
+    () => getPasswordStrength(passwordChecks),
+    [passwordChecks]
+  );
+
   function handleChange(event) {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
   }
 
-  /**
-   * Submits the sign-up form.
-   *
-   * On success, queues the welcome modal and redirects to the jobs page.
-   *
-   * @param {React.FormEvent<HTMLFormElement>} event Form submit event.
-   * @returns {Promise<void>}
-   */
+  function handleProfileIconSelect(iconId) {
+    setForm((current) => ({
+      ...current,
+      profileIcon: iconId,
+    }));
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
+
+    if (loading) {
+      return;
+    }
+
     setError("");
 
-    if (!form.email.trim()) {
-      setError("Enter your email.");
+    if (form.website.trim()) {
+      setError("Unable to complete sign up.");
+      return;
+    }
+
+    const cleanedName = normalizeName(form.name);
+    const cleanedEmail = form.email.trim().toLowerCase();
+
+    if (!cleanedName) {
+      setError("Enter your name.");
+      return;
+    }
+
+    if (cleanedName.length < 2) {
+      setError("Name must be at least 2 characters.");
+      return;
+    }
+
+    if (cleanedName.length > 80) {
+      setError("Name must be 80 characters or less.");
+      return;
+    }
+
+    const emailError = validateEmail(cleanedEmail);
+    if (emailError) {
+      setError(emailError);
       return;
     }
 
@@ -92,13 +206,19 @@ function SignUp() {
       return;
     }
 
+    if (!acceptedTerms) {
+      setError("Please agree before creating your account.");
+      return;
+    }
+
     setLoading(true);
 
     try {
       await signUp({
-        email: form.email.trim(),
+        email: cleanedEmail,
         password: form.password,
-        displayName: form.name.trim(),
+        displayName: cleanedName,
+        profileIcon: form.profileIcon,
       });
 
       window.sessionStorage.setItem(WELCOME_MODAL_PENDING_KEY, "true");
@@ -111,82 +231,113 @@ function SignUp() {
   }
 
   return (
-    <div className="auth-page auth-page--signup">
+    <div className="signup-page">
       <section className="container section-pad">
-        <div className="auth-stage">
-          <div className="section-card auth-side">
-            <div className="auth-side__inner">
-              <div className="eyebrow-pill">Meet Petallo</div>
+        <div className="signup-layout">
+          <aside className="section-card signup-side signup-side--glass">
+            <div className="signup-side__inner">
+              <div className="eyebrow-pill">Meet the Bloombug crew</div>
 
-              <h1 className="auth-side__title">
-                Plant your account and grow your search with purpose.
+              <h1 className="signup-side__title">
+                Create your account and start your search with a steadier front
+                door.
               </h1>
 
-              <p className="auth-side__copy">
-                EarlyBloom started with entry-level and junior job seekers in
-                mind, but your path might stretch across more than one level.
-                Creating an account helps us remember your preferences, keep
-                your resume close, and build a search experience that feels
-                more grounded and inclusive.
+              <p className="signup-side__copy">
+                Pick a profile icon, secure your account, and keep your EarlyBloom
+                preferences ready. This layout is built to stay smooth on mobile,
+                clear on desktop, and stable as your user base keeps growing.
               </p>
 
-              <div className="auth-side__chips" aria-label="Account benefits">
-                <span className="tag-chip">Saved preferences</span>
-                <span className="tag-chip">Resume-ready flow</span>
-                <span className="tag-chip">Inclusive by design</span>
+              <div className="signup-side__chips" aria-label="Sign-up benefits">
+                <span className="tag-chip">Custom profile icon</span>
+                <span className="tag-chip">Secure sign-up flow</span>
+                <span className="tag-chip">Responsive layout</span>
+              </div>
+
+              <div className="signup-side__feature-grid">
+                <div className="info-panel info-panel--soft">
+                  <h2 className="card-title">Built for scale</h2>
+                  <p className="card-copy">
+                    Lightweight UI, guarded submits, and clean validation keep the
+                    page fast and calm under heavier traffic.
+                  </p>
+                </div>
+
+                <div className="info-panel info-panel--soft">
+                  <h2 className="card-title">Safer by default</h2>
+                  <p className="card-copy">
+                    Stronger password requirements and bot-noise reduction add a
+                    little armor to the front gate.
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
+          </aside>
 
-          <div className="section-card auth-form-card">
-            <header className="auth-form-card__header">
-              <div className="auth-form-card__header-copy">
-                <h2 className="auth-form-card__title">Create account</h2>
-                <p className="auth-form-card__text">
-                  Save your resume, role preferences, and future search flow.
+          <div className="section-card signup-card signup-card--strong">
+            <header className="signup-card__header">
+              <div className="signup-card__header-copy">
+                <h2 className="signup-card__title">Create account</h2>
+                <p className="signup-card__text">
+                  Save your profile, resume flow, and preferences in one place.
                 </p>
               </div>
 
               <img
                 src={PetalloMascot}
                 alt="Petallo icon"
-                className="auth-form-card__icon"
+                className="signup-card__icon"
               />
             </header>
 
-            <form className="auth-form" onSubmit={handleSubmit} noValidate>
+            <form className="signup-form" onSubmit={handleSubmit} noValidate>
               {error ? (
                 <div
-                  className="auth-form__message auth-form__message--error"
+                  className="signup-form__message signup-form__message--error"
                   role="alert"
                 >
                   {error}
                 </div>
               ) : null}
 
-              <div className="auth-form__grid">
-                <div className="auth-form__field auth-form__field--full">
-                  <label className="auth-form__label" htmlFor="name">
+              <div className="signup-form__field signup-form__field--honeypot">
+                <label htmlFor="website">Website</label>
+                <input
+                  id="website"
+                  name="website"
+                  value={form.website}
+                  onChange={handleChange}
+                  autoComplete="off"
+                  tabIndex={-1}
+                />
+              </div>
+
+              <div className="signup-form__grid">
+                <div className="signup-form__field signup-form__field--full">
+                  <label className="signup-form__label" htmlFor="name">
                     Name
                   </label>
                   <input
                     id="name"
-                    className="auth-form__input"
+                    className="signup-form__input"
                     name="name"
                     value={form.name}
                     onChange={handleChange}
                     autoComplete="name"
                     placeholder="Your name"
+                    maxLength={80}
+                    required
                   />
                 </div>
 
-                <div className="auth-form__field auth-form__field--full">
-                  <label className="auth-form__label" htmlFor="email">
+                <div className="signup-form__field signup-form__field--full">
+                  <label className="signup-form__label" htmlFor="email">
                     Email
                   </label>
                   <input
                     id="email"
-                    className="auth-form__input"
+                    className="signup-form__input"
                     name="email"
                     type="email"
                     value={form.email}
@@ -194,17 +345,19 @@ function SignUp() {
                     onChange={handleChange}
                     autoComplete="email"
                     inputMode="email"
+                    spellCheck="false"
                     placeholder="you@example.com"
+                    maxLength={254}
                   />
                 </div>
 
-                <div className="auth-form__field">
-                  <label className="auth-form__label" htmlFor="password">
+                <div className="signup-form__field">
+                  <label className="signup-form__label" htmlFor="password">
                     Password
                   </label>
                   <input
                     id="password"
-                    className="auth-form__input"
+                    className="signup-form__input"
                     name="password"
                     type="password"
                     value={form.password}
@@ -212,16 +365,17 @@ function SignUp() {
                     onChange={handleChange}
                     autoComplete="new-password"
                     placeholder="Create a password"
+                    maxLength={128}
                   />
                 </div>
 
-                <div className="auth-form__field">
-                  <label className="auth-form__label" htmlFor="confirm">
+                <div className="signup-form__field">
+                  <label className="signup-form__label" htmlFor="confirm">
                     Confirm password
                   </label>
                   <input
                     id="confirm"
-                    className="auth-form__input"
+                    className="signup-form__input"
                     name="confirm"
                     type="password"
                     value={form.confirm}
@@ -229,26 +383,169 @@ function SignUp() {
                     onChange={handleChange}
                     autoComplete="new-password"
                     placeholder="Re-enter password"
+                    maxLength={128}
                   />
                 </div>
               </div>
 
-              <p className="auth-form__hint">
-                Your password should be harder to crack than a stubborn walnut.
-              </p>
-
-              <ul
-                className="auth-form__requirements"
-                aria-label="Password requirements"
+              <section
+                className="signup-avatar-picker"
+                aria-labelledby="signup-avatar-picker-title"
               >
-                <li>At least 10 characters</li>
-                <li>One uppercase letter and one lowercase letter</li>
-                <li>One number and one special character</li>
-              </ul>
+                <div className="signup-avatar-picker__header">
+                  <h3
+                    id="signup-avatar-picker-title"
+                    className="signup-avatar-picker__title"
+                  >
+                    Choose your profile icon
+                  </h3>
+                  <p className="signup-avatar-picker__copy">
+                    Petaloo starts as the default, but users can pick any Bloombug
+                    friend they want.
+                  </p>
+                </div>
 
-              <div className="auth-form__actions">
+                <div
+                  className="signup-avatar-picker__grid"
+                  role="radiogroup"
+                  aria-label="Profile icon options"
+                >
+                  {PROFILE_ICON_OPTIONS.map((icon) => {
+                    const isSelected = form.profileIcon === icon.id;
+
+                    return (
+                      <button
+                        key={icon.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        aria-label={icon.label}
+                        className={`signup-avatar-option ${
+                          isSelected ? "signup-avatar-option--selected" : ""
+                        }`}
+                        onClick={() => handleProfileIconSelect(icon.id)}
+                      >
+                        <span className="signup-avatar-option__image-wrap">
+                          <img
+                            src={icon.image}
+                            alt=""
+                            className="signup-avatar-option__image"
+                            loading="lazy"
+                          />
+                        </span>
+
+                        <span className="signup-avatar-option__label">
+                          {icon.label}
+                        </span>
+
+                        {icon.isDefault ? (
+                          <span className="signup-avatar-option__meta">
+                            Default
+                          </span>
+                        ) : (
+                          <span className="signup-avatar-option__meta">
+                            Select
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section
+                className="signup-password-panel"
+                aria-labelledby="signup-password-title"
+              >
+                <div className="signup-password-panel__header">
+                  <div>
+                    <h3
+                      id="signup-password-title"
+                      className="signup-password-panel__title"
+                    >
+                      Password strength
+                    </h3>
+                    <p className="signup-password-panel__copy">
+                      Aim for something tougher than a locked greenhouse in a storm.
+                    </p>
+                  </div>
+
+                  <span
+                    className={`signup-password-strength signup-password-strength--${passwordStrength.tone}`}
+                    aria-live="polite"
+                  >
+                    {passwordStrength.label}
+                  </span>
+                </div>
+
+                <ul
+                  className="signup-password-checklist"
+                  aria-label="Password requirements"
+                >
+                  <li
+                    className={`signup-password-checklist__item ${
+                      passwordChecks.length
+                        ? "signup-password-checklist__item--pass"
+                        : ""
+                    }`}
+                  >
+                    At least 12 characters
+                  </li>
+                  <li
+                    className={`signup-password-checklist__item ${
+                      passwordChecks.uppercase
+                        ? "signup-password-checklist__item--pass"
+                        : ""
+                    }`}
+                  >
+                    One uppercase letter
+                  </li>
+                  <li
+                    className={`signup-password-checklist__item ${
+                      passwordChecks.lowercase
+                        ? "signup-password-checklist__item--pass"
+                        : ""
+                    }`}
+                  >
+                    One lowercase letter
+                  </li>
+                  <li
+                    className={`signup-password-checklist__item ${
+                      passwordChecks.number
+                        ? "signup-password-checklist__item--pass"
+                        : ""
+                    }`}
+                  >
+                    One number
+                  </li>
+                  <li
+                    className={`signup-password-checklist__item ${
+                      passwordChecks.special
+                        ? "signup-password-checklist__item--pass"
+                        : ""
+                    }`}
+                  >
+                    One special character
+                  </li>
+                </ul>
+              </section>
+
+              <label className="signup-consent">
+                <input
+                  className="signup-consent__input"
+                  type="checkbox"
+                  checked={acceptedTerms}
+                  onChange={(event) => setAcceptedTerms(event.target.checked)}
+                />
+                <span className="signup-consent__text">
+                  I understand my account details will be used to personalize my
+                  EarlyBloom experience.
+                </span>
+              </label>
+
+              <div className="signup-form__actions">
                 <button
-                  className="button button--primary auth-form__submit"
+                  className="button button--primary signup-form__submit"
                   disabled={loading}
                 >
                   {loading ? "Creating..." : "Create account"}
@@ -256,9 +553,9 @@ function SignUp() {
               </div>
             </form>
 
-            <p className="auth-form-card__footer">
+            <p className="signup-card__footer">
               Already have an account?{" "}
-              <Link className="auth-form-card__footer-link" to="/sign-in">
+              <Link className="signup-card__footer-link" to="/sign-in">
                 Sign in
               </Link>
             </p>

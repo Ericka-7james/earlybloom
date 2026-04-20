@@ -20,6 +20,10 @@ from app.schemas.auth import (
 )
 
 
+DEFAULT_DESIRED_LEVELS = ["entry-level", "junior"]
+DEFAULT_AVATAR = "petaloo"
+
+
 @dataclass
 class CurrentSessionContext:
     """Represents the verified current user session."""
@@ -45,6 +49,7 @@ def _profile_select_columns() -> str:
         "user_id,"
         "email,"
         "display_name,"
+        "avatar,"
         "desired_levels,"
         "is_lgbtq_friendly_only,"
         "created_at,"
@@ -74,12 +79,29 @@ def _to_user_response(user: Any) -> AuthUserResponse:
     )
 
 
-def _to_profile_response(profile_row: dict[str, Any] | None) -> ProfileResponse | None:
-    """Maps a profile row into the API response model."""
+def _normalize_profile_row(profile_row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Applies safe defaults to a raw profile row before response mapping."""
     if not profile_row:
         return None
 
-    return ProfileResponse(**profile_row)
+    normalized = dict(profile_row)
+    normalized["avatar"] = normalized.get("avatar") or DEFAULT_AVATAR
+    normalized["desired_levels"] = normalized.get("desired_levels") or list(
+        DEFAULT_DESIRED_LEVELS
+    )
+    normalized["is_lgbtq_friendly_only"] = bool(
+        normalized.get("is_lgbtq_friendly_only", False)
+    )
+    return normalized
+
+
+def _to_profile_response(profile_row: dict[str, Any] | None) -> ProfileResponse | None:
+    """Maps a profile row into the API response model."""
+    normalized = _normalize_profile_row(profile_row)
+    if not normalized:
+        return None
+
+    return ProfileResponse(**normalized)
 
 
 def fetch_profile_for_user_id(user_id: str) -> dict[str, Any] | None:
@@ -94,7 +116,77 @@ def fetch_profile_for_user_id(user_id: str) -> dict[str, Any] | None:
         .execute()
     )
 
-    return result.data
+    return _normalize_profile_row(result.data)
+
+
+def _build_profile_row(
+    *,
+    user_id: str,
+    user_email: str | None,
+    payload: UpdateProfileRequest | SignUpRequest,
+    existing: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a normalized profile row for upsert operations."""
+    current = existing or {}
+
+    return {
+        "user_id": user_id,
+        "email": current.get("email") or user_email,
+        "display_name": (
+            payload.display_name
+            if payload.display_name is not None
+            else current.get("display_name")
+        ),
+        "avatar": (
+            payload.avatar
+            if getattr(payload, "avatar", None) is not None
+            else current.get("avatar", DEFAULT_AVATAR)
+        ),
+        "desired_levels": (
+            payload.desired_levels
+            if getattr(payload, "desired_levels", None) is not None
+            else current.get("desired_levels", list(DEFAULT_DESIRED_LEVELS))
+        ),
+        "is_lgbtq_friendly_only": (
+            payload.is_lgbtq_friendly_only
+            if getattr(payload, "is_lgbtq_friendly_only", None) is not None
+            else current.get("is_lgbtq_friendly_only", False)
+        ),
+    }
+
+
+def _upsert_profile_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Upserts a profile row and returns the stored result."""
+    service_client = get_supabase_service_client()
+
+    result = (
+        service_client.table("profiles")
+        .upsert(row, on_conflict="user_id")
+        .execute()
+    )
+
+    data = result.data or []
+    stored = data[0] if data else row
+    return _normalize_profile_row(stored) or row
+
+
+def ensure_profile_for_user(
+    *,
+    user_id: str,
+    user_email: str | None,
+    payload: SignUpRequest,
+) -> dict[str, Any]:
+    """Ensures a newly signed-up user has a matching app profile row."""
+    existing = fetch_profile_for_user_id(user_id)
+
+    row = _build_profile_row(
+        user_id=user_id,
+        user_email=user_email,
+        payload=payload,
+        existing=existing,
+    )
+
+    return _upsert_profile_row(row)
 
 
 def update_profile_for_user_id(
@@ -106,49 +198,23 @@ def update_profile_for_user_id(
     existing = fetch_profile_for_user_id(user_id) or {
         "user_id": user_id,
         "email": user_email,
-        "desired_levels": ["entry-level", "junior"],
+        "avatar": DEFAULT_AVATAR,
+        "desired_levels": list(DEFAULT_DESIRED_LEVELS),
         "is_lgbtq_friendly_only": False,
     }
 
-    row = {
-        "user_id": user_id,
-        "email": existing.get("email") or user_email,
-        "display_name": (
-            payload.display_name
-            if payload.display_name is not None
-            else existing.get("display_name")
-        ),
-        "desired_levels": (
-            payload.desired_levels
-            if payload.desired_levels is not None
-            else existing.get("desired_levels", ["entry-level", "junior"])
-        ),
-        "is_lgbtq_friendly_only": (
-            payload.is_lgbtq_friendly_only
-            if payload.is_lgbtq_friendly_only is not None
-            else existing.get("is_lgbtq_friendly_only", False)
-        ),
-    }
-
-    service_client = get_supabase_service_client()
-
-    result = (
-        service_client.table("profiles")
-        .upsert(row, on_conflict="user_id")
-        .execute()
+    row = _build_profile_row(
+        user_id=user_id,
+        user_email=user_email,
+        payload=payload,
+        existing=existing,
     )
 
-    data = result.data or []
-    return data[0] if data else row
+    return _upsert_profile_row(row)
 
 
 def sign_up_user(payload: SignUpRequest) -> tuple[AuthSessionResponse, Any | None]:
-    """Signs up a user through Supabase Auth.
-
-    This route does not manually create a profile row. Profile creation should
-    be handled by a database trigger on auth.users so we only create app
-    profile records after a real auth row exists.
-    """
+    """Signs up a user through Supabase Auth and ensures an app profile row."""
     public_client = get_supabase_public_client()
 
     try:
@@ -159,6 +225,7 @@ def sign_up_user(payload: SignUpRequest) -> tuple[AuthSessionResponse, Any | Non
                 "options": {
                     "data": {
                         "display_name": payload.display_name,
+                        "avatar": payload.avatar,
                     }
                 },
             }
@@ -175,11 +242,26 @@ def sign_up_user(payload: SignUpRequest) -> tuple[AuthSessionResponse, Any | Non
             "Unable to create the account.",
         )
 
+    user_id = str(getattr(user, "id"))
+    user_email = getattr(user, "email", None)
+
+    profile_row = None
+    try:
+        profile_row = ensure_profile_for_user(
+            user_id=user_id,
+            user_email=user_email,
+            payload=payload,
+        )
+    except Exception:
+        # Keep auth creation successful even if app profile sync briefly fails.
+        # The profile can still be repaired later through session/profile flows.
+        profile_row = fetch_profile_for_user_id(user_id)
+
     response = AuthSessionResponse(
         authenticated=session is not None,
         requires_email_verification=session is None,
         user=_to_user_response(user),
-        profile=None,
+        profile=_to_profile_response(profile_row),
     )
 
     return response, session
@@ -264,7 +346,9 @@ def verify_or_refresh_session(
 
     if not user:
         try:
-            user_response = public_client.auth.get_user(getattr(session, "access_token"))
+            user_response = public_client.auth.get_user(
+                getattr(session, "access_token")
+            )
             user = getattr(user_response, "user", None)
         except Exception as exc:
             raise _http_error(
