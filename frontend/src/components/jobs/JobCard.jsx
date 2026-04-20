@@ -64,14 +64,14 @@ function stopCardEvent(event) {
 }
 
 /**
- * Returns the quick-take copy shown near the top of the card.
+ * Returns a shorter quick-take copy for compact cards.
  *
  * @param {object} job Display job.
- * @returns {string} Short quick-take text.
+ * @returns {string} Compact quick-take text.
  */
 function getQuickTake(job) {
   if (job?.qualificationSignal?.text) {
-    return job.qualificationSignal.text;
+    return String(job.qualificationSignal.text).trim();
   }
 
   if (job.fitTag === "Real Junior") {
@@ -79,25 +79,46 @@ function getQuickTake(job) {
   }
 
   if (job.fitTag === "Stretch Role") {
-    return "Possible fit, but double-check requirements.";
+    return "You may qualify, but review the requirements before applying.";
   }
 
   if (job.fitTag === "Misleading Junior") {
-    return "Labeled junior, but parts may lean more experienced.";
+    return "Listed as junior, but parts may lean more experienced.";
   }
 
-  return "This may be more experienced than it first appears.";
+  return "This role may be more experienced than it first appears.";
+}
+
+/**
+ * Trims long copy so the card stays compact.
+ *
+ * @param {string} text Raw text.
+ * @param {number} maxLength Maximum length.
+ * @returns {string} Truncated text.
+ */
+function truncateText(text, maxLength = 110) {
+  const value = String(text || "").trim();
+
+  if (!value) {
+    return "";
+  }
+
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength).trim()}…`;
 }
 
 /**
  * Returns a capped list of matched skills for compact card display.
  *
  * @param {string[] | undefined} matchedSkills Matched skills.
- * @returns {string[]} Up to three matched skills.
+ * @returns {string[]} Up to one matched skill.
  */
 function getVisibleMatchedSkills(matchedSkills) {
   return Array.isArray(matchedSkills)
-    ? matchedSkills.filter(Boolean).slice(0, 3)
+    ? matchedSkills.filter(Boolean).slice(0, 1)
     : [];
 }
 
@@ -122,9 +143,7 @@ function getRecencyLabel(metaItems) {
     return null;
   }
 
-  return (
-    metaItems.find((item) => /ago|today|recent/i.test(item)) || null
-  );
+  return metaItems.find((item) => /ago|today|recent/i.test(item)) || null;
 }
 
 /**
@@ -181,7 +200,7 @@ function JobCardActions({
     <div className="job-card__actions" aria-label="Job actions">
       <button
         type="button"
-        className={`job-card__icon-button ${
+        className={`job-card__icon-button job-card__icon-button--save ${
           job.isSaved ? "job-card__icon-button--active" : ""
         }`}
         onClick={handleSaveClick}
@@ -189,20 +208,20 @@ function JobCardActions({
         aria-label={job.isSaved ? "Remove saved job" : "Save job"}
         title={job.isSaved ? "Remove saved job" : "Save job"}
       >
-        <span aria-hidden="true">{job.isSaved ? "★" : "☆"}</span>
+        <span aria-hidden="true">{job.isSaved ? "♥" : "♡"}</span>
       </button>
 
       <button
         type="button"
-        className={`job-card__icon-button ${
-          job.isHidden ? "job-card__icon-button--danger" : ""
+        className={`job-card__icon-button job-card__icon-button--hide ${
+          job.isHidden ? "job-card__icon-button--danger-active" : ""
         }`}
         onClick={handleHideClick}
         disabled={isHidePending}
         aria-label={resolvedHideLabel}
         title={resolvedHideLabel}
       >
-        <span aria-hidden="true">{job.isHidden ? "↺" : "✕"}</span>
+        <span aria-hidden="true">⊘</span>
       </button>
     </div>
   );
@@ -249,20 +268,22 @@ function JobCardBody({
   return (
     <div className="job-card__content">
       <div className="job-card__heading">
-        <h3 id={`job-card-title-${jobId}`} className="job-card__title">
-          {title}
-        </h3>
+        <div className="job-card__identity">
+          <h3 id={`job-card-title-${jobId}`} className="job-card__title">
+            {title}
+          </h3>
 
-        <p className="job-card__company">{company}</p>
+          <p className="job-card__company">{company}</p>
+        </div>
+
+        {recencyLabel ? (
+          <div className="job-card__signal-row">
+            <span className="job-card__signal-chip">{recencyLabel}</span>
+          </div>
+        ) : null}
       </div>
 
-      {recencyLabel ? (
-        <div className="job-card__signal-row">
-          <span className="job-card__signal-chip">{recencyLabel}</span>
-        </div>
-      ) : null}
-
-      <p className="job-card__quick-take">{quickTake}</p>
+      <p className="job-card__quick-take">{truncateText(quickTake, 110)}</p>
 
       {visibleMatchedSkills.length > 0 ? (
         <div className="job-card__matched-skills" aria-label="Matched skills">
@@ -397,7 +418,7 @@ function JobCardComponent({
 
   return (
     <article
-      className="job-card section-card job-card--tracker-ready"
+      className="job-card section-card job-card--compact-modern"
       aria-labelledby={`job-card-title-${jobId}`}
     >
       <div className="job-card__top-row">

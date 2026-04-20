@@ -1,3 +1,13 @@
+/**
+ * Profile page for EarlyBloom.
+ *
+ * This page is intentionally UI-forward but low-risk:
+ * - preserves existing auth, tracker fetch, and sign-out logic
+ * - keeps navigation and modal flows intact
+ * - aligns the visual system with the modern Jobs page direction
+ * - remains mobile-first and responsive
+ */
+
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import CommonModal from "../components/common/CommonModal.jsx";
@@ -35,6 +45,12 @@ const DEFAULT_TRACKER_DATA = {
   },
 };
 
+/**
+ * Converts a string value into title case for UI display.
+ *
+ * @param {string} value Raw label value.
+ * @returns {string} Human-friendly label.
+ */
 function titleCase(value) {
   return String(value || "")
     .split(/[\s_-]+/)
@@ -43,6 +59,13 @@ function titleCase(value) {
     .join(" ");
 }
 
+/**
+ * Formats an array of values as a user-facing comma-separated list.
+ *
+ * @param {string[]} values Values to format.
+ * @param {string} emptyLabel Fallback text when no values exist.
+ * @returns {string} Formatted list string.
+ */
 function formatList(values, emptyLabel = "Not set yet") {
   if (!Array.isArray(values) || values.length === 0) {
     return emptyLabel;
@@ -51,6 +74,12 @@ function formatList(values, emptyLabel = "Not set yet") {
   return values.map(titleCase).join(", ");
 }
 
+/**
+ * Derives a fallback display name from authenticated user metadata.
+ *
+ * @param {object|null} user Authenticated user.
+ * @returns {string} Best-available display name.
+ */
 function getFallbackDisplayName(user) {
   return (
     user?.user_metadata?.display_name ||
@@ -61,6 +90,14 @@ function getFallbackDisplayName(user) {
   );
 }
 
+/**
+ * Resolves the final display name using profile data first,
+ * then authenticated user metadata.
+ *
+ * @param {object|null} profile Profile payload.
+ * @param {object|null} user Authenticated user.
+ * @returns {string} Display name to show in UI.
+ */
 function getResolvedDisplayName(profile, user) {
   const profileDisplayName =
     profile?.display_name && String(profile.display_name).trim();
@@ -68,6 +105,12 @@ function getResolvedDisplayName(profile, user) {
   return profileDisplayName || getFallbackDisplayName(user);
 }
 
+/**
+ * Formats resume parse state into a display string.
+ *
+ * @param {object|null} resume Resume payload.
+ * @returns {string} Resume status label.
+ */
 function formatResumeStatus(resume) {
   if (!resume?.parse_status) {
     return "No resume uploaded";
@@ -76,6 +119,12 @@ function formatResumeStatus(resume) {
   return titleCase(resume.parse_status);
 }
 
+/**
+ * Converts backend or auth-related errors into friendlier profile copy.
+ *
+ * @param {unknown} error Error thrown during load.
+ * @returns {string} User-friendly message.
+ */
 function getFriendlyProfileError(error) {
   const message =
     error instanceof Error
@@ -94,6 +143,13 @@ function getFriendlyProfileError(error) {
   return message;
 }
 
+/**
+ * Normalizes the tracker payload so the page can safely render even when
+ * optional fields are absent.
+ *
+ * @param {object|null} payload Tracker response payload.
+ * @returns {object} Safe normalized tracker data.
+ */
 function normalizeTrackerPayload(payload) {
   if (!payload || typeof payload !== "object") {
     return DEFAULT_TRACKER_DATA;
@@ -121,6 +177,11 @@ function normalizeTrackerPayload(payload) {
   };
 }
 
+/**
+ * Small viewport hook used for mobile-specific UI choices.
+ *
+ * @returns {number} Current viewport width.
+ */
 function useViewportWidth() {
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window === "undefined" ? 1280 : window.innerWidth
@@ -191,7 +252,7 @@ function Profile() {
       }
     }
 
-    loadProfileData();
+    void loadProfileData();
 
     return () => {
       isMounted = false;
@@ -207,6 +268,11 @@ function Profile() {
     [profile, user]
   );
 
+  /**
+   * Signs the current user out and returns them to the landing page.
+   *
+   * @returns {Promise<void>}
+   */
   async function handleConfirmSignOut() {
     setIsSigningOut(true);
 
@@ -225,33 +291,38 @@ function Profile() {
     }
   }
 
+  /**
+   * Renders the durable preferences block. Reused for desktop card and mobile modal.
+   *
+   * @returns {JSX.Element} Preferences content.
+   */
   function renderPreferencesContent() {
     return (
-      <div className="settings-section">
+      <div className="settings-section profile-preferences-section">
         <div className="settings-section__header">
           <p className="section-label">Preferences</p>
           <h2 className="card-title">Search and profile defaults</h2>
           <p className="card-copy">
-            These reflect your durable account setup and the same
-            preference language used by Tracker.
+            These reflect your durable account setup and the same preference
+            language used by Tracker.
           </p>
         </div>
 
         <div className="settings-section__body">
-          <div className="settings-section__group">
-            <div className="form-field">
+          <div className="settings-section__group profile-preferences-grid">
+            <div className="form-field profile-detail-tile">
               <p className="form-field__label">Display name</p>
               <p className="card-copy">{displayName}</p>
             </div>
 
-            <div className="form-field">
+            <div className="form-field profile-detail-tile">
               <p className="form-field__label">Career interests</p>
               <p className="card-copy">
                 {formatList(profile.career_interests, "Not set yet")}
               </p>
             </div>
 
-            <div className="form-field">
+            <div className="form-field profile-detail-tile">
               <p className="form-field__label">Preferred job levels</p>
               <p className="card-copy">
                 {formatList(
@@ -263,7 +334,7 @@ function Profile() {
               </p>
             </div>
 
-            <div className="form-field">
+            <div className="form-field profile-detail-tile">
               <p className="form-field__label">Preferred role types</p>
               <p className="card-copy">
                 {formatList(
@@ -275,7 +346,7 @@ function Profile() {
               </p>
             </div>
 
-            <div className="form-field">
+            <div className="form-field profile-detail-tile">
               <p className="form-field__label">Location preferences</p>
               <p className="card-copy">
                 {formatList(
@@ -287,7 +358,7 @@ function Profile() {
               </p>
             </div>
 
-            <div className="form-field">
+            <div className="form-field profile-detail-tile">
               <p className="form-field__label">Remote / hybrid preference</p>
               <p className="card-copy">
                 {formatList(
@@ -299,7 +370,7 @@ function Profile() {
               </p>
             </div>
 
-            <div className="form-field">
+            <div className="form-field profile-detail-tile profile-detail-tile--wide">
               <p className="form-field__label">LGBTQ-friendly only</p>
               <p className="card-copy">
                 {(typeof preferences.is_lgbt_friendly_only === "boolean"
@@ -339,7 +410,7 @@ function Profile() {
       <main className="app-page profile-page">
         <section className="section-pad">
           <div className="container--product">
-            <div className="empty-state-card empty-state-card--centered">
+            <div className="empty-state-card empty-state-card--centered profile-empty-state">
               <div className="empty-state-card__header">
                 <span className="eyebrow-pill">Your Profile</span>
                 <h1 className="section-title">Sign in to view your profile</h1>
@@ -370,24 +441,24 @@ function Profile() {
 
   return (
     <main className="app-page profile-page">
-      <section className="section-pad">
-        <div className="container--product app-content-stack">
-          <section className="app-page__hero">
-            <div className="hero-card app-page__hero-card profile-hero">
-              <div className="app-page__hero-content">
+      <section className="section-pad profile-page__section">
+        <div className="container--product app-content-stack profile-page__stack">
+          <section className="app-page__hero profile-page__hero-wrap">
+            <div className="hero-card app-page__hero-card profile-hero profile-hero--polished">
+              <div className="app-page__hero-content profile-hero__content">
                 <span className="eyebrow-pill">Profile</span>
 
                 <div className="stack-sm">
                   <h1 className="section-title">{displayName}</h1>
                   <p className="section-copy">
                     Your EarlyBloom home base for defaults, resume signals, and
-                    the tracker shortcuts you will use most.
+                    the tracker shortcuts you use most.
                   </p>
                 </div>
 
-                <div className="app-page__hero-meta">
-                  <span className="tag-chip">{user.email}</span>
-                  <span className="tag-chip">
+                <div className="app-page__hero-meta profile-hero__meta">
+                  <span className="tag-chip profile-chip">{user.email}</span>
+                  <span className="tag-chip profile-chip">
                     Resume: {formatResumeStatus(latestResume)}
                   </span>
                 </div>
@@ -403,40 +474,48 @@ function Profile() {
               </div>
 
               <div className="app-page__hero-aside profile-hero__aside">
-                <div className="info-panel info-panel--soft">
+                <div className="info-panel info-panel--soft profile-snapshot-card">
                   <div className="info-panel__header">
                     <p className="section-label">Account snapshot</p>
                     <h2 className="card-title">What is set up right now</h2>
                   </div>
 
-                  <div className="info-panel__content">
-                    <p className="card-copy">
-                      Preferred levels:{" "}
-                      {formatList(
-                        preferences.desired_levels?.length
-                          ? preferences.desired_levels
-                          : profile.desired_levels,
-                        "Entry-level, Junior"
-                      )}
-                    </p>
-                    <p className="card-copy">
-                      Workplace:{" "}
-                      {formatList(
-                        preferences.preferred_workplace_types?.length
-                          ? preferences.preferred_workplace_types
-                          : profile.preferred_workplace_types,
-                        "Not set yet"
-                      )}
-                    </p>
-                    <p className="card-copy">
-                      Locations:{" "}
-                      {formatList(
-                        preferences.preferred_locations?.length
-                          ? preferences.preferred_locations
-                          : profile.preferred_locations,
-                        "Not set yet"
-                      )}
-                    </p>
+                  <div className="profile-snapshot-list">
+                    <div className="profile-snapshot-row">
+                      <span className="profile-snapshot-row__label">Preferred levels</span>
+                      <strong className="profile-snapshot-row__value">
+                        {formatList(
+                          preferences.desired_levels?.length
+                            ? preferences.desired_levels
+                            : profile.desired_levels,
+                          "Entry-level, Junior"
+                        )}
+                      </strong>
+                    </div>
+
+                    <div className="profile-snapshot-row">
+                      <span className="profile-snapshot-row__label">Workplace</span>
+                      <strong className="profile-snapshot-row__value">
+                        {formatList(
+                          preferences.preferred_workplace_types?.length
+                            ? preferences.preferred_workplace_types
+                            : profile.preferred_workplace_types,
+                          "Not set yet"
+                        )}
+                      </strong>
+                    </div>
+
+                    <div className="profile-snapshot-row">
+                      <span className="profile-snapshot-row__label">Locations</span>
+                      <strong className="profile-snapshot-row__value">
+                        {formatList(
+                          preferences.preferred_locations?.length
+                            ? preferences.preferred_locations
+                            : profile.preferred_locations,
+                          "Not set yet"
+                        )}
+                      </strong>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -449,8 +528,8 @@ function Profile() {
               <h2 className="card-title">Your current snapshot</h2>
             </div>
 
-            <div className="app-grid app-grid--stats">
-              <article className="compact-stat-card">
+            <div className="app-grid app-grid--stats profile-stats-grid">
+              <article className="compact-stat-card profile-stat-card">
                 <p className="compact-stat-card__label">Saved jobs</p>
                 <p className="compact-stat-card__value">
                   {trackerData?.stats?.saved_jobs_count ?? 0}
@@ -460,7 +539,7 @@ function Profile() {
                 </p>
               </article>
 
-              <article className="compact-stat-card">
+              <article className="compact-stat-card profile-stat-card">
                 <p className="compact-stat-card__label">Hidden jobs</p>
                 <p className="compact-stat-card__value">
                   {trackerData?.stats?.hidden_jobs_count ?? 0}
@@ -470,7 +549,7 @@ function Profile() {
                 </p>
               </article>
 
-              <article className="compact-stat-card">
+              <article className="compact-stat-card profile-stat-card">
                 <p className="compact-stat-card__label">Resume status</p>
                 <p className="compact-stat-card__value">
                   {latestResume?.parse_status
@@ -482,7 +561,7 @@ function Profile() {
                 </p>
               </article>
 
-              <article className="compact-stat-card">
+              <article className="compact-stat-card profile-stat-card">
                 <p className="compact-stat-card__label">LGBTQ-friendly only</p>
                 <p className="compact-stat-card__value">
                   {(typeof preferences.is_lgbt_friendly_only === "boolean"
@@ -498,14 +577,14 @@ function Profile() {
             </div>
           </section>
 
-          <section className="app-split-layout app-split-layout--balanced">
+          <section className="app-split-layout app-split-layout--balanced profile-main-grid">
             <div className="app-content-stack app-content-stack--tight">
               {!isMobile ? (
-                <section className="app-panel-card">
+                <section className="app-panel-card app-panel-card--soft profile-panel">
                   {renderPreferencesContent()}
                 </section>
               ) : (
-                <section className="app-panel-card">
+                <section className="app-panel-card app-panel-card--soft profile-panel">
                   <div className="settings-section">
                     <div className="settings-section__header">
                       <p className="section-label">Preferences</p>
@@ -536,7 +615,7 @@ function Profile() {
             </div>
 
             <div className="app-content-stack app-content-stack--tight">
-              <section className="app-panel-card">
+              <section className="app-panel-card app-panel-card--soft profile-panel">
                 <div className="settings-section">
                   <div className="settings-section__header">
                     <p className="section-label">Shortcuts</p>
@@ -556,7 +635,7 @@ function Profile() {
                 </div>
               </section>
 
-              <section className="app-panel-card app-panel-card--soft">
+              <section className="app-panel-card app-panel-card--soft profile-panel">
                 <div className="settings-section">
                   <div className="settings-section__header">
                     <p className="section-label">Resume</p>
@@ -567,7 +646,7 @@ function Profile() {
                   </div>
 
                   <div className="settings-section__body">
-                    <div className="info-panel">
+                    <div className="info-panel profile-resume-info">
                       <div className="info-panel__content">
                         <p className="card-copy">
                           Current file:{" "}
@@ -588,7 +667,7 @@ function Profile() {
                 </div>
               </section>
 
-              <section className="app-panel-card app-panel-card--soft">
+              <section className="app-panel-card app-panel-card--soft profile-panel">
                 <div className="settings-section">
                   <div className="settings-section__header">
                     <p className="section-label">Account actions</p>
@@ -613,7 +692,7 @@ function Profile() {
               </section>
 
               {error ? (
-                <div className="message-card message-card--warning">
+                <div className="message-card message-card--warning profile-message-card">
                   <p className="message-card__title">Some profile details are missing</p>
                   <p className="message-card__copy">{error}</p>
                 </div>

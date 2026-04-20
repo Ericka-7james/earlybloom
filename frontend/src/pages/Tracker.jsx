@@ -1,3 +1,4 @@
+// src/pages/Tracker.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import JobCard from "../components/jobs/JobCard.jsx";
@@ -348,6 +349,16 @@ function Tracker() {
     parsedResume?.basics?.location
   );
 
+  const savedCount = trackerData?.stats?.saved_jobs_count ?? savedJobs.length;
+  const hiddenCount = trackerData?.stats?.hidden_jobs_count ?? hiddenJobs.length;
+  const resumeStatusLabel = latestResume?.parse_status
+    ? titleCase(latestResume.parse_status)
+    : "None";
+  const desiredLevelsDisplay =
+    preferencesDraft.desired_levels?.length > 0
+      ? preferencesDraft.desired_levels.map(titleCase).join(", ")
+      : "Entry-level, Junior";
+
   const shouldShowLoadingModal =
     isLoading &&
     !hasLoadedOnce &&
@@ -561,6 +572,9 @@ function Tracker() {
     if (activeTab === TRACKER_TABS.SAVED) {
       return (
         <div className="tracker-empty section-card">
+          <div className="tracker-empty__icon" aria-hidden="true">
+            ✦
+          </div>
           <h3 className="tracker-empty__title">No saved jobs yet</h3>
           <p className="tracker-empty__text">
             When you find a role worth circling back to, save it and it will
@@ -577,6 +591,9 @@ function Tracker() {
 
     return (
       <div className="tracker-empty section-card">
+        <div className="tracker-empty__icon" aria-hidden="true">
+          ✦
+        </div>
         <h3 className="tracker-empty__title">No hidden jobs right now</h3>
         <p className="tracker-empty__text">
           Hidden roles live here so your main feed stays cleaner and less
@@ -608,8 +625,8 @@ function Tracker() {
     return (
       <main className="tracker-page">
         <section className="section-pad">
-          <div className="container">
-            <div className="tracker-gate section-card">
+          <div className="container--product">
+            <div className="tracker-gate tracker-gate--centered section-card">
               <span className="eyebrow-pill">Your Job Tracker</span>
               <h1 className="tracker-gate__title">Sign in to use your tracker</h1>
               <p className="tracker-gate__text">
@@ -639,7 +656,86 @@ function Tracker() {
   return (
     <main className="tracker-page">
       <section className="section-pad">
-        <div className="container tracker-stack">
+        <div className="container--product tracker-stack">
+          <section className="tracker-hero section-card">
+            <div className="tracker-hero__layout">
+              <div className="tracker-hero__content">
+                <div className="eyebrow-pill">Tracker</div>
+
+                <div className="tracker-hero__copy">
+                  <h1 className="tracker-hero__title">
+                    Keep saved roles, hidden roles, and resume signals in one
+                    place.
+                  </h1>
+                  <p className="tracker-hero__text">
+                    Your tracker works like the companion space for Jobs,
+                    helping you revisit strong matches, clean up your feed, and
+                    understand what your current resume is signaling.
+                  </p>
+                </div>
+
+                <div className="tracker-hero__actions">
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    onClick={() => setIsResumeModalOpen(true)}
+                  >
+                    {latestResume ? "Replace resume" : "Upload resume"}
+                  </button>
+
+                  <Link to="/jobs" className="button button--secondary">
+                    Browse jobs
+                  </Link>
+
+                  {isMobile ? (
+                    <button
+                      type="button"
+                      className="button button--secondary"
+                      onClick={() => setIsPreferencesModalOpen(true)}
+                    >
+                      Edit preferences
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              {!isMobile ? (
+                <aside
+                  className="tracker-hero__summary"
+                  aria-label="Tracker header summary"
+                >
+                  <span className="tracker-summary-pill">
+                    <span className="tracker-summary-pill__label">Saved</span>
+                    <span className="tracker-summary-pill__value">
+                      {savedCount}
+                    </span>
+                  </span>
+
+                  <span className="tracker-summary-pill">
+                    <span className="tracker-summary-pill__label">Hidden</span>
+                    <span className="tracker-summary-pill__value">
+                      {hiddenCount}
+                    </span>
+                  </span>
+
+                  <span className="tracker-summary-pill">
+                    <span className="tracker-summary-pill__label">Resume</span>
+                    <span className="tracker-summary-pill__value">
+                      {resumeStatusLabel}
+                    </span>
+                  </span>
+
+                  <span className="tracker-summary-pill">
+                    <span className="tracker-summary-pill__label">Levels</span>
+                    <span className="tracker-summary-pill__value">
+                      {desiredLevelsDisplay}
+                    </span>
+                  </span>
+                </aside>
+              ) : null}
+            </div>
+          </section>
+
           <div className="tracker-main-layout">
             {!isMobile ? (
               <aside className="tracker-sidebar">
@@ -657,25 +753,28 @@ function Tracker() {
               <div className="tracker-stats">
                 <article className="tracker-stat tracker-stat--saved section-card">
                   <span className="tracker-stat__label">Saved</span>
-                  <strong className="tracker-stat__value">
-                    {trackerData?.stats?.saved_jobs_count ?? savedJobs.length}
-                  </strong>
+                  <strong className="tracker-stat__value">{savedCount}</strong>
+                  <p className="tracker-stat__meta">Roles you want to revisit</p>
                 </article>
 
                 <article className="tracker-stat tracker-stat--hidden section-card">
                   <span className="tracker-stat__label">Hidden</span>
-                  <strong className="tracker-stat__value">
-                    {trackerData?.stats?.hidden_jobs_count ?? hiddenJobs.length}
-                  </strong>
+                  <strong className="tracker-stat__value">{hiddenCount}</strong>
+                  <p className="tracker-stat__meta">
+                    Jobs removed from your main feed
+                  </p>
                 </article>
 
                 <article className="tracker-stat tracker-stat--resume section-card">
                   <span className="tracker-stat__label">Resume status</span>
                   <strong className="tracker-stat__value">
-                    {latestResume?.parse_status
-                      ? titleCase(latestResume.parse_status)
-                      : "None"}
+                    {resumeStatusLabel}
                   </strong>
+                  <p className="tracker-stat__meta">
+                    {latestResume
+                      ? `Updated ${formatDate(latestResume.updated_at)}`
+                      : "No resume uploaded yet"}
+                  </p>
                 </article>
 
                 <button
@@ -685,14 +784,17 @@ function Tracker() {
                   aria-label="Edit tracker preferences"
                 >
                   <span className="tracker-stat__label">Preferences</span>
-                  <strong className="tracker-stat__value">Edit →</strong>
+                  <strong className="tracker-stat__value">Edit</strong>
+                  <p className="tracker-stat__meta">
+                    Adjust fit and location signals
+                  </p>
                 </button>
               </div>
 
               <section className="section-card tracker-resume-card">
                 <div className="tracker-section-head">
                   <div>
-                    <p className="tracker-stat__label">Latest resume</p>
+                    <p className="tracker-section-kicker">Latest resume</p>
                     <h2 className="tracker-empty__title">
                       {latestResume?.original_filename || "No resume uploaded yet"}
                     </h2>
@@ -719,7 +821,7 @@ function Tracker() {
               <section className="section-card tracker-signals-card">
                 <div className="tracker-section-head">
                   <div>
-                    <p className="tracker-stat__label">Resume signals</p>
+                    <p className="tracker-section-kicker">Resume signals</p>
                     <h2 className="tracker-empty__title">
                       What your resume is currently displaying
                     </h2>
@@ -797,70 +899,85 @@ function Tracker() {
                 )}
               </section>
 
-              <div
-                className="tracker-tabs section-card"
-                role="tablist"
-                aria-label="Tracker sections"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeTab === TRACKER_TABS.SAVED}
-                  className={`tracker-tab ${
-                    activeTab === TRACKER_TABS.SAVED
-                      ? "tracker-tab--active"
-                      : ""
-                  }`}
-                  onClick={() => setActiveTab(TRACKER_TABS.SAVED)}
-                >
-                  Saved Jobs
-                </button>
+              <section className="section-card tracker-jobs-shell">
+                <div className="tracker-section-head tracker-section-head--jobs">
+                  <div>
+                    <p className="tracker-section-kicker">Tracked jobs</p>
+                    <h2 className="tracker-empty__title">
+                      {activeTab === TRACKER_TABS.SAVED
+                        ? "Saved jobs"
+                        : "Hidden jobs"}
+                    </h2>
+                  </div>
+                </div>
 
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeTab === TRACKER_TABS.HIDDEN}
-                  className={`tracker-tab ${
-                    activeTab === TRACKER_TABS.HIDDEN
-                      ? "tracker-tab--active"
-                      : ""
-                  }`}
-                  onClick={() => setActiveTab(TRACKER_TABS.HIDDEN)}
-                >
-                  Hidden Jobs
-                </button>
-              </div>
-
-              {error ? (
                 <div
-                  className="section-card tracker-error"
-                  role="alert"
-                  aria-live="polite"
+                  className="tracker-tabs"
+                  role="tablist"
+                  aria-label="Tracker sections"
                 >
-                  <p className="tracker-error__text">{error}</p>
-                </div>
-              ) : null}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === TRACKER_TABS.SAVED}
+                    className={`tracker-tab ${
+                      activeTab === TRACKER_TABS.SAVED
+                        ? "tracker-tab--active"
+                        : ""
+                    }`}
+                    onClick={() => setActiveTab(TRACKER_TABS.SAVED)}
+                  >
+                    Saved Jobs
+                    <span className="tracker-tab__count">{savedCount}</span>
+                  </button>
 
-              {!isLoading && visibleJobs.length === 0 ? (
-                renderEmptyState()
-              ) : !isLoading ? (
-                <div className="tracker-list">
-                  {visibleJobs.map((job) => (
-                    <JobCard
-                      key={`${activeTab}-${job.id}`}
-                      job={job}
-                      onOpenDetails={() => navigate("/jobs")}
-                      onSaveToggle={handleToggleSave}
-                      onHide={handleHideOrUnhide}
-                      isSavePending={Boolean(pendingActions[job.id]?.saving)}
-                      isHidePending={Boolean(pendingActions[job.id]?.hiding)}
-                      hideLabel={
-                        activeTab === TRACKER_TABS.HIDDEN ? "Unhide" : "Hide"
-                      }
-                    />
-                  ))}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === TRACKER_TABS.HIDDEN}
+                    className={`tracker-tab ${
+                      activeTab === TRACKER_TABS.HIDDEN
+                        ? "tracker-tab--active"
+                        : ""
+                    }`}
+                    onClick={() => setActiveTab(TRACKER_TABS.HIDDEN)}
+                  >
+                    Hidden Jobs
+                    <span className="tracker-tab__count">{hiddenCount}</span>
+                  </button>
                 </div>
-              ) : null}
+
+                {error ? (
+                  <div
+                    className="section-card tracker-error"
+                    role="alert"
+                    aria-live="polite"
+                  >
+                    <p className="tracker-error__text">{error}</p>
+                  </div>
+                ) : null}
+
+                {!isLoading && visibleJobs.length === 0 ? (
+                  renderEmptyState()
+                ) : !isLoading ? (
+                  <div className="tracker-list">
+                    {visibleJobs.map((job) => (
+                      <JobCard
+                        key={`${activeTab}-${job.id}`}
+                        job={job}
+                        onOpenDetails={() => navigate("/jobs")}
+                        onSaveToggle={handleToggleSave}
+                        onHide={handleHideOrUnhide}
+                        isSavePending={Boolean(pendingActions[job.id]?.saving)}
+                        isHidePending={Boolean(pendingActions[job.id]?.hiding)}
+                        hideLabel={
+                          activeTab === TRACKER_TABS.HIDDEN ? "Unhide" : "Hide"
+                        }
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </section>
             </div>
           </div>
         </div>
