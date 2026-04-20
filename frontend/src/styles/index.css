@@ -122,6 +122,11 @@
   --blur-surface: blur(14px);
   --blur-strong: blur(18px);
 
+  /* Navigation sizing */
+  --app-utility-nav-height: 4.5rem;
+  --desktop-section-nav-height: 3.75rem;
+  --mobile-bottom-nav-height: 4.5rem;
+
   /* Gradients */
   --gradient-page:
     radial-gradient(circle at top left, rgba(255, 206, 223, 0.55), transparent 30%),
@@ -229,6 +234,20 @@ select {
   width: 100%;
 }
 
+/* Accessibility helpers */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Focus treatment */
 
 :where(
@@ -279,6 +298,13 @@ select {
 
 .app-shell {
   min-height: 100vh;
+}
+
+.app-main {
+  min-height: calc(100vh - var(--app-utility-nav-height));
+  padding-bottom: calc(
+    var(--mobile-bottom-nav-height) + env(safe-area-inset-bottom) + var(--space-4)
+  );
 }
 
 .page-shell {
@@ -1205,6 +1231,15 @@ textarea::placeholder {
   color: var(--color-text-muted);
 }
 
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--color-text);
+  -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.82) inset;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
 input:hover,
 textarea:hover,
 select:hover {
@@ -1582,6 +1617,15 @@ select:disabled {
   .form-grid--two,
   .form-row--inline {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) {
+  .app-main {
+    min-height: calc(
+      100vh - var(--app-utility-nav-height) - var(--desktop-section-nav-height)
+    );
+    padding-bottom: var(--space-10);
   }
 }
 
