@@ -23,7 +23,9 @@ describe("JobCard", () => {
     expect(screen.getByText("Bloom Labs")).toBeInTheDocument();
     expect(screen.getByText("Real Junior")).toBeInTheDocument();
     expect(screen.getByLabelText("87 percent match")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Quick view" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Quick view" })
+    ).toBeInTheDocument();
 
     expect(screen.getByText("Atlanta, GA")).toBeInTheDocument();
     expect(screen.getByText("Junior")).toBeInTheDocument();
@@ -76,7 +78,9 @@ describe("JobCard", () => {
     );
 
     expect(
-      screen.getByText("Possible fit, but double-check requirements.")
+      screen.getByText(
+        "You may qualify, but review the requirements before applying."
+      )
     ).toBeInTheDocument();
   });
 
@@ -91,7 +95,9 @@ describe("JobCard", () => {
     );
 
     expect(
-      screen.getByText("Labeled junior, but parts may lean more experienced.")
+      screen.getByText(
+        "Listed as junior, but parts may lean more experienced."
+      )
     ).toBeInTheDocument();
   });
 
@@ -106,7 +112,7 @@ describe("JobCard", () => {
     );
 
     expect(
-      screen.getByText("This may be more experienced than it first appears.")
+      screen.getByText("This role may be more experienced than it first appears.")
     ).toBeInTheDocument();
   });
 
@@ -195,7 +201,7 @@ describe("JobCard", () => {
     expect(screen.getByLabelText("0 percent match")).toBeInTheDocument();
   });
 
-  it("renders all cardMeta items", () => {
+  it("shows only the first three visible metadata items", () => {
     render(
       <JobCard
         job={{
@@ -206,8 +212,29 @@ describe("JobCard", () => {
     );
 
     expect(screen.getByText("One")).toBeInTheDocument();
-    expect(screen.getByText("Six")).toBeInTheDocument();
-    expect(screen.getByText("Seven")).toBeInTheDocument();
+    expect(screen.getByText("Two")).toBeInTheDocument();
+    expect(screen.getByText("Three")).toBeInTheDocument();
+
+    expect(screen.queryByText("Four")).not.toBeInTheDocument();
+    expect(screen.queryByText("Five")).not.toBeInTheDocument();
+    expect(screen.queryByText("Six")).not.toBeInTheDocument();
+    expect(screen.queryByText("Seven")).not.toBeInTheDocument();
+  });
+
+  it("renders recency metadata as a signal chip and non-recency items as metadata tags", () => {
+    render(
+      <JobCard
+        job={{
+          ...baseJob,
+          cardMeta: ["2 days ago", "Atlanta, GA", "Remote"],
+        }}
+      />
+    );
+
+    expect(screen.getByText("2 days ago")).toBeInTheDocument();
+    expect(screen.getByText("Atlanta, GA")).toBeInTheDocument();
+    expect(screen.getByText("Remote")).toBeInTheDocument();
+    expect(screen.getByLabelText("Job metadata")).toBeInTheDocument();
   });
 
   it("does not render metadata section when cardMeta is missing", () => {
@@ -270,7 +297,10 @@ describe("JobCard", () => {
     );
 
     const applyLink = screen.getByRole("link", { name: "Apply" });
-    expect(applyLink).toHaveAttribute("href", "https://example.com/source-only");
+    expect(applyLink).toHaveAttribute(
+      "href",
+      "https://example.com/source-only"
+    );
   });
 
   it("renders apply as a button when no external url is available", () => {
@@ -355,9 +385,7 @@ describe("JobCard", () => {
   it("uses custom hide label when provided", () => {
     render(<JobCard job={baseJob} hideLabel="Archive" />);
 
-    expect(
-      screen.getByRole("button", { name: "Archive" })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
   });
 
   it("shows restore label when the job is hidden", () => {
@@ -379,11 +407,7 @@ describe("JobCard", () => {
     const onHide = vi.fn();
 
     render(
-      <JobCard
-        job={baseJob}
-        onHide={onHide}
-        isHidePending={true}
-      />
+      <JobCard job={baseJob} onHide={onHide} isHidePending={true} />
     );
 
     expect(screen.getByRole("button", { name: "Hide job" })).toBeDisabled();
@@ -415,16 +439,61 @@ describe("JobCard", () => {
     const onHide = vi.fn();
 
     render(
-      <JobCard
-        job={baseJob}
-        onOpenDetails={onOpenDetails}
-        onHide={onHide}
-      />
+      <JobCard job={baseJob} onOpenDetails={onOpenDetails} onHide={onHide} />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Hide job" }));
 
     expect(onHide).toHaveBeenCalledTimes(1);
     expect(onOpenDetails).not.toHaveBeenCalled();
+  });
+
+  it("renders one matched skill chip when matchedSkills are provided", () => {
+    render(
+      <JobCard
+        job={{
+          ...baseJob,
+          matchedSkills: ["React", "JavaScript", "CSS"],
+        }}
+      />
+    );
+
+    expect(screen.getByLabelText("Matched skills")).toBeInTheDocument();
+    expect(screen.getByText("Matched skills")).toBeInTheDocument();
+    expect(screen.getByText("React")).toBeInTheDocument();
+    expect(screen.queryByText("JavaScript")).not.toBeInTheDocument();
+    expect(screen.queryByText("CSS")).not.toBeInTheDocument();
+  });
+
+  it("does not render matched skills section when matchedSkills is missing", () => {
+    render(
+      <JobCard
+        job={{
+          ...baseJob,
+          matchedSkills: undefined,
+        }}
+      />
+    );
+
+    expect(screen.queryByLabelText("Matched skills")).not.toBeInTheDocument();
+  });
+
+  it("truncates long quick-take text", () => {
+    render(
+      <JobCard
+        job={{
+          ...baseJob,
+          qualificationSignal: {
+            text: "This is a very long quick take designed to exceed the truncation limit so the compact card stays tidy and does not spill too much copy into the layout.",
+          },
+        }}
+      />
+    );
+
+    const quickTake = screen.getByText((content) =>
+      content.startsWith("This is a very long quick take designed to exceed")
+    );
+
+    expect(quickTake.textContent.endsWith("…")).toBe(true);
   });
 });
