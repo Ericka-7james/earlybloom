@@ -111,14 +111,14 @@ function validatePassword(password) {
  * - stronger password validation
  * - duplicate-submit protection
  * - honeypot bot trap
- * - local profile icon selection with a default option
+ * - local avatar selection with a default option
  *
  * @returns {JSX.Element} Sign-up page.
  */
 function SignUp() {
   const navigate = useNavigate();
 
-  const defaultIcon =
+  const defaultAvatar =
     PROFILE_ICON_OPTIONS.find((icon) => icon.isDefault)?.id ||
     PROFILE_ICON_OPTIONS[0].id;
 
@@ -127,7 +127,7 @@ function SignUp() {
     email: "",
     password: "",
     confirm: "",
-    profileIcon: defaultIcon,
+    avatar: defaultAvatar,
     website: "",
   });
 
@@ -150,10 +150,10 @@ function SignUp() {
     setForm((current) => ({ ...current, [name]: value }));
   }
 
-  function handleProfileIconSelect(iconId) {
+  function handleAvatarSelect(avatarId) {
     setForm((current) => ({
       ...current,
-      profileIcon: iconId,
+      avatar: avatarId,
     }));
   }
 
@@ -218,7 +218,7 @@ function SignUp() {
         email: cleanedEmail,
         password: form.password,
         displayName: cleanedName,
-        profileIcon: form.profileIcon,
+        avatar: form.avatar,
       });
 
       window.sessionStorage.setItem(WELCOME_MODAL_PENDING_KEY, "true");
@@ -411,7 +411,7 @@ function SignUp() {
                   aria-label="Profile icon options"
                 >
                   {PROFILE_ICON_OPTIONS.map((icon) => {
-                    const isSelected = form.profileIcon === icon.id;
+                    const isSelected = form.avatar === icon.id;
 
                     return (
                       <button
@@ -423,7 +423,7 @@ function SignUp() {
                         className={`signup-avatar-option ${
                           isSelected ? "signup-avatar-option--selected" : ""
                         }`}
-                        onClick={() => handleProfileIconSelect(icon.id)}
+                        onClick={() => handleAvatarSelect(icon.id)}
                       >
                         <span className="signup-avatar-option__image-wrap">
                           <img
@@ -438,15 +438,9 @@ function SignUp() {
                           {icon.label}
                         </span>
 
-                        {icon.isDefault ? (
-                          <span className="signup-avatar-option__meta">
-                            Default
-                          </span>
-                        ) : (
-                          <span className="signup-avatar-option__meta">
-                            Select
-                          </span>
-                        )}
+                        <span className="signup-avatar-option__meta">
+                          {icon.isDefault ? "Default" : "Select"}
+                        </span>
                       </button>
                     );
                   })}

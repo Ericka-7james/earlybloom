@@ -1,6 +1,10 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
+import BloomiIcon from "../assets/bloombug/bloombugFam/Bloomi.png";
+import NibbletIcon from "../assets/bloombug/bloombugFam/Nibblet.png";
+import PetalooIcon from "../assets/bloombug/bloombugFam/Petaloo.png";
+import SprigletIcon from "../assets/bloombug/bloombugFam/Spriglet.png";
 import { useAuth } from "../hooks/useAuth";
 import {
   NAV_AUTH_LINKS,
@@ -10,6 +14,13 @@ import NavIcon from "./navbar/NavIcon";
 import NavLinks from "./navbar/NavLinks";
 import ProfileMenu from "./navbar/ProfileMenu";
 import "../styles/components/navbar.css";
+
+const AVATAR_IMAGE_BY_ID = {
+  petaloo: PetalooIcon,
+  bloomi: BloomiIcon,
+  nibblet: NibbletIcon,
+  spriglet: SprigletIcon,
+};
 
 /**
  * Returns a concise label for the authenticated user.
@@ -29,12 +40,32 @@ function getUserLabel(user) {
     user.user_metadata?.full_name ||
     user.user_metadata?.name ||
     user.user_metadata?.preferred_name ||
+    user.profile?.display_name ||
     "";
 
   const emailPrefix = user.email?.split("@")[0] || "";
   const rawLabel = metadataName || emailPrefix || "Account";
 
   return rawLabel.trim().split(/\s+/)[0].slice(0, 16) || "Account";
+}
+
+/**
+ * Resolves the signed-in user's chosen avatar id from available profile or
+ * auth metadata and falls back safely to the default Bloombug.
+ *
+ * @param {object | null} user - Current authenticated user.
+ * @returns {string} Normalized avatar id.
+ */
+function getUserAvatarId(user) {
+  const rawAvatar =
+    user?.profile?.avatar ||
+    user?.user_metadata?.avatar ||
+    user?.avatar ||
+    "petaloo";
+
+  const normalizedAvatar = String(rawAvatar).trim().toLowerCase();
+
+  return AVATAR_IMAGE_BY_ID[normalizedAvatar] ? normalizedAvatar : "petaloo";
 }
 
 /**
@@ -47,8 +78,8 @@ function getUserLabel(user) {
  *
  * Auth behavior:
  * - signed-out users see Join and Sign in links
- * - signed-in users see a profile icon instead of those links
- * - clicking the profile icon opens a dropdown with Profile and Sign out
+ * - signed-in users see their selected avatar instead of the generic profile icon
+ * - clicking the avatar opens a dropdown with Profile and Sign out
  *
  * @returns {JSX.Element} Shared application navigation.
  */
@@ -60,6 +91,11 @@ function Navbar() {
   const profileMenuRef = useRef(null);
 
   const userLabel = useMemo(() => getUserLabel(user), [user]);
+  const userAvatarId = useMemo(() => getUserAvatarId(user), [user]);
+  const userAvatarSrc = useMemo(
+    () => AVATAR_IMAGE_BY_ID[userAvatarId],
+    [userAvatarId]
+  );
 
   /**
    * Sends the user to the jobs route from the compact utility header.
@@ -163,6 +199,8 @@ function Navbar() {
                     onProfileClick={handleProfileNavigate}
                     onSignOutClick={handleSignOutClick}
                     title={userLabel}
+                    avatarSrc={userAvatarSrc}
+                    avatarAlt={`${userLabel} avatar`}
                   />
                 ) : (
                   <div className="app-header__auth-links">
