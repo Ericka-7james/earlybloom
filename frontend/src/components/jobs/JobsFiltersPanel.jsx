@@ -10,7 +10,7 @@ import {
  * @param {Array<{label:string,value:string,count?:number,source?:string}>} options
  * @param {string[]} selectedValues
  * @param {(value:string)=>void} onToggle
- * @returns {JSX.Element}
+ * @returns {JSX.Element | null} Chip list.
  */
 function renderFilterChips(options, selectedValues, onToggle) {
   const safeOptions = Array.isArray(options) ? options : [];
@@ -62,7 +62,7 @@ function renderFilterChips(options, selectedValues, onToggle) {
  * onToggleOpen:()=>void,
  * children:React.ReactNode
  * }} props
- * @returns {JSX.Element}
+ * @returns {JSX.Element} Filter section.
  */
 function FilterSection({ title, isOpen, onToggleOpen, children }) {
   return (
@@ -106,20 +106,8 @@ function FilterSection({ title, isOpen, onToggleOpen, children }) {
  * 1. user resume skills
  * 2. current jobs dataset skills
  *
- * @param {{
- * hasActiveFilters:boolean,
- * selectedExperienceLevels:string[],
- * selectedWorkplaces:string[],
- * selectedRoleTypes:string[],
- * selectedSkills:string[],
- * availableSkills:Array<{label:string,value:string,count:number,source:string}>,
- * setSelectedExperienceLevels:Function,
- * setSelectedWorkplaces:Function,
- * setSelectedRoleTypes:Function,
- * setSelectedSkills:Function,
- * onClearAll:()=>void
- * }} props
- * @returns {JSX.Element}
+ * @param {object} props Component props.
+ * @returns {JSX.Element} Filters panel.
  */
 function JobsFiltersPanel({
   hasActiveFilters,
@@ -162,13 +150,15 @@ function JobsFiltersPanel({
   ]);
 
   const visibleSkillOptions = useMemo(() => {
-    if (showAllSkills) {
-      return safeAvailableSkills;
-    }
-
-    return safeAvailableSkills.slice(0, 10);
+    return showAllSkills ? safeAvailableSkills : safeAvailableSkills.slice(0, 10);
   }, [safeAvailableSkills, showAllSkills]);
 
+  /**
+   * Toggles a filter section open state.
+   *
+   * @param {string} sectionKey Section key.
+   * @returns {void}
+   */
   function toggleSection(sectionKey) {
     setOpenSections((current) => ({
       ...current,
@@ -176,13 +166,22 @@ function JobsFiltersPanel({
     }));
   }
 
+  /**
+   * Toggles a selected skill.
+   *
+   * @param {string} value Skill value.
+   * @returns {void}
+   */
   function toggleSkills(value) {
     if (typeof setSelectedSkills !== "function") {
       return;
     }
 
     setSelectedSkills((currentValues) =>
-      toggleSelectedValue(Array.isArray(currentValues) ? currentValues : [], value)
+      toggleSelectedValue(
+        Array.isArray(currentValues) ? currentValues : [],
+        value
+      )
     );
   }
 
@@ -227,7 +226,10 @@ function JobsFiltersPanel({
             selectedExperienceLevels,
             (value) =>
               setSelectedExperienceLevels((currentValues) =>
-                toggleSelectedValue(Array.isArray(currentValues) ? currentValues : [], value)
+                toggleSelectedValue(
+                  Array.isArray(currentValues) ? currentValues : [],
+                  value
+                )
               )
           )}
         </FilterSection>
@@ -242,7 +244,10 @@ function JobsFiltersPanel({
             selectedWorkplaces,
             (value) =>
               setSelectedWorkplaces((currentValues) =>
-                toggleSelectedValue(Array.isArray(currentValues) ? currentValues : [], value)
+                toggleSelectedValue(
+                  Array.isArray(currentValues) ? currentValues : [],
+                  value
+                )
               )
           )}
         </FilterSection>
@@ -257,7 +262,10 @@ function JobsFiltersPanel({
             selectedRoleTypes,
             (value) =>
               setSelectedRoleTypes((currentValues) =>
-                toggleSelectedValue(Array.isArray(currentValues) ? currentValues : [], value)
+                toggleSelectedValue(
+                  Array.isArray(currentValues) ? currentValues : [],
+                  value
+                )
               )
           )}
         </FilterSection>
@@ -268,11 +276,8 @@ function JobsFiltersPanel({
           onToggleOpen={() => toggleSection("skills")}
         >
           {safeAvailableSkills.length > 0 ? (
-            <>
-              <p
-                className="jobs-filters__text"
-                style={{ marginBottom: "0.75rem" }}
-              >
+            <div className="jobs-filters__skills">
+              <p className="jobs-filters__text jobs-filters__skills-text">
                 Personalized from your resume and current results.
               </p>
 
@@ -283,7 +288,7 @@ function JobsFiltersPanel({
               )}
 
               {safeAvailableSkills.length > 10 ? (
-                <div style={{ marginTop: "0.875rem" }}>
+                <div className="jobs-filters__skills-actions">
                   <button
                     type="button"
                     className="jobs-chip jobs-chip--muted"
@@ -293,7 +298,7 @@ function JobsFiltersPanel({
                   </button>
                 </div>
               ) : null}
-            </>
+            </div>
           ) : (
             <p className="jobs-filters__text">
               Skill filters appear once resume skills or job-result skills are
