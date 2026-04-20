@@ -1,6 +1,6 @@
 import bloombugMarketingMascot from "../assets/bloombug/BloombugMarketingMascot.png";
 import BloombugCareerGarden from "../assets/bloombug/BloombugCareerGarden.png";
-import "../styles/components/learnmore.css";
+import "../styles/pages/learnmore.css";
 
 /**
  * Renders the Learn More page for EarlyBloom.
