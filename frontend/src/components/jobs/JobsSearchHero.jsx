@@ -8,11 +8,6 @@ import React from "react";
  */
 function JobsSearchHero({
   visibleResumeFile,
-  filtersSummary,
-  isLoading,
-  isRefreshing,
-  onOpenFilters,
-  onRefresh,
   onRequestResumeUpload,
 }) {
   return (
@@ -50,38 +45,6 @@ function JobsSearchHero({
                 </p>
               </div>
             </button>
-          </div>
-
-          <div className="jobs-search-panel__controls">
-            <button
-              type="button"
-              className="jobs-search-panel__input"
-              onClick={onOpenFilters}
-            >
-              <span className="jobs-search-panel__input-label">Browse setup</span>
-              <span className="jobs-search-panel__input-value">
-                {filtersSummary}
-              </span>
-            </button>
-
-            <div className="jobs-search-panel__action-row">
-              <button
-                type="button"
-                className="jobs-search-panel__filters-button"
-                onClick={onOpenFilters}
-              >
-                All filters
-              </button>
-
-              <button
-                type="button"
-                className="jobs-search-panel__refresh-button"
-                onClick={onRefresh}
-                disabled={isLoading || isRefreshing}
-              >
-                {isRefreshing ? "Refreshing..." : "Refresh results"}
-              </button>
-            </div>
           </div>
         </div>
       </div>

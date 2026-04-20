@@ -1,13 +1,187 @@
+/**
+ * Profile page styles.
+ *
+ * Visual goals:
+ * - match the updated Jobs-page product feel
+ * - keep the page polished, purple-forward, and responsive
+ * - avoid altering business logic or interaction flow
+ */
+
 .profile-page {
   width: 100%;
 }
 
+.profile-page__section {
+  padding-top: 1rem;
+}
+
+.profile-page__stack {
+  gap: 1.25rem;
+}
+
+.profile-page__hero-wrap {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
 .profile-hero {
-  align-items: start;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.profile-hero--polished {
+  position: relative;
+  border-color: rgba(102, 76, 181, 0.16);
+  background:
+    radial-gradient(circle at top right, rgba(255, 143, 196, 0.12), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(127, 90, 240, 0.16), transparent 34%),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.96) 0%,
+      rgba(245, 241, 255, 0.94) 100%
+    );
+  box-shadow:
+    0 18px 44px rgba(64, 44, 122, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.profile-hero--polished::after {
+  content: "";
+  position: absolute;
+  inset: auto -8% -30% auto;
+  width: 18rem;
+  height: 18rem;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    rgba(127, 90, 240, 0.12) 0%,
+    rgba(127, 90, 240, 0) 72%
+  );
+  pointer-events: none;
+}
+
+.profile-hero__content,
+.profile-hero__aside {
+  position: relative;
+  z-index: 1;
 }
 
 .profile-hero__aside {
   min-width: 0;
+}
+
+.profile-hero__meta {
+  gap: 0.75rem;
+}
+
+.profile-chip {
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(102, 76, 181, 0.16);
+  color: var(--color-primary-dark);
+}
+
+.profile-snapshot-card {
+  height: 100%;
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.98) 0%,
+      rgba(244, 239, 255, 0.95) 100%
+    );
+  border: 1px solid rgba(102, 76, 181, 0.14);
+  box-shadow: 0 16px 34px rgba(64, 44, 122, 0.08);
+}
+
+.profile-snapshot-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.profile-snapshot-row {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid rgba(102, 76, 181, 0.1);
+}
+
+.profile-snapshot-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.profile-snapshot-row__label {
+  color: var(--color-text-soft);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.profile-snapshot-row__value {
+  color: var(--color-heading);
+  font-size: 0.98rem;
+  line-height: 1.5;
+  font-weight: 700;
+}
+
+.profile-stats-grid {
+  gap: 0.85rem;
+}
+
+.profile-stat-card {
+  min-height: 148px;
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.98) 0%,
+      rgba(245, 241, 255, 0.94) 100%
+    );
+  border-color: rgba(102, 76, 181, 0.14);
+  box-shadow: 0 14px 32px rgba(64, 44, 122, 0.08);
+}
+
+.profile-main-grid {
+  align-items: start;
+}
+
+.profile-panel {
+  border-radius: var(--radius-xl);
+  border-color: rgba(102, 76, 181, 0.14);
+  box-shadow: 0 16px 38px rgba(64, 44, 122, 0.08);
+}
+
+.profile-preferences-section {
+  gap: 1rem;
+}
+
+.profile-preferences-grid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.profile-detail-tile {
+  padding: 1rem 1rem 1.05rem;
+  border-radius: 1.1rem;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(102, 76, 181, 0.1);
+}
+
+.profile-detail-tile .form-field__label {
+  color: var(--color-primary-deep);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.profile-resume-info {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.96) 0%,
+      rgba(247, 243, 255, 0.92) 100%
+    );
 }
 
 .profile-shortcuts {
@@ -22,8 +196,67 @@
   justify-content: flex-end;
 }
 
+.profile-message-card {
+  border-radius: var(--radius-lg);
+}
+
+.profile-empty-state {
+  border-radius: var(--radius-xl);
+}
+
 @media (min-width: 640px) {
   .profile-shortcuts .button {
     width: auto;
+  }
+
+  .profile-preferences-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .profile-detail-tile--wide {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 860px) {
+  .profile-hero {
+    grid-template-columns: minmax(0, 1.2fr) minmax(290px, 0.8fr);
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .profile-page__section {
+    padding-top: 0.75rem;
+  }
+
+  .profile-page__stack {
+    gap: 1rem;
+  }
+
+  .profile-hero__meta {
+    gap: 0.55rem;
+  }
+
+  .profile-panel {
+    border-radius: 1.5rem;
+  }
+
+  .profile-account-actions {
+    justify-content: stretch;
+  }
+
+  .profile-account-actions .button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .profile-detail-tile {
+    padding: 0.9rem;
+  }
+
+  .profile-snapshot-row {
+    padding: 0.75rem 0;
   }
 }
