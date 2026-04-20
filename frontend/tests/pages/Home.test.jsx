@@ -16,7 +16,7 @@ describe("Home", () => {
     renderHome();
 
     expect(
-      screen.getByText("Mobile-first job matching for people building careers in tech")
+      screen.getByText("Real roles for early careers")
     ).toBeInTheDocument();
 
     expect(
