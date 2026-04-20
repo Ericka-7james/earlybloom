@@ -5,7 +5,7 @@ import CommonLoadingModal from "../components/common/CommonLoadingModal.jsx";
 import BloombugAppIcon from "../assets/bloombug/BloombugAppIcon.png";
 import { useAuth } from "../hooks/useAuth";
 import { fetchTracker } from "../lib/tracker/trackerApi";
-import "../styles/components/profile.css";
+import "../styles/pages/profile.css";
 
 const DEFAULT_PROFILE = {
   display_name: null,

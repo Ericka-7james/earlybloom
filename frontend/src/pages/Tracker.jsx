@@ -21,7 +21,7 @@ import {
   fetchTracker,
   updateTrackerPreferences,
 } from "../lib/tracker/trackerApi";
-import "../styles/components/tracker.css";
+import "../styles/pages/tracker.css";
 
 const TRACKER_TABS = {
   SAVED: "saved",

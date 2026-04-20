@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import "../styles/components/signup-page.css";
+import "../styles/pages/signup-page.css";
 import { signUp } from "../lib/auth/authApi";
 import PetalloMascot from "../assets/bloombug/bloombugFam/Petaloo.png";
 import BloomiIcon from "../assets/bloombug/bloombugFam/Bloomi.png";
