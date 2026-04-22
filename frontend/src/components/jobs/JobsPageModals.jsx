@@ -6,29 +6,70 @@ import CommonModal from "../common/CommonModal.jsx";
 import BloombugAppIcon from "../../assets/bloombug/BloombugAppIcon.png";
 
 /**
+ * Returns a safe array.
+ *
+ * @param {unknown} value Potential array.
+ * @returns {Array<unknown>} Safe array.
+ */
+function toSafeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+/**
+ * Returns safe login-required content.
+ *
+ * @param {unknown} value Potential login content object.
+ * @returns {{eyebrow: string, title: string, body: string}} Safe modal copy.
+ */
+function toSafeLoginContent(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      eyebrow: "Sign in to continue.",
+      title: "Sign in required",
+      body: "Please sign in to use this feature.",
+    };
+  }
+
+  return {
+    eyebrow:
+      typeof value.eyebrow === "string" && value.eyebrow.trim()
+        ? value.eyebrow
+        : "Sign in to continue.",
+    title:
+      typeof value.title === "string" && value.title.trim()
+        ? value.title
+        : "Sign in required",
+    body:
+      typeof value.body === "string" && value.body.trim()
+        ? value.body
+        : "Please sign in to use this feature.",
+  };
+}
+
+/**
  * Renders all Jobs page modals in one place.
  *
  * @param {object} props Component props.
  * @returns {JSX.Element} Jobs page modals.
  */
 function JobsPageModals({
-  activeJob,
-  isFiltersModalOpen,
-  isLoginRequiredModalOpen,
-  isWelcomeModalOpen,
-  isResumeModalOpen,
-  hasActiveFilters,
-  loginContent,
-  availableSkillOptions,
-  selectedExperienceLevels,
-  selectedWorkplaces,
-  selectedRoleTypes,
-  selectedSkills,
+  activeJob = null,
+  isFiltersModalOpen = false,
+  isLoginRequiredModalOpen = false,
+  isWelcomeModalOpen = false,
+  isResumeModalOpen = false,
+  hasActiveFilters = false,
+  loginContent = null,
+  availableSkillOptions = [],
+  selectedExperienceLevels = [],
+  selectedWorkplaces = [],
+  selectedRoleTypes = [],
+  selectedSkills = [],
   setSelectedExperienceLevels,
   setSelectedWorkplaces,
   setSelectedRoleTypes,
   setSelectedSkills,
-  visibleResumeFile,
+  visibleResumeFile = null,
   onCloseDetails,
   onCloseFilters,
   onClearAllFilters,
@@ -39,10 +80,17 @@ function JobsPageModals({
   onCloseResumeModal,
   onResumeSaved,
 }) {
+  const safeLoginContent = toSafeLoginContent(loginContent);
+  const safeAvailableSkillOptions = toSafeArray(availableSkillOptions);
+  const safeSelectedExperienceLevels = toSafeArray(selectedExperienceLevels);
+  const safeSelectedWorkplaces = toSafeArray(selectedWorkplaces);
+  const safeSelectedRoleTypes = toSafeArray(selectedRoleTypes);
+  const safeSelectedSkills = toSafeArray(selectedSkills);
+
   return (
     <>
       <CommonModal
-        isOpen={isFiltersModalOpen}
+        isOpen={Boolean(isFiltersModalOpen)}
         title="Filters"
         onClose={onCloseFilters}
         size="md"
@@ -51,12 +99,12 @@ function JobsPageModals({
       >
         <div className="jobs-filters jobs-filters--modal">
           <JobsFiltersPanel
-            hasActiveFilters={hasActiveFilters}
-            selectedExperienceLevels={selectedExperienceLevels}
-            selectedWorkplaces={selectedWorkplaces}
-            selectedRoleTypes={selectedRoleTypes}
-            selectedSkills={selectedSkills}
-            availableSkills={availableSkillOptions}
+            hasActiveFilters={Boolean(hasActiveFilters)}
+            selectedExperienceLevels={safeSelectedExperienceLevels}
+            selectedWorkplaces={safeSelectedWorkplaces}
+            selectedRoleTypes={safeSelectedRoleTypes}
+            selectedSkills={safeSelectedSkills}
+            availableSkills={safeAvailableSkillOptions}
             setSelectedExperienceLevels={setSelectedExperienceLevels}
             setSelectedWorkplaces={setSelectedWorkplaces}
             setSelectedRoleTypes={setSelectedRoleTypes}
@@ -67,7 +115,7 @@ function JobsPageModals({
       </CommonModal>
 
       <CommonModal
-        isOpen={isLoginRequiredModalOpen}
+        isOpen={Boolean(isLoginRequiredModalOpen)}
         title="Sign in required"
         onClose={onCloseLoginRequired}
         size="md"
@@ -77,15 +125,15 @@ function JobsPageModals({
         <div className="jobs-reasons-modal">
           <div className="jobs-reasons-modal__intro">
             <p className="jobs-reasons-modal__job-meta">
-              {loginContent.eyebrow}
+              {safeLoginContent.eyebrow}
             </p>
 
             <h3 className="jobs-reasons-modal__job-title">
-              {loginContent.title}
+              {safeLoginContent.title}
             </h3>
 
             <p className="jobs-results__text jobs-results__text--modal">
-              {loginContent.body}
+              {safeLoginContent.body}
             </p>
           </div>
 
@@ -110,7 +158,7 @@ function JobsPageModals({
       </CommonModal>
 
       <CommonModal
-        isOpen={isWelcomeModalOpen}
+        isOpen={Boolean(isWelcomeModalOpen)}
         title="Welcome to EarlyBloom"
         onClose={onCloseWelcome}
         size="md"
@@ -160,7 +208,7 @@ function JobsPageModals({
       />
 
       <ResumeUploadModal
-        isOpen={isResumeModalOpen}
+        isOpen={Boolean(isResumeModalOpen)}
         onClose={onCloseResumeModal}
         onResumeSaved={onResumeSaved}
         resumeFile={visibleResumeFile}
