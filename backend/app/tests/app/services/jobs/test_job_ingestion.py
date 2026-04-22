@@ -63,8 +63,23 @@ class FakeRepository:
         self.running_ingestions = set()
         self.cooldown_ingestions = set()
 
-    def build_query_cache_key(self, *, remote_only=False, levels=None, role_types=None):
-        return f"remote={remote_only}|levels={levels or []}|roles={role_types or []}"
+    def build_query_cache_key(
+        self,
+        *,
+        remote_only=False,
+        levels=None,
+        role_types=None,
+        location_query=None,
+    ):
+        normalized_location = " ".join(
+            str(location_query or "").strip().lower().split()
+        )
+        return (
+            f"remote={remote_only}"
+            f"|levels={levels or []}"
+            f"|roles={role_types or []}"
+            f"|location={normalized_location}"
+        )
 
     def get_query_cache(self, cache_key: str):
         return self.query_cache.get(cache_key)
