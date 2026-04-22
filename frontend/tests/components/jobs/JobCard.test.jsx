@@ -42,15 +42,15 @@ describe("JobCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the default quick take for Real Junior roles", () => {
+  it("does not render legacy quick take text for Real Junior roles", () => {
     render(<JobCard job={baseJob} />);
 
     expect(
-      screen.getByText("Looks realistically junior-friendly.")
-    ).toBeInTheDocument();
+      screen.queryByText("Looks realistically junior-friendly.")
+    ).not.toBeInTheDocument();
   });
 
-  it("renders qualification signal text when provided", () => {
+  it("does not render qualification signal text in the compact card", () => {
     render(
       <JobCard
         job={{
@@ -63,11 +63,11 @@ describe("JobCard", () => {
     );
 
     expect(
-      screen.getByText("Role is explicitly framed as early-career friendly.")
-    ).toBeInTheDocument();
+      screen.queryByText("Role is explicitly framed as early-career friendly.")
+    ).not.toBeInTheDocument();
   });
 
-  it("renders the default quick take for Stretch Role", () => {
+  it("does not render legacy quick take text for Stretch Role", () => {
     render(
       <JobCard
         job={{
@@ -78,13 +78,13 @@ describe("JobCard", () => {
     );
 
     expect(
-      screen.getByText(
+      screen.queryByText(
         "You may qualify, but review the requirements before applying."
       )
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
   });
 
-  it("renders the default quick take for Misleading Junior", () => {
+  it("does not render legacy quick take text for Misleading Junior", () => {
     render(
       <JobCard
         job={{
@@ -95,13 +95,13 @@ describe("JobCard", () => {
     );
 
     expect(
-      screen.getByText(
+      screen.queryByText(
         "Listed as junior, but parts may lean more experienced."
       )
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
   });
 
-  it("renders the default quick take fallback for Too Senior roles", () => {
+  it("does not render legacy quick take text for Too Senior", () => {
     render(
       <JobCard
         job={{
@@ -112,8 +112,8 @@ describe("JobCard", () => {
     );
 
     expect(
-      screen.getByText("This role may be more experienced than it first appears.")
-    ).toBeInTheDocument();
+      screen.queryByText("This role may be more experienced than it first appears.")
+    ).not.toBeInTheDocument();
   });
 
   it("calls onOpenDetails when the card surface is clicked", () => {
@@ -406,9 +406,7 @@ describe("JobCard", () => {
   it("does not call onHide when hide is pending", () => {
     const onHide = vi.fn();
 
-    render(
-      <JobCard job={baseJob} onHide={onHide} isHidePending={true} />
-    );
+    render(<JobCard job={baseJob} onHide={onHide} isHidePending={true} />);
 
     expect(screen.getByRole("button", { name: "Hide job" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Hide job" }));
@@ -478,22 +476,27 @@ describe("JobCard", () => {
     expect(screen.queryByLabelText("Matched skills")).not.toBeInTheDocument();
   });
 
-  it("truncates long quick-take text", () => {
+  it("coerces object and array values into safe display text", () => {
     render(
       <JobCard
         job={{
-          ...baseJob,
-          qualificationSignal: {
-            text: "This is a very long quick take designed to exceed the truncation limit so the compact card stays tidy and does not spill too much copy into the layout.",
-          },
+          id: { name: "object-id" },
+          title: { text: "Frontend Platform Engineer" },
+          company: { label: "Signal Bloom" },
+          fitTag: "Real Junior",
+          matchScore: 61,
+          cardMeta: [{ label: "Atlanta, GA" }, ["Hybrid"], { text: "Entry-level" }],
+          matchedSkills: [{ name: "TypeScript" }, "React"],
         }}
       />
     );
 
-    const quickTake = screen.getByText((content) =>
-      content.startsWith("This is a very long quick take designed to exceed")
-    );
-
-    expect(quickTake.textContent.endsWith("…")).toBe(true);
+    expect(screen.getByText("Frontend Platform Engineer")).toBeInTheDocument();
+    expect(screen.getByText("Signal Bloom")).toBeInTheDocument();
+    expect(screen.getByText("Atlanta, GA")).toBeInTheDocument();
+    expect(screen.getByText("Hybrid")).toBeInTheDocument();
+    expect(screen.getByText("Entry-level")).toBeInTheDocument();
+    expect(screen.getByText("TypeScript")).toBeInTheDocument();
+    expect(screen.queryByText("React")).not.toBeInTheDocument();
   });
 });
