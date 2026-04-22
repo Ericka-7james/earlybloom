@@ -14,7 +14,7 @@
  * - degrade gracefully when one request succeeds and the other fails
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchJobs,
   fetchResolvedJobProfile,
@@ -90,6 +90,17 @@ export function useJobs(options = {}) {
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
 
+  const jobsRef = useRef(jobs);
+  const hasLoadedOnceRef = useRef(hasLoadedOnce);
+
+  useEffect(() => {
+    jobsRef.current = jobs;
+  }, [jobs]);
+
+  useEffect(() => {
+    hasLoadedOnceRef.current = hasLoadedOnce;
+  }, [hasLoadedOnce]);
+
   const retry = useCallback(() => {
     setReloadKey((currentValue) => currentValue + 1);
   }, []);
@@ -98,8 +109,11 @@ export function useJobs(options = {}) {
     const controller = new AbortController();
 
     async function loadJobsData() {
-      const hasExistingJobs = Array.isArray(jobs) && jobs.length > 0;
-      const shouldUseRefreshState = hasLoadedOnce || hasExistingJobs;
+      const existingJobs = jobsRef.current;
+      const existingHasLoadedOnce = hasLoadedOnceRef.current;
+      const hasExistingJobs =
+        Array.isArray(existingJobs) && existingJobs.length > 0;
+      const shouldUseRefreshState = existingHasLoadedOnce || hasExistingJobs;
 
       if (shouldUseRefreshState) {
         setIsRefreshing(true);
@@ -123,7 +137,7 @@ export function useJobs(options = {}) {
       if (jobsResult.status === "fulfilled") {
         setJobs(Array.isArray(jobsResult.value) ? jobsResult.value : []);
         setHasLoadedOnce(true);
-      } else if (!hasExistingJobs && !hasLoadedOnce) {
+      } else if (!hasExistingJobs && !existingHasLoadedOnce) {
         setJobs([]);
         nextError = getReadableErrorMessage(
           jobsResult.reason,
@@ -140,7 +154,7 @@ export function useJobs(options = {}) {
         setResolvedUserProfile(
           normalizeResolvedUserProfile(profileResult.value)
         );
-      } else if (!hasLoadedOnce && !hasExistingJobs) {
+      } else if (!existingHasLoadedOnce && !hasExistingJobs) {
         setResolvedUserProfile(getDefaultResolvedUserProfile());
 
         if (!nextError) {

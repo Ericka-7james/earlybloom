@@ -314,18 +314,20 @@ export function useJobsPageState() {
   const [selectedRoleTypes, setSelectedRoleTypes] = useState([]);
   const [selectedSkills, setSelectedSkills] = useState([]);
   const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
-  const [jobViewerOverrides, setJobViewerOverrides] = useState({});
-  const [pendingActions, setPendingActions] = useState({});
-  const [actionError, setActionError] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(() => {
-    const welcomePending =
-      readSessionStorageValue(WELCOME_MODAL_PENDING_KEY) === "true";
-    const cachedResume = readCachedResumeUiState();
-    const hasCachedResume = Boolean(cachedResume);
 
-    return welcomePending && !hasCachedResume;
+  const [viewerStateStore, setViewerStateStore] = useState({
+    scope: null,
+    overrides: {},
+    pendingActions: {},
+    actionError: "",
   });
+
+  const [pageState, setPageState] = useState({
+    key: "",
+    page: 1,
+  });
+
+  const [isWelcomeModalDismissed, setIsWelcomeModalDismissed] = useState(false);
 
   const {
     jobs: rawJobs,
@@ -396,17 +398,27 @@ export function useJobsPageState() {
 
   useEffect(() => {
     if (hasVisibleResume) {
-      setIsWelcomeModalOpen(false);
       removeSessionStorageValue(WELCOME_MODAL_PENDING_KEY);
     }
   }, [hasVisibleResume]);
 
-  useEffect(() => {
-    setJobViewerOverrides({});
-    setPendingActions({});
-    setActionError("");
-    setCurrentPage(1);
-  }, [viewerKey, rawJobs]);
+  const viewerScope = useMemo(
+    () => ({ viewerKey, rawJobs }),
+    [viewerKey, rawJobs]
+  );
+
+  const effectiveViewerState = useMemo(() => {
+    if (viewerStateStore.scope === viewerScope) {
+      return viewerStateStore;
+    }
+
+    return {
+      scope: viewerScope,
+      overrides: {},
+      pendingActions: {},
+      actionError: "",
+    };
+  }, [viewerStateStore, viewerScope]);
 
   const scoredJobs = useMemo(() => {
     if (!hasRawJobs) {
@@ -422,9 +434,9 @@ export function useJobsPageState() {
     }
 
     return mapJobsForDisplay(rawJobs, scoredJobs, {
-      viewerStateOverrides: jobViewerOverrides,
+      viewerStateOverrides: effectiveViewerState.overrides,
     }).sort((a, b) => b.matchScore - a.matchScore);
-  }, [hasRawJobs, rawJobs, scoredJobs, jobViewerOverrides]);
+  }, [hasRawJobs, rawJobs, scoredJobs, effectiveViewerState.overrides]);
 
   const availableSkillOptions = useMemo(() => {
     if (!mappedJobs.length && !profileSkills.length) {
@@ -453,23 +465,31 @@ export function useJobsPageState() {
     selectedSkills,
   ]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [
-    selectedExperienceLevels,
-    selectedWorkplaces,
-    selectedRoleTypes,
-    selectedSkills,
-  ]);
+  const filterStateKey = useMemo(
+    () =>
+      JSON.stringify({
+        selectedExperienceLevels,
+        selectedWorkplaces,
+        selectedRoleTypes,
+        selectedSkills,
+      }),
+    [
+      selectedExperienceLevels,
+      selectedWorkplaces,
+      selectedRoleTypes,
+      selectedSkills,
+    ]
+  );
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(jobs.length / JOBS_PER_PAGE)),
     [jobs.length]
   );
 
-  useEffect(() => {
-    setCurrentPage((current) => Math.min(current, totalPages));
-  }, [totalPages]);
+  const currentPage =
+    pageState.key === filterStateKey
+      ? Math.min(pageState.page, totalPages)
+      : 1;
 
   const paginatedJobs = useMemo(() => {
     const startIndex = (currentPage - 1) * JOBS_PER_PAGE;
@@ -519,6 +539,15 @@ export function useJobsPageState() {
     [loginRequiredIntent]
   );
 
+  const shouldShowPendingWelcome =
+    readSessionStorageValue(WELCOME_MODAL_PENDING_KEY) === "true";
+  const hasCachedResume = Boolean(readCachedResumeUiState());
+  const isWelcomeModalOpen =
+    !isWelcomeModalDismissed &&
+    shouldShowPendingWelcome &&
+    !hasCachedResume &&
+    !hasVisibleResume;
+
   const showInitialLoadingState = isLoading && !hasLoadedOnce && !hasRawJobs;
   const showRefreshState = isRefreshing && hasRawJobs;
   const showLoadErrorCard = !showInitialLoadingState && !!error && !hasRawJobs;
@@ -543,13 +572,13 @@ export function useJobsPageState() {
     setResumeFile(savedResumeUiState);
     setTrackerResume(savedResumeUiState);
     setIsResumeModalOpen(false);
-    setIsWelcomeModalOpen(false);
+    setIsWelcomeModalDismissed(true);
     removeSessionStorageValue(WELCOME_MODAL_PENDING_KEY);
     removeSessionStorageValue(RESUME_MODAL_DISMISSED_KEY);
   }, []);
 
   const handleCloseWelcomeModal = useCallback(() => {
-    setIsWelcomeModalOpen(false);
+    setIsWelcomeModalDismissed(true);
     removeSessionStorageValue(WELCOME_MODAL_PENDING_KEY);
   }, []);
 
@@ -559,7 +588,7 @@ export function useJobsPageState() {
     }
 
     if (!user) {
-      setIsWelcomeModalOpen(false);
+      setIsWelcomeModalDismissed(true);
       setIsResumeModalOpen(false);
       setLoginRequiredIntent("resume");
       setIsLoginRequiredModalOpen(true);
@@ -590,7 +619,7 @@ export function useJobsPageState() {
     }
 
     if (!user) {
-      setIsWelcomeModalOpen(false);
+      setIsWelcomeModalDismissed(true);
       setIsResumeModalOpen(false);
       openLoginRequiredModal("resume");
       return;
@@ -605,52 +634,132 @@ export function useJobsPageState() {
     setSelectedWorkplaces([]);
     setSelectedRoleTypes([]);
     setSelectedSkills([]);
+    setPageState({
+      key: "",
+      page: 1,
+    });
   }, []);
 
   const updatePendingAction = useCallback((jobId, nextState) => {
-    setPendingActions((current) => ({
-      ...current,
-      [jobId]: {
-        ...(current[jobId] || {}),
-        ...nextState,
-      },
-    }));
-  }, []);
+    setViewerStateStore((current) => {
+      const base =
+        current.scope === viewerScope
+          ? current
+          : {
+              scope: viewerScope,
+              overrides: {},
+              pendingActions: {},
+              actionError: "",
+            };
+
+      return {
+        ...base,
+        pendingActions: {
+          ...base.pendingActions,
+          [jobId]: {
+            ...(base.pendingActions[jobId] || {}),
+            ...nextState,
+          },
+        },
+      };
+    });
+  }, [viewerScope]);
 
   const clearPendingAction = useCallback((jobId, key) => {
-    setPendingActions((current) => {
-      const next = { ...current };
-      const currentEntry = { ...(next[jobId] || {}) };
+    setViewerStateStore((current) => {
+      const base =
+        current.scope === viewerScope
+          ? current
+          : {
+              scope: viewerScope,
+              overrides: {},
+              pendingActions: {},
+              actionError: "",
+            };
+
+      const nextPendingActions = { ...base.pendingActions };
+      const currentEntry = { ...(nextPendingActions[jobId] || {}) };
 
       delete currentEntry[key];
 
       if (Object.keys(currentEntry).length === 0) {
-        delete next[jobId];
+        delete nextPendingActions[jobId];
       } else {
-        next[jobId] = currentEntry;
+        nextPendingActions[jobId] = currentEntry;
       }
 
-      return next;
+      return {
+        ...base,
+        pendingActions: nextPendingActions,
+      };
     });
-  }, []);
+  }, [viewerScope]);
 
   const applyViewerOverride = useCallback((jobId, patch) => {
-    setJobViewerOverrides((current) => ({
-      ...current,
-      [jobId]: {
-        ...(current[jobId] || {}),
-        ...patch,
-      },
-    }));
-  }, []);
+    setViewerStateStore((current) => {
+      const base =
+        current.scope === viewerScope
+          ? current
+          : {
+              scope: viewerScope,
+              overrides: {},
+              pendingActions: {},
+              actionError: "",
+            };
+
+      return {
+        ...base,
+        overrides: {
+          ...base.overrides,
+          [jobId]: {
+            ...(base.overrides[jobId] || {}),
+            ...patch,
+          },
+        },
+      };
+    });
+  }, [viewerScope]);
 
   const removeViewerOverride = useCallback((jobId) => {
-    setJobViewerOverrides((current) => {
-      const next = { ...current };
-      delete next[jobId];
-      return next;
+    setViewerStateStore((current) => {
+      const base =
+        current.scope === viewerScope
+          ? current
+          : {
+              scope: viewerScope,
+              overrides: {},
+              pendingActions: {},
+              actionError: "",
+            };
+
+      const nextOverrides = { ...base.overrides };
+      delete nextOverrides[jobId];
+
+      return {
+        ...base,
+        overrides: nextOverrides,
+      };
     });
-  }, []);
+  }, [viewerScope]);
+
+  const setScopedActionError = useCallback((nextMessage) => {
+    setViewerStateStore((current) => {
+      const base =
+        current.scope === viewerScope
+          ? current
+          : {
+              scope: viewerScope,
+              overrides: {},
+              pendingActions: {},
+              actionError: "",
+            };
+
+      return {
+        ...base,
+        actionError: nextMessage,
+      };
+    });
+  }, [viewerScope]);
 
   const handleToggleSave = useCallback(
     async (job) => {
@@ -665,9 +774,9 @@ export function useJobsPageState() {
 
       const jobId = job.id;
       const nextSaved = !job.isSaved;
-      const previousOverride = jobViewerOverrides[jobId];
+      const previousOverride = effectiveViewerState.overrides[jobId];
 
-      setActionError("");
+      setScopedActionError("");
       updatePendingAction(jobId, { saving: true });
       applyViewerOverride(jobId, {
         is_saved: nextSaved,
@@ -688,7 +797,7 @@ export function useJobsPageState() {
           removeViewerOverride(jobId);
         }
 
-        setActionError(
+        setScopedActionError(
           saveError instanceof Error
             ? saveError.message
             : "We could not update that saved job right now."
@@ -701,11 +810,12 @@ export function useJobsPageState() {
       authLoading,
       user,
       openLoginRequiredModal,
-      jobViewerOverrides,
+      effectiveViewerState.overrides,
       updatePendingAction,
       applyViewerOverride,
       removeViewerOverride,
       clearPendingAction,
+      setScopedActionError,
     ]
   );
 
@@ -721,9 +831,9 @@ export function useJobsPageState() {
       }
 
       const jobId = job.id;
-      const previousOverride = jobViewerOverrides[jobId];
+      const previousOverride = effectiveViewerState.overrides[jobId];
 
-      setActionError("");
+      setScopedActionError("");
       updatePendingAction(jobId, { hiding: true });
       applyViewerOverride(jobId, {
         is_hidden: true,
@@ -744,7 +854,7 @@ export function useJobsPageState() {
           removeViewerOverride(jobId);
         }
 
-        setActionError(
+        setScopedActionError(
           hideError instanceof Error
             ? hideError.message
             : "We could not hide that job right now."
@@ -757,11 +867,12 @@ export function useJobsPageState() {
       authLoading,
       user,
       openLoginRequiredModal,
-      jobViewerOverrides,
+      effectiveViewerState.overrides,
       updatePendingAction,
       applyViewerOverride,
       removeViewerOverride,
       clearPendingAction,
+      setScopedActionError,
     ]
   );
 
@@ -771,7 +882,10 @@ export function useJobsPageState() {
         return;
       }
 
-      setCurrentPage(nextPage);
+      setPageState({
+        key: filterStateKey,
+        page: nextPage,
+      });
 
       if (typeof window !== "undefined") {
         window.scrollTo({
@@ -780,12 +894,12 @@ export function useJobsPageState() {
         });
       }
     },
-    [currentPage, totalPages]
+    [currentPage, totalPages, filterStateKey]
   );
 
   return {
     activeJob,
-    actionError,
+    actionError: effectiveViewerState.actionError,
     activeFilterTags,
     availableSkillOptions,
     clearAllFilters,
@@ -818,7 +932,7 @@ export function useJobsPageState() {
     pageEndCount,
     pageStartCount,
     paginatedJobs,
-    pendingActions,
+    pendingActions: effectiveViewerState.pendingActions,
     retry,
     selectedExperienceLevels,
     selectedRoleTypes,

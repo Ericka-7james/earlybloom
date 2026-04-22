@@ -15,7 +15,7 @@
  * - safe close behavior during processing
  */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 
 import CommonModal from "../common/CommonModal.jsx";
@@ -146,36 +146,23 @@ function validateResumeFile(file) {
 }
 
 /**
- * Resume upload modal component.
+ * Inner modal body that is mounted only while the modal is open.
+ * This lets local upload state reset naturally on close without using
+ * setState inside an effect.
  *
- * @param {{
- *   isOpen: boolean,
- *   onClose?: () => void,
- *   onResumeSaved?: (resume: object) => void,
- *   resumeFile?: object | null
- * }} props Component props.
- * @returns {JSX.Element} Resume upload modal.
+ * @param {object} props Component props.
+ * @returns {JSX.Element} Resume upload modal body.
  */
-function ResumeUploadModal({
-  isOpen,
+function ResumeUploadModalBody({
   onClose,
   onResumeSaved,
-  resumeFile = null,
+  resumeFile,
 }) {
   const [resumeError, setResumeError] = useState("");
   const [isSavingResume, setIsSavingResume] = useState(false);
   const [selectedFileMeta, setSelectedFileMeta] = useState(null);
   const [uploadState, setUploadState] = useState("idle");
   const fileInputRef = useRef(null);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setResumeError("");
-      setIsSavingResume(false);
-      setSelectedFileMeta(null);
-      setUploadState("idle");
-    }
-  }, [isOpen]);
 
   const currentResumeSummary = useMemo(() => {
     if (!resumeFile) {
@@ -349,9 +336,6 @@ function ResumeUploadModal({
       return;
     }
 
-    setResumeError("");
-    setSelectedFileMeta(null);
-    setUploadState("idle");
     onClose?.();
   }
 
@@ -360,213 +344,241 @@ function ResumeUploadModal({
   const showErrorMessage = uploadState === "error" && Boolean(resumeError);
 
   return (
+    <div
+      className="resume-upload-modal"
+      style={{ display: "grid", gap: "1rem" }}
+    >
+      <div style={{ display: "grid", gap: "0.45rem" }}>
+        <p className="card-title">Make your search feel more tailored</p>
+        <p className="card-copy">
+          Upload a PDF resume so EarlyBloom can personalize your job flow and
+          show cleaner resume signals.
+        </p>
+      </div>
+
+      {hasSavedResume ? (
+        <div
+          className="section-card section-card--soft"
+          style={{ gap: "0.75rem", padding: "1rem" }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "0.75rem",
+              alignItems: "flex-start",
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ display: "grid", gap: "0.25rem", minWidth: 0 }}>
+              <p className="section-label">Current resume</p>
+              <p
+                className="card-title"
+                style={{
+                  fontSize: "1rem",
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {currentResumeSummary.name}
+              </p>
+            </div>
+
+            <span className="tag-chip">
+              {currentResumeSummary.parseStatus}
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              gap: "0.5rem",
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            {currentResumeSummary.fileSizeLabel ? (
+              <span className="card-meta">
+                {currentResumeSummary.fileSizeLabel}
+              </span>
+            ) : null}
+            {currentResumeSummary.uploadedAt ? (
+              <span className="card-meta">
+                Saved {new Date(currentResumeSummary.uploadedAt).toLocaleDateString()}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      <button
+        type="button"
+        className="filter-trigger-card"
+        onClick={openFilePicker}
+        onDrop={handleResumeDrop}
+        onDragOver={handleResumeDragOver}
+        disabled={isSavingResume}
+        aria-busy={isSavingResume}
+        style={{
+          padding: "1rem",
+          gap: "0.65rem",
+        }}
+      >
+        <span className="filter-trigger-card__label">
+          {isSavingResume
+            ? "Processing your resume..."
+            : hasSavedResume
+              ? "Replace resume"
+              : "Choose a PDF resume"}
+        </span>
+
+        <span className="filter-trigger-card__value">
+          Drag and drop a file here, or tap to browse.
+        </span>
+
+        <span className="filter-trigger-card__meta">
+          PDF only. Text-based PDFs work best for clean extraction and resume parsing.
+        </span>
+      </button>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,application/pdf"
+        className="resume-upload-modal__input"
+        onChange={handleResumeFileChange}
+        disabled={isSavingResume}
+        hidden
+      />
+
+      {selectedFileMeta ? (
+        <div
+          className="section-card"
+          style={{ gap: "0.45rem", padding: "0.9rem 1rem" }}
+        >
+          <p className="section-label">
+            {isSavingResume ? "Selected file" : "Latest selection"}
+          </p>
+          <p
+            className="card-title"
+            style={{ fontSize: "1rem", overflowWrap: "anywhere" }}
+          >
+            {selectedFileMeta.name}
+          </p>
+          <p className="card-meta">{selectedFileMeta.sizeLabel}</p>
+        </div>
+      ) : null}
+
+      {uploadState === "idle" && !resumeError && !selectedFileMeta ? (
+        <div className="status-message-card status-message-card--info">
+          <p className="status-message-card__title">Ready to upload</p>
+          <p className="status-message-card__copy">
+            We’ll extract text from your PDF and save it to your account when
+            you’re signed in.
+          </p>
+        </div>
+      ) : null}
+
+      {uploadState === "processing" ? (
+        <div
+          className="status-message-card status-message-card--info"
+          role="status"
+          aria-live="polite"
+        >
+          <p className="status-message-card__title">Processing resume</p>
+          <p className="status-message-card__copy">
+            Extracting text, saving your file record, and preparing resume
+            signals.
+          </p>
+        </div>
+      ) : null}
+
+      {showSuccessMessage ? (
+        <div
+          className="status-message-card status-message-card--success"
+          aria-live="polite"
+        >
+          <p className="status-message-card__title">Resume uploaded</p>
+          <p className="status-message-card__copy">
+            {selectedFileMeta?.name
+              ? `${selectedFileMeta.name} is saved and your tracker can refresh its resume signals.`
+              : "Your resume was uploaded successfully."}
+          </p>
+        </div>
+      ) : null}
+
+      {showErrorMessage ? (
+        <div
+          className="status-message-card status-message-card--error"
+          role="alert"
+        >
+          <p className="status-message-card__title">Upload problem</p>
+          <p className="status-message-card__copy">{resumeError}</p>
+        </div>
+      ) : null}
+
+      <div
+        style={{
+          display: "flex",
+          gap: "0.75rem",
+          flexWrap: "wrap",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <p className="card-meta" style={{ margin: 0 }}>
+          {isSavingResume
+            ? "Please keep this window open while we process your file."
+            : "You can replace your resume anytime."}
+        </p>
+
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="button button--secondary"
+            onClick={handleClose}
+            disabled={isSavingResume}
+          >
+            {showSuccessMessage ? "Done" : "Close"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Resume upload modal component.
+ *
+ * @param {{
+ *   isOpen: boolean,
+ *   onClose?: () => void,
+ *   onResumeSaved?: (resume: object) => void,
+ *   resumeFile?: object | null
+ * }} props Component props.
+ * @returns {JSX.Element} Resume upload modal.
+ */
+function ResumeUploadModal({
+  isOpen,
+  onClose,
+  onResumeSaved,
+  resumeFile = null,
+}) {
+  return (
     <CommonModal
       isOpen={isOpen}
       title="Upload your resume"
-      onClose={handleClose}
+      onClose={onClose}
       size="sm"
       iconImage={BloomHire}
       iconAlt="EarlyBloom resume upload icon"
     >
-      <div
-        className="resume-upload-modal"
-        style={{ display: "grid", gap: "1rem" }}
-      >
-        <div style={{ display: "grid", gap: "0.45rem" }}>
-          <p className="card-title">Make your search feel more tailored</p>
-          <p className="card-copy">
-            Upload a PDF resume so EarlyBloom can personalize your job flow and
-            show cleaner resume signals.
-          </p>
-        </div>
-
-        {hasSavedResume ? (
-          <div
-            className="section-card section-card--soft"
-            style={{ gap: "0.75rem", padding: "1rem" }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: "0.75rem",
-                alignItems: "flex-start",
-                flexWrap: "wrap",
-              }}
-            >
-              <div style={{ display: "grid", gap: "0.25rem", minWidth: 0 }}>
-                <p className="section-label">Current resume</p>
-                <p
-                  className="card-title"
-                  style={{
-                    fontSize: "1rem",
-                    overflowWrap: "anywhere",
-                  }}
-                >
-                  {currentResumeSummary.name}
-                </p>
-              </div>
-
-              <span className="tag-chip">
-                {currentResumeSummary.parseStatus}
-              </span>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                gap: "0.5rem",
-                flexWrap: "wrap",
-                alignItems: "center",
-              }}
-            >
-              {currentResumeSummary.fileSizeLabel ? (
-                <span className="card-meta">
-                  {currentResumeSummary.fileSizeLabel}
-                </span>
-              ) : null}
-              {currentResumeSummary.uploadedAt ? (
-                <span className="card-meta">
-                  Saved {new Date(currentResumeSummary.uploadedAt).toLocaleDateString()}
-                </span>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
-        <button
-          type="button"
-          className="filter-trigger-card"
-          onClick={openFilePicker}
-          onDrop={handleResumeDrop}
-          onDragOver={handleResumeDragOver}
-          disabled={isSavingResume}
-          aria-busy={isSavingResume}
-          style={{
-            padding: "1rem",
-            gap: "0.65rem",
-          }}
-        >
-          <span className="filter-trigger-card__label">
-            {isSavingResume
-              ? "Processing your resume..."
-              : hasSavedResume
-                ? "Replace resume"
-                : "Choose a PDF resume"}
-          </span>
-
-          <span className="filter-trigger-card__value">
-            Drag and drop a file here, or tap to browse.
-          </span>
-
-          <span className="filter-trigger-card__meta">
-            PDF only. Text-based PDFs work best for clean extraction and resume parsing.
-          </span>
-        </button>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pdf,application/pdf"
-          className="resume-upload-modal__input"
-          onChange={handleResumeFileChange}
-          disabled={isSavingResume}
-          hidden
+      {isOpen ? (
+        <ResumeUploadModalBody
+          onClose={onClose}
+          onResumeSaved={onResumeSaved}
+          resumeFile={resumeFile}
         />
-
-        {selectedFileMeta ? (
-          <div
-            className="section-card"
-            style={{ gap: "0.45rem", padding: "0.9rem 1rem" }}
-          >
-            <p className="section-label">
-              {isSavingResume ? "Selected file" : "Latest selection"}
-            </p>
-            <p
-              className="card-title"
-              style={{ fontSize: "1rem", overflowWrap: "anywhere" }}
-            >
-              {selectedFileMeta.name}
-            </p>
-            <p className="card-meta">{selectedFileMeta.sizeLabel}</p>
-          </div>
-        ) : null}
-
-        {uploadState === "idle" && !resumeError && !selectedFileMeta ? (
-          <div className="status-message-card status-message-card--info">
-            <p className="status-message-card__title">Ready to upload</p>
-            <p className="status-message-card__copy">
-              We’ll extract text from your PDF and save it to your account when
-              you’re signed in.
-            </p>
-          </div>
-        ) : null}
-
-        {uploadState === "processing" ? (
-          <div
-            className="status-message-card status-message-card--info"
-            role="status"
-            aria-live="polite"
-          >
-            <p className="status-message-card__title">Processing resume</p>
-            <p className="status-message-card__copy">
-              Extracting text, saving your file record, and preparing resume
-              signals.
-            </p>
-          </div>
-        ) : null}
-
-        {showSuccessMessage ? (
-          <div
-            className="status-message-card status-message-card--success"
-            aria-live="polite"
-          >
-            <p className="status-message-card__title">Resume uploaded</p>
-            <p className="status-message-card__copy">
-              {selectedFileMeta?.name
-                ? `${selectedFileMeta.name} is saved and your tracker can refresh its resume signals.`
-                : "Your resume was uploaded successfully."}
-            </p>
-          </div>
-        ) : null}
-
-        {showErrorMessage ? (
-          <div
-            className="status-message-card status-message-card--error"
-            role="alert"
-          >
-            <p className="status-message-card__title">Upload problem</p>
-            <p className="status-message-card__copy">{resumeError}</p>
-          </div>
-        ) : null}
-
-        <div
-          style={{
-            display: "flex",
-            gap: "0.75rem",
-            flexWrap: "wrap",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <p className="card-meta" style={{ margin: 0 }}>
-            {isSavingResume
-              ? "Please keep this window open while we process your file."
-              : "You can replace your resume anytime."}
-          </p>
-
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className="button button--secondary"
-              onClick={handleClose}
-              disabled={isSavingResume}
-            >
-              {showSuccessMessage ? "Done" : "Close"}
-            </button>
-          </div>
-        </div>
-      </div>
+      ) : null}
     </CommonModal>
   );
 }
