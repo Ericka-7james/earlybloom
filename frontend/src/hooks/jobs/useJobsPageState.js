@@ -1,3 +1,4 @@
+// frontend/src/hooks/jobs/useJobsPageState.js
 /**
  * @fileoverview Shared state and behavior for the Jobs page.
  *
@@ -307,6 +308,7 @@ export function useJobsPageState() {
   const [loginRequiredIntent, setLoginRequiredIntent] = useState("resume");
   const [resumeFile, setResumeFile] = useState(() => readCachedResumeUiState());
   const [trackerResume, setTrackerResume] = useState(null);
+  const [locationQuery, setLocationQuery] = useState("");
   const [selectedExperienceLevels, setSelectedExperienceLevels] = useState(
     DEFAULT_SELECTED_EXPERIENCE_LEVELS
   );
@@ -338,7 +340,10 @@ export function useJobsPageState() {
     error,
     isMockMode,
     retry,
-  } = useJobs({ viewerKey });
+  } = useJobs({
+    viewerKey,
+    locationQuery,
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -452,6 +457,7 @@ export function useJobsPageState() {
     }
 
     return filterJobs(mappedJobs, {
+      locationQuery,
       selectedExperienceLevels,
       selectedWorkplaces,
       selectedRoleTypes,
@@ -459,6 +465,7 @@ export function useJobsPageState() {
     }).filter((job) => !job.isHidden);
   }, [
     mappedJobs,
+    locationQuery,
     selectedExperienceLevels,
     selectedWorkplaces,
     selectedRoleTypes,
@@ -468,12 +475,14 @@ export function useJobsPageState() {
   const filterStateKey = useMemo(
     () =>
       JSON.stringify({
+        locationQuery: String(locationQuery || "").trim().toLowerCase(),
         selectedExperienceLevels,
         selectedWorkplaces,
         selectedRoleTypes,
         selectedSkills,
       }),
     [
+      locationQuery,
       selectedExperienceLevels,
       selectedWorkplaces,
       selectedRoleTypes,
@@ -506,12 +515,14 @@ export function useJobsPageState() {
 
   const filtersSummary = useMemo(() => {
     return getFilterSummary({
+      locationQuery,
       selectedExperienceLevels,
       selectedWorkplaces,
       selectedRoleTypes,
       selectedSkills,
     });
   }, [
+    locationQuery,
     selectedExperienceLevels,
     selectedWorkplaces,
     selectedRoleTypes,
@@ -520,12 +531,14 @@ export function useJobsPageState() {
 
   const activeFilterTags = useMemo(() => {
     return getActiveFilterTags({
+      locationQuery,
       selectedExperienceLevels,
       selectedWorkplaces,
       selectedRoleTypes,
       selectedSkills,
     });
   }, [
+    locationQuery,
     selectedExperienceLevels,
     selectedWorkplaces,
     selectedRoleTypes,
@@ -630,6 +643,7 @@ export function useJobsPageState() {
   }, [authLoading, user, openLoginRequiredModal]);
 
   const clearAllFilters = useCallback(() => {
+    setLocationQuery("");
     setSelectedExperienceLevels([]);
     setSelectedWorkplaces([]);
     setSelectedRoleTypes([]);
@@ -928,6 +942,7 @@ export function useJobsPageState() {
     isResumeModalOpen,
     isWelcomeModalOpen,
     jobs,
+    locationQuery,
     loginContent,
     pageEndCount,
     pageStartCount,
@@ -939,6 +954,7 @@ export function useJobsPageState() {
     selectedSkills,
     selectedWorkplaces,
     setIsFiltersModalOpen,
+    setLocationQuery,
     setSelectedExperienceLevels,
     setSelectedRoleTypes,
     setSelectedSkills,

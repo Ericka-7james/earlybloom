@@ -1,3 +1,4 @@
+// frontend/src/hooks/useJobs.js
 /**
  * @fileoverview Jobs data hook for EarlyBloom.
  *
@@ -78,7 +79,10 @@ function getReadableErrorMessage(error, fallbackMessage) {
 }
 
 export function useJobs(options = {}) {
-  const { viewerKey = "guest" } = options;
+  const {
+    viewerKey = "guest",
+    locationQuery = "",
+  } = options;
 
   const [jobs, setJobs] = useState([]);
   const [resolvedUserProfile, setResolvedUserProfile] = useState(
@@ -124,7 +128,10 @@ export function useJobs(options = {}) {
       setError("");
 
       const [jobsResult, profileResult] = await Promise.allSettled([
-        fetchJobs({ signal: controller.signal }),
+        fetchJobs({
+          signal: controller.signal,
+          locationQuery,
+        }),
         fetchResolvedJobProfile({ signal: controller.signal }),
       ]);
 
@@ -175,7 +182,7 @@ export function useJobs(options = {}) {
     return () => {
       controller.abort();
     };
-  }, [reloadKey, viewerKey]);
+  }, [reloadKey, viewerKey, locationQuery]);
 
   const isMockMode = useMemo(() => shouldUseMockJobs(), []);
 
