@@ -64,78 +64,89 @@ function stopCardEvent(event) {
 }
 
 /**
- * Returns a shorter quick-take copy for compact cards.
+ * Converts unknown values into safe display text.
  *
- * @param {object} job Display job.
- * @returns {string} Compact quick-take text.
+ * @param {unknown} value Raw value.
+ * @param {string} fallback Fallback string.
+ * @returns {string} Safe text.
  */
-function getQuickTake(job) {
-  if (job?.qualificationSignal?.text) {
-    return String(job.qualificationSignal.text).trim();
+function toDisplayText(value, fallback = "") {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || fallback;
   }
 
-  if (job.fitTag === "Real Junior") {
-    return "Looks realistically junior-friendly.";
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
   }
 
-  if (job.fitTag === "Stretch Role") {
-    return "You may qualify, but review the requirements before applying.";
+  if (Array.isArray(value)) {
+    const joined = value
+      .map((item) => toDisplayText(item, ""))
+      .filter(Boolean)
+      .join(", ")
+      .trim();
+
+    return joined || fallback;
   }
 
-  if (job.fitTag === "Misleading Junior") {
-    return "Listed as junior, but parts may lean more experienced.";
+  if (value && typeof value === "object") {
+    if (typeof value.name === "string" && value.name.trim()) {
+      return value.name.trim();
+    }
+
+    if (typeof value.label === "string" && value.label.trim()) {
+      return value.label.trim();
+    }
+
+    if (typeof value.text === "string" && value.text.trim()) {
+      return value.text.trim();
+    }
+
+    return fallback;
   }
 
-  return "This role may be more experienced than it first appears.";
-}
-
-/**
- * Trims long copy so the card stays compact.
- *
- * @param {string} text Raw text.
- * @param {number} maxLength Maximum length.
- * @returns {string} Truncated text.
- */
-function truncateText(text, maxLength = 110) {
-  const value = String(text || "").trim();
-
-  if (!value) {
-    return "";
-  }
-
-  if (value.length <= maxLength) {
-    return value;
-  }
-
-  return `${value.slice(0, maxLength).trim()}…`;
+  return fallback;
 }
 
 /**
  * Returns a capped list of matched skills for compact card display.
  *
- * @param {string[] | undefined} matchedSkills Matched skills.
+ * @param {unknown} matchedSkills Matched skills.
  * @returns {string[]} Up to one matched skill.
  */
 function getVisibleMatchedSkills(matchedSkills) {
-  return Array.isArray(matchedSkills)
-    ? matchedSkills.filter(Boolean).slice(0, 1)
-    : [];
+  if (!Array.isArray(matchedSkills)) {
+    return [];
+  }
+
+  return matchedSkills
+    .map((skill) => toDisplayText(skill, ""))
+    .filter(Boolean)
+    .slice(0, 1);
 }
 
 /**
  * Returns visible compact metadata chips.
  *
- * @param {Array<string>} metaItems Card meta items.
- * @returns {Array<string>} Visible metadata items.
+ * @param {unknown} metaItems Card meta items.
+ * @returns {string[]} Visible metadata items.
  */
 function getVisibleMetaItems(metaItems) {
-  return Array.isArray(metaItems) ? metaItems.slice(0, 3) : [];
+  if (!Array.isArray(metaItems)) {
+    return [];
+  }
+
+  return metaItems
+    .map((item) => toDisplayText(item, ""))
+    .filter(Boolean)
+    .slice(0, 3);
 }
 
 /**
  * Returns role recency copy.
  *
- * @param {Array<string>} metaItems Card meta items.
+ * @param {string[]} metaItems Card meta items.
  * @returns {string | null} Recency label.
  */
 function getRecencyLabel(metaItems) {
@@ -143,21 +154,33 @@ function getRecencyLabel(metaItems) {
     return null;
   }
 
-  return metaItems.find((item) => /ago|today|recent/i.test(item)) || null;
+  return metaItems.find((item) => /ago|today|recent/i.test(String(item))) || null;
 }
 
 /**
  * Returns the non-recency metadata tags.
  *
- * @param {Array<string>} metaItems Card meta items.
- * @returns {Array<string>} Displayable metadata tags.
+ * @param {string[]} metaItems Card meta items.
+ * @returns {string[]} Displayable metadata tags.
  */
 function getSecondaryMetaItems(metaItems) {
   if (!Array.isArray(metaItems)) {
     return [];
   }
 
-  return metaItems.filter((item) => !/ago|today|recent/i.test(item)).slice(0, 3);
+  return metaItems
+    .filter((item) => item && !/ago|today|recent/i.test(String(item)))
+    .slice(0, 3);
+}
+
+/**
+ * Returns a safe job object.
+ *
+ * @param {object | null | undefined} job Raw job.
+ * @returns {object} Safe job object.
+ */
+function getSafeJob(job) {
+  return job && typeof job === "object" && !Array.isArray(job) ? job : {};
 }
 
 /**
@@ -174,6 +197,9 @@ function JobCardActions({
   onHide,
   resolvedHideLabel,
 }) {
+  const isSaved = Boolean(job?.isSaved);
+  const isHidden = Boolean(job?.isHidden);
+
   const handleSaveClick = useCallback(
     (event) => {
       stopCardEvent(event);
@@ -201,20 +227,20 @@ function JobCardActions({
       <button
         type="button"
         className={`job-card__icon-button job-card__icon-button--save ${
-          job.isSaved ? "job-card__icon-button--active" : ""
+          isSaved ? "job-card__icon-button--active" : ""
         }`}
         onClick={handleSaveClick}
         disabled={isSavePending}
-        aria-label={job.isSaved ? "Remove saved job" : "Save job"}
-        title={job.isSaved ? "Remove saved job" : "Save job"}
+        aria-label={isSaved ? "Remove saved job" : "Save job"}
+        title={isSaved ? "Remove saved job" : "Save job"}
       >
-        <span aria-hidden="true">{job.isSaved ? "♥" : "♡"}</span>
+        <span aria-hidden="true">{isSaved ? "♥" : "♡"}</span>
       </button>
 
       <button
         type="button"
         className={`job-card__icon-button job-card__icon-button--hide ${
-          job.isHidden ? "job-card__icon-button--danger-active" : ""
+          isHidden ? "job-card__icon-button--danger-active" : ""
         }`}
         onClick={handleHideClick}
         disabled={isHidePending}
@@ -260,7 +286,6 @@ function JobCardBody({
   jobId,
   title,
   company,
-  quickTake,
   recencyLabel,
   secondaryMetaItems,
   visibleMatchedSkills,
@@ -282,8 +307,6 @@ function JobCardBody({
           </div>
         ) : null}
       </div>
-
-      <p className="job-card__quick-take">{truncateText(quickTake, 110)}</p>
 
       {visibleMatchedSkills.length > 0 ? (
         <div className="job-card__matched-skills" aria-label="Matched skills">
@@ -382,39 +405,50 @@ function JobCardComponent({
   isHidePending = false,
   hideLabel,
 }) {
-  const jobId = job.id;
-  const title = job.title || "Untitled role";
-  const company = job.company || "Unknown company";
-  const fitTag = useMemo(() => getSafeFitTag(job.fitTag), [job.fitTag]);
+  const safeJob = getSafeJob(job);
+
+  const rawJobId =
+    safeJob.id ??
+    safeJob.jobId ??
+    safeJob.slug ??
+    safeJob.url ??
+    "job-card-fallback";
+
+  const jobId = toDisplayText(rawJobId, "job-card-fallback");
+  const title = toDisplayText(safeJob.title, "Untitled role");
+  const company = toDisplayText(safeJob.company, "Unknown company");
+
+  const fitTag = useMemo(() => getSafeFitTag(safeJob.fitTag), [safeJob.fitTag]);
   const fitTagClassName = useMemo(() => getFitTagClassName(fitTag), [fitTag]);
   const matchScore = useMemo(
-    () => getSafeMatchScore(job.matchScore),
-    [job.matchScore]
+    () => getSafeMatchScore(safeJob.matchScore),
+    [safeJob.matchScore]
   );
 
   const metaItems = useMemo(
-    () => getVisibleMetaItems(job.cardMeta),
-    [job.cardMeta]
+    () => getVisibleMetaItems(safeJob.cardMeta),
+    [safeJob.cardMeta]
   );
   const recencyLabel = useMemo(() => getRecencyLabel(metaItems), [metaItems]);
   const secondaryMetaItems = useMemo(
     () => getSecondaryMetaItems(metaItems),
     [metaItems]
   );
-  const quickTake = useMemo(() => getQuickTake(job), [job]);
-  const applyUrl = job.url || job.sourceUrl || null;
+
+  const applyUrl = toDisplayText(safeJob.url || safeJob.sourceUrl, "");
   const resolvedHideLabel =
-    hideLabel || (job.isHidden ? "Restore job" : "Hide job");
+    hideLabel || (safeJob.isHidden ? "Restore job" : "Hide job");
+
   const visibleMatchedSkills = useMemo(
-    () => getVisibleMatchedSkills(job.matchedSkills),
-    [job.matchedSkills]
+    () => getVisibleMatchedSkills(safeJob.matchedSkills),
+    [safeJob.matchedSkills]
   );
 
   const handleOpen = useCallback(() => {
     if (typeof onOpenDetails === "function") {
-      onOpenDetails(job);
+      onOpenDetails(safeJob);
     }
-  }, [job, onOpenDetails]);
+  }, [safeJob, onOpenDetails]);
 
   return (
     <article
@@ -426,11 +460,11 @@ function JobCardComponent({
           fitTag={fitTag}
           fitTagClassName={fitTagClassName}
           matchScore={matchScore}
-          isSaved={job.isSaved}
+          isSaved={Boolean(safeJob.isSaved)}
         />
 
         <JobCardActions
-          job={job}
+          job={safeJob}
           isSavePending={isSavePending}
           isHidePending={isHidePending}
           onSaveToggle={onSaveToggle}
@@ -449,14 +483,13 @@ function JobCardComponent({
           jobId={jobId}
           title={title}
           company={company}
-          quickTake={quickTake}
           recencyLabel={recencyLabel}
           secondaryMetaItems={secondaryMetaItems}
           visibleMatchedSkills={visibleMatchedSkills}
         />
       </button>
 
-      <JobCardFooter applyUrl={applyUrl} onOpenDetails={handleOpen} />
+      <JobCardFooter applyUrl={applyUrl || null} onOpenDetails={handleOpen} />
     </article>
   );
 }

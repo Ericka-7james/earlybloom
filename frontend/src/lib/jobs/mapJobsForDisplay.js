@@ -433,7 +433,7 @@ export function mapJobsForDisplay(
     );
 
     const mappedJob = {
-      id: job.id,
+      id: job.id ?? job.jobId ?? job.slug ?? job.url ?? `${title}-${company}`,
       title,
       company,
       location: fullLocation || "Location not listed",
