@@ -39,7 +39,7 @@ class FakeProfilesQuery:
         self.payload = payload
         self.on_conflict = on_conflict
         self.client.upsert_calls.append(
-            {"payload": payload, "on_conflict": on_conflict}
+          {"payload": payload, "on_conflict": on_conflict}
         )
         return self
 
@@ -152,7 +152,8 @@ def make_sign_up_request() -> SignUpRequest:
     return SignUpRequest(
         email="test@example.com",
         password="Supersecret123!",
-        display_name="E",
+        display_name="Er",
+        avatar="petaloo",
         desired_levels=["entry-level", "junior"],
         is_lgbtq_friendly_only=True,
     )
@@ -178,6 +179,7 @@ def test_profile_select_columns_returns_expected_projection():
         "user_id,"
         "email,"
         "display_name,"
+        "avatar,"
         "desired_levels,"
         "is_lgbtq_friendly_only,"
         "created_at,"
@@ -212,7 +214,8 @@ def test_to_profile_response_maps_profile_row():
     row = {
         "user_id": "user-123",
         "email": "test@example.com",
-        "display_name": "E",
+        "display_name": "Er",
+        "avatar": "petaloo",
         "desired_levels": ["entry-level", "junior"],
         "is_lgbtq_friendly_only": True,
         "created_at": None,
@@ -222,7 +225,8 @@ def test_to_profile_response_maps_profile_row():
     result = auth_service._to_profile_response(row)
 
     assert result.user_id == "user-123"
-    assert result.display_name == "E"
+    assert result.display_name == "Er"
+    assert result.avatar == "petaloo"
     assert result.is_lgbtq_friendly_only is True
 
 
@@ -230,7 +234,7 @@ def test_fetch_profile_for_user_id_returns_profile_row(monkeypatch):
     service_client = FakeServiceClient(
         fetch_result={
             "user_id": "user-123",
-            "display_name": "E",
+            "display_name": "Er",
         }
     )
     monkeypatch.setattr(
@@ -241,7 +245,13 @@ def test_fetch_profile_for_user_id_returns_profile_row(monkeypatch):
 
     result = auth_service.fetch_profile_for_user_id("user-123")
 
-    assert result == {"user_id": "user-123", "display_name": "E"}
+    assert result == {
+        "user_id": "user-123",
+        "display_name": "Er",
+        "avatar": "petaloo",
+        "desired_levels": ["entry-level", "junior"],
+        "is_lgbtq_friendly_only": False,
+    }
     assert service_client.table_calls == ["profiles"]
 
 
@@ -251,7 +261,8 @@ def test_update_profile_for_user_id_merges_existing_profile(monkeypatch):
             {
                 "user_id": "user-123",
                 "email": "test@example.com",
-                "display_name": "Updated E",
+                "display_name": "Updated Er",
+                "avatar": "petaloo",
                 "desired_levels": ["junior"],
                 "is_lgbtq_friendly_only": True,
             }
@@ -264,7 +275,8 @@ def test_update_profile_for_user_id_merges_existing_profile(monkeypatch):
         lambda user_id: {
             "user_id": user_id,
             "email": "test@example.com",
-            "display_name": "Old E",
+            "display_name": "Old Er",
+            "avatar": "petaloo",
             "desired_levels": ["entry-level"],
             "is_lgbtq_friendly_only": False,
         },
@@ -276,7 +288,7 @@ def test_update_profile_for_user_id_merges_existing_profile(monkeypatch):
     )
 
     payload = UpdateProfileRequest(
-        display_name="Updated E",
+        display_name="Updated Er",
         desired_levels=["junior"],
         is_lgbtq_friendly_only=True,
     )
@@ -287,13 +299,14 @@ def test_update_profile_for_user_id_merges_existing_profile(monkeypatch):
         payload=payload,
     )
 
-    assert result["display_name"] == "Updated E"
+    assert result["display_name"] == "Updated Er"
     assert service_client.upsert_calls == [
         {
             "payload": {
                 "user_id": "user-123",
                 "email": "test@example.com",
-                "display_name": "Updated E",
+                "display_name": "Updated Er",
+                "avatar": "petaloo",
                 "desired_levels": ["junior"],
                 "is_lgbtq_friendly_only": True,
             },
@@ -324,6 +337,7 @@ def test_update_profile_for_user_id_uses_defaults_when_existing_missing(monkeypa
         "user_id": "user-123",
         "email": "test@example.com",
         "display_name": None,
+        "avatar": "petaloo",
         "desired_levels": ["entry-level", "junior"],
         "is_lgbtq_friendly_only": False,
     }
@@ -341,6 +355,11 @@ def test_sign_up_user_returns_authenticated_response_when_session_exists(monkeyp
         "get_supabase_public_client",
         lambda: FakePublicClient(public_auth),
     )
+    monkeypatch.setattr(
+        auth_service,
+        "ensure_profile_for_user",
+        lambda **kwargs: None,
+    )
 
     response, returned_session = auth_service.sign_up_user(make_sign_up_request())
 
@@ -357,7 +376,8 @@ def test_sign_up_user_returns_authenticated_response_when_session_exists(monkeyp
             "password": "Supersecret123!",
             "options": {
                 "data": {
-                    "display_name": "E",
+                    "display_name": "Er",
+                    "avatar": "petaloo",
                 }
             },
         }
@@ -374,6 +394,11 @@ def test_sign_up_user_returns_verification_required_when_session_missing(monkeyp
         auth_service,
         "get_supabase_public_client",
         lambda: FakePublicClient(public_auth),
+    )
+    monkeypatch.setattr(
+        auth_service,
+        "ensure_profile_for_user",
+        lambda **kwargs: None,
     )
 
     response, returned_session = auth_service.sign_up_user(make_sign_up_request())
@@ -435,7 +460,8 @@ def test_sign_in_user_returns_session_and_profile(monkeypatch):
         lambda user_id: {
             "user_id": user_id,
             "email": "test@example.com",
-            "display_name": "E",
+            "display_name": "Er",
+            "avatar": "petaloo",
             "desired_levels": ["entry-level", "junior"],
             "is_lgbtq_friendly_only": False,
             "created_at": None,
