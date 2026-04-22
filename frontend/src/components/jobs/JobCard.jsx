@@ -1,11 +1,5 @@
 import React, { memo, useMemo, useCallback } from "react";
 
-/**
- * Returns the modifier class used for the fit tag badge.
- *
- * @param {string} fitTag Fit verdict label.
- * @returns {string} CSS class name.
- */
 function getFitTagClassName(fitTag) {
   switch (fitTag) {
     case "Real Junior":
@@ -20,12 +14,6 @@ function getFitTagClassName(fitTag) {
   }
 }
 
-/**
- * Normalizes incoming fit tags into the supported UI set.
- *
- * @param {string} fitTag Raw fit tag.
- * @returns {string} Safe fit tag.
- */
 function getSafeFitTag(fitTag) {
   switch (fitTag) {
     case "Real Junior":
@@ -38,12 +26,6 @@ function getSafeFitTag(fitTag) {
   }
 }
 
-/**
- * Normalizes match score into a safe 0-100 integer.
- *
- * @param {number} matchScore Raw match score.
- * @returns {number} Safe score.
- */
 function getSafeMatchScore(matchScore) {
   if (!Number.isFinite(matchScore)) {
     return 0;
@@ -52,24 +34,11 @@ function getSafeMatchScore(matchScore) {
   return Math.max(0, Math.min(100, Math.round(matchScore)));
 }
 
-/**
- * Stops a nested button click from bubbling through the card surface.
- *
- * @param {React.SyntheticEvent} event React event.
- * @returns {void}
- */
 function stopCardEvent(event) {
   event.preventDefault();
   event.stopPropagation();
 }
 
-/**
- * Converts unknown values into safe display text.
- *
- * @param {unknown} value Raw value.
- * @param {string} fallback Fallback string.
- * @returns {string} Safe text.
- */
 function toDisplayText(value, fallback = "") {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -109,12 +78,6 @@ function toDisplayText(value, fallback = "") {
   return fallback;
 }
 
-/**
- * Returns a capped list of matched skills for compact card display.
- *
- * @param {unknown} matchedSkills Matched skills.
- * @returns {string[]} Up to one matched skill.
- */
 function getVisibleMatchedSkills(matchedSkills) {
   if (!Array.isArray(matchedSkills)) {
     return [];
@@ -126,12 +89,6 @@ function getVisibleMatchedSkills(matchedSkills) {
     .slice(0, 1);
 }
 
-/**
- * Returns visible compact metadata chips.
- *
- * @param {unknown} metaItems Card meta items.
- * @returns {string[]} Visible metadata items.
- */
 function getVisibleMetaItems(metaItems) {
   if (!Array.isArray(metaItems)) {
     return [];
@@ -143,12 +100,6 @@ function getVisibleMetaItems(metaItems) {
     .slice(0, 3);
 }
 
-/**
- * Returns role recency copy.
- *
- * @param {string[]} metaItems Card meta items.
- * @returns {string | null} Recency label.
- */
 function getRecencyLabel(metaItems) {
   if (!Array.isArray(metaItems)) {
     return null;
@@ -157,12 +108,6 @@ function getRecencyLabel(metaItems) {
   return metaItems.find((item) => /ago|today|recent/i.test(String(item))) || null;
 }
 
-/**
- * Returns the non-recency metadata tags.
- *
- * @param {string[]} metaItems Card meta items.
- * @returns {string[]} Displayable metadata tags.
- */
 function getSecondaryMetaItems(metaItems) {
   if (!Array.isArray(metaItems)) {
     return [];
@@ -173,22 +118,10 @@ function getSecondaryMetaItems(metaItems) {
     .slice(0, 3);
 }
 
-/**
- * Returns a safe job object.
- *
- * @param {object | null | undefined} job Raw job.
- * @returns {object} Safe job object.
- */
 function getSafeJob(job) {
   return job && typeof job === "object" && !Array.isArray(job) ? job : {};
 }
 
-/**
- * Renders the action buttons in the card header.
- *
- * @param {object} props Component props.
- * @returns {JSX.Element} Action UI.
- */
 function JobCardActions({
   job,
   isSavePending,
@@ -253,12 +186,6 @@ function JobCardActions({
   );
 }
 
-/**
- * Renders the top badge strip for a job card.
- *
- * @param {object} props Component props.
- * @returns {JSX.Element} Badge UI.
- */
 function JobCardBadges({ fitTag, fitTagClassName, matchScore, isSaved }) {
   return (
     <div className="job-card__meta-row">
@@ -276,12 +203,6 @@ function JobCardBadges({ fitTag, fitTagClassName, matchScore, isSaved }) {
   );
 }
 
-/**
- * Renders the main body content of a job card.
- *
- * @param {object} props Component props.
- * @returns {JSX.Element} Content UI.
- */
 function JobCardBody({
   jobId,
   title,
@@ -291,59 +212,57 @@ function JobCardBody({
   visibleMatchedSkills,
 }) {
   return (
-    <div className="job-card__content">
-      <div className="job-card__heading">
-        <div className="job-card__identity">
-          <h3 id={`job-card-title-${jobId}`} className="job-card__title">
-            {title}
-          </h3>
+    <>
+      <div className="job-card__main">
+        <div className="job-card__heading">
+          <div className="job-card__identity">
+            <h3 id={`job-card-title-${jobId}`} className="job-card__title">
+              {title}
+            </h3>
 
-          <p className="job-card__company">{company}</p>
-        </div>
-
-        {recencyLabel ? (
-          <div className="job-card__signal-row">
-            <span className="job-card__signal-chip">{recencyLabel}</span>
+            <p className="job-card__company">{company}</p>
           </div>
-        ) : null}
+
+          {recencyLabel ? (
+            <div className="job-card__signal-row">
+              <span className="job-card__signal-chip">{recencyLabel}</span>
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      {visibleMatchedSkills.length > 0 ? (
-        <div className="job-card__matched-skills" aria-label="Matched skills">
-          <p className="job-card__matched-skills-label">Matched skills</p>
+      <div className="job-card__meta-block">
+        {visibleMatchedSkills.length > 0 ? (
+          <div className="job-card__matched-skills" aria-label="Matched skills">
+            <p className="job-card__matched-skills-label">Matched skills</p>
 
-          <div className="job-card__matched-skills-list">
-            {visibleMatchedSkills.map((skill) => (
-              <span
-                key={`${jobId}-matched-skill-${skill}`}
-                className="job-card__matched-skill-chip"
-              >
-                {skill}
+            <div className="job-card__matched-skills-list">
+              {visibleMatchedSkills.map((skill) => (
+                <span
+                  key={`${jobId}-matched-skill-${skill}`}
+                  className="job-card__matched-skill-chip"
+                >
+                  {skill}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {secondaryMetaItems.length > 0 ? (
+          <div className="job-card__compact-meta" aria-label="Job metadata">
+            {secondaryMetaItems.map((item, index) => (
+              <span key={`${jobId}-meta-${index}`} className="job-card__tag">
+                {item}
               </span>
             ))}
           </div>
-        </div>
-      ) : null}
-
-      {secondaryMetaItems.length > 0 ? (
-        <div className="job-card__compact-meta" aria-label="Job metadata">
-          {secondaryMetaItems.map((item, index) => (
-            <span key={`${jobId}-meta-${index}`} className="job-card__tag">
-              {item}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </div>
+        ) : null}
+      </div>
+    </>
   );
 }
 
-/**
- * Renders the footer actions for a job card.
- *
- * @param {object} props Component props.
- * @returns {JSX.Element} Footer UI.
- */
 function JobCardFooter({ applyUrl, onOpenDetails }) {
   const handleApplyClick = useCallback((event) => {
     event.stopPropagation();
@@ -382,20 +301,6 @@ function JobCardFooter({ applyUrl, onOpenDetails }) {
   );
 }
 
-/**
- * EarlyBloom job result card.
- *
- * @param {{
- *   job: object,
- *   onOpenDetails?: (job: object) => void,
- *   onSaveToggle?: (job: object) => void,
- *   onHide?: (job: object) => void,
- *   isSavePending?: boolean,
- *   isHidePending?: boolean,
- *   hideLabel?: string,
- * }} props Card props.
- * @returns {JSX.Element} Job card.
- */
 function JobCardComponent({
   job,
   onOpenDetails,
@@ -452,7 +357,7 @@ function JobCardComponent({
 
   return (
     <article
-      className="job-card section-card job-card--compact-modern"
+      className="job-card job-card--compact-modern"
       aria-labelledby={`job-card-title-${jobId}`}
     >
       <div className="job-card__top-row">
@@ -479,14 +384,16 @@ function JobCardComponent({
         onClick={handleOpen}
         aria-label={`Open details for ${title} at ${company}`}
       >
-        <JobCardBody
-          jobId={jobId}
-          title={title}
-          company={company}
-          recencyLabel={recencyLabel}
-          secondaryMetaItems={secondaryMetaItems}
-          visibleMatchedSkills={visibleMatchedSkills}
-        />
+        <div className="job-card__content">
+          <JobCardBody
+            jobId={jobId}
+            title={title}
+            company={company}
+            recencyLabel={recencyLabel}
+            secondaryMetaItems={secondaryMetaItems}
+            visibleMatchedSkills={visibleMatchedSkills}
+          />
+        </div>
       </button>
 
       <JobCardFooter applyUrl={applyUrl || null} onOpenDetails={handleOpen} />

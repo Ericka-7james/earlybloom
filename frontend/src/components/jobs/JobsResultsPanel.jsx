@@ -1,33 +1,14 @@
 import React from "react";
 import JobCard from "./JobCard.jsx";
 
-/**
- * Returns a safe array.
- *
- * @param {unknown} value Potential array.
- * @returns {Array<unknown>} Safe array.
- */
 function toSafeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-/**
- * Returns a safe object.
- *
- * @param {unknown} value Potential object.
- * @returns {Record<string, unknown>} Safe object.
- */
 function toSafeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-/**
- * Returns a safe string for UI rendering.
- *
- * @param {unknown} value Raw value.
- * @param {string} fallback Fallback text.
- * @returns {string} Safe string.
- */
 function toSafeText(value, fallback = "") {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -41,24 +22,10 @@ function toSafeText(value, fallback = "") {
   return fallback;
 }
 
-/**
- * Returns a safe page number.
- *
- * @param {unknown} value Raw page number.
- * @param {number} fallback Fallback number.
- * @returns {number} Safe page number.
- */
 function toSafeNumber(value, fallback = 0) {
   return Number.isFinite(value) ? Number(value) : fallback;
 }
 
-/**
- * Returns a safe job object.
- *
- * @param {unknown} job Raw job.
- * @param {number} index Job index.
- * @returns {object | null} Safe job or null.
- */
 function getSafeRenderableJob(job, index) {
   if (!job || typeof job !== "object" || Array.isArray(job)) {
     return null;
@@ -86,12 +53,6 @@ function getSafeRenderableJob(job, index) {
   };
 }
 
-/**
- * Renders the jobs results surface.
- *
- * @param {object} props Component props.
- * @returns {JSX.Element} Results panel.
- */
 function JobsResultsPanel({
   jobs = [],
   paginatedJobs = [],
@@ -168,7 +129,7 @@ function JobsResultsPanel({
 
   return (
     <div className="jobs-results">
-      <div className="jobs-results__surface section-card">
+      <div className="jobs-results__surface">
         <div className="jobs-results__header">
           <div className="jobs-results__header-copy">
             <p className="jobs-results__section-label">Top roles</p>
@@ -329,7 +290,7 @@ function JobsResultsPanel({
 
             {safeTotalPages > 1 ? (
               <nav
-                className="jobs-pagination section-card"
+                className="jobs-pagination"
                 aria-label="Job results pages"
               >
                 <div className="jobs-pagination__inner">
