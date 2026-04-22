@@ -9,7 +9,7 @@ import { useAuth } from "../hooks/useAuth";
 import {
   NAV_AUTH_LINKS,
   NAV_PRIMARY_ITEMS,
-} from "./content/NavBar.content.mdx";
+} from "./content/Navbar.content.mdx";
 import NavIcon from "./navbar/NavIcon";
 import NavLinks from "./navbar/NavLinks";
 import ProfileMenu from "./navbar/ProfileMenu";
