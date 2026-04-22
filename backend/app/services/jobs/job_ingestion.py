@@ -1,3 +1,4 @@
+# backend/app/services/jobs/job_ingestion.py
 """Job ingestion service for EarlyBloom.
 
 This module orchestrates provider ingestion for the jobs API.
@@ -33,6 +34,7 @@ from app.services.jobs.job_dedupe import dedupe_jobs
 from app.services.jobs.job_filters import (
     build_filter_options,
     should_include_job,
+    should_match_location_query,
 )
 from app.services.jobs.normalizer import normalize_provider_job
 from app.services.jobs.providers import get_configured_providers
@@ -55,11 +57,13 @@ class JobIngestionService:
         remote_only: bool = False,
         levels: list[str] | None = None,
         role_types: list[str] | None = None,
+        location_query: str | None = None,
     ) -> list[dict[str, Any]]:
         return await get_jobs(
             remote_only=remote_only,
             levels=levels,
             role_types=role_types,
+            location_query=location_query,
             providers=self.providers or None,
         )
 
@@ -68,6 +72,7 @@ async def get_jobs(
     remote_only: bool = False,
     levels: list[str] | None = None,
     role_types: list[str] | None = None,
+    location_query: str | None = None,
     providers: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Public entry point for jobs ingestion."""
@@ -81,10 +86,11 @@ async def get_jobs(
     repository = JobCacheRepository()
 
     logger.warning(
-        "get_jobs called remote_only=%s levels=%s role_types=%s providers=%s",
+        "get_jobs called remote_only=%s levels=%s role_types=%s location_query=%s providers=%s",
         remote_only,
         levels,
         role_types,
+        location_query,
         list(provider_registry.keys()),
     )
 
@@ -96,6 +102,9 @@ async def get_jobs(
             remote_only=remote_only,
             provider_names=list(provider_registry.keys()),
         )
+        if location_query:
+            memory_cache_key = f"{memory_cache_key}:location:{_normalize_text(location_query)}"
+
         cached_memory_jobs = get_cached_value(memory_cache_key)
         if cached_memory_jobs is not None:
             logger.warning(
@@ -108,6 +117,7 @@ async def get_jobs(
         remote_only=remote_only,
         levels=levels,
         role_types=role_types,
+        location_query=location_query,
     )
 
     cached_query_jobs = _get_cached_jobs_from_query_cache(
@@ -130,6 +140,7 @@ async def get_jobs(
         remote_only=remote_only,
         levels=levels,
         role_types=role_types,
+        location_query=location_query,
         limit=settings.JOBS_MAX_DB_SCAN_ROWS,
     )
 
@@ -149,6 +160,7 @@ async def get_jobs(
             remote_only=remote_only,
             levels=levels,
             role_types=role_types,
+            location_query=location_query,
         )
 
         if _should_return_shared_jobs_immediately(shared_jobs):
@@ -184,6 +196,7 @@ async def get_jobs(
         remote_only=remote_only,
         levels=levels,
         role_types=role_types,
+        location_query=location_query,
         providers=provider_registry,
     )
 
@@ -206,6 +219,7 @@ async def get_jobs(
             remote_only=remote_only,
             levels=levels,
             role_types=role_types,
+            location_query=location_query,
         )
 
     if use_memory_cache and memory_cache_key is not None:
@@ -312,6 +326,7 @@ def _get_cached_jobs_from_db(
     remote_only: bool = False,
     levels: list[str] | None = None,
     role_types: list[str] | None = None,
+    location_query: str | None = None,
     limit: int = 300,
 ) -> list[dict[str, Any]]:
     """Read jobs from Supabase cache and apply the same filtering pipeline."""
@@ -337,6 +352,7 @@ def _get_cached_jobs_from_db(
         remote_only=remote_only,
         levels=levels,
         role_types=role_types,
+        location_query=location_query,
     )
 
     deduped_jobs = dedupe_jobs(filtered_jobs)
@@ -360,6 +376,7 @@ def _write_query_cache(
     remote_only: bool,
     levels: list[str] | None,
     role_types: list[str] | None,
+    location_query: str | None,
 ) -> None:
     """Persist filtered response ids for fast query replay."""
     try:
@@ -375,6 +392,7 @@ def _write_query_cache(
                 "remote_only": remote_only,
                 "levels": levels or [],
                 "role_types": role_types or [],
+                "location_query": (location_query or "").strip(),
             },
             job_ids=job_ids,
             viewer_scope="public",
@@ -427,6 +445,7 @@ async def _refresh_jobs_from_providers_if_allowed(
     remote_only: bool,
     levels: list[str] | None,
     role_types: list[str] | None,
+    location_query: str | None,
     providers: dict[str, Any],
 ) -> list[NormalizedJob]:
     """Refresh from providers only when cooldown and running guards allow it."""
@@ -471,6 +490,7 @@ async def _refresh_jobs_from_providers_if_allowed(
                 "remote_only": remote_only,
                 "levels": levels or [],
                 "role_types": role_types or [],
+                "location_query": (location_query or "").strip(),
             },
         )
         run_id = str(run.get("id") or "").strip() or None
@@ -491,6 +511,7 @@ async def _refresh_jobs_from_providers_if_allowed(
             remote_only=remote_only,
             levels=levels,
             role_types=role_types,
+            location_query=location_query,
         )
         for provider_name, provider, run_id in eligible_runs
     ]
@@ -529,6 +550,7 @@ async def _refresh_single_provider(
     remote_only: bool,
     levels: list[str] | None,
     role_types: list[str] | None,
+    location_query: str | None,
 ) -> list[NormalizedJob]:
     """Fetch, filter, dedupe, and persist a single provider result."""
     raw_count = 0
@@ -556,6 +578,7 @@ async def _refresh_single_provider(
                 remote_only=remote_only,
                 levels=levels,
                 role_types=role_types,
+                location_query=location_query,
             )
 
             deduped_provider_jobs = dedupe_jobs(filtered_provider_jobs)
@@ -614,11 +637,13 @@ def _apply_job_filters(
     remote_only: bool = False,
     levels: list[str] | None = None,
     role_types: list[str] | None = None,
+    location_query: str | None = None,
 ) -> list[NormalizedJob]:
-    """Apply shared U.S./experience/remote filters to normalized jobs."""
+    """Apply shared U.S./experience/remote/location filters to normalized jobs."""
     options = build_filter_options(
         levels=levels,
         role_types=role_types,
+        location_query=location_query,
     )
 
     filtered: list[NormalizedJob] = []
@@ -642,6 +667,17 @@ def _apply_job_filters(
             continue
 
         if remote_only and not _is_remote_job(job):
+            continue
+
+        if not should_match_location_query(
+            location_query=options.selected_location_query,
+            title=job.title,
+            location=job.location,
+            location_display=job.location_display,
+            description=job.description,
+            remote_flag=job.remote,
+            remote_type=job.remote_type,
+        ):
             continue
 
         filtered.append(job)

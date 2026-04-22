@@ -1,3 +1,4 @@
+# backend/app/services/jobs/job_filters.py
 """Filtering utilities for job ingestion and ranking."""
 
 from __future__ import annotations
@@ -126,6 +127,61 @@ ROLE_TYPE_ALIASES = {
     "cloud_devops": "devops",
 }
 
+US_STATE_CODE_TO_NAME = {
+    "al": "alabama",
+    "ak": "alaska",
+    "az": "arizona",
+    "ar": "arkansas",
+    "ca": "california",
+    "co": "colorado",
+    "ct": "connecticut",
+    "de": "delaware",
+    "fl": "florida",
+    "ga": "georgia",
+    "hi": "hawaii",
+    "id": "idaho",
+    "il": "illinois",
+    "in": "indiana",
+    "ia": "iowa",
+    "ks": "kansas",
+    "ky": "kentucky",
+    "la": "louisiana",
+    "me": "maine",
+    "md": "maryland",
+    "ma": "massachusetts",
+    "mi": "michigan",
+    "mn": "minnesota",
+    "ms": "mississippi",
+    "mo": "missouri",
+    "mt": "montana",
+    "ne": "nebraska",
+    "nv": "nevada",
+    "nh": "new hampshire",
+    "nj": "new jersey",
+    "nm": "new mexico",
+    "ny": "new york",
+    "nc": "north carolina",
+    "nd": "north dakota",
+    "oh": "ohio",
+    "ok": "oklahoma",
+    "or": "oregon",
+    "pa": "pennsylvania",
+    "ri": "rhode island",
+    "sc": "south carolina",
+    "sd": "south dakota",
+    "tn": "tennessee",
+    "tx": "texas",
+    "ut": "utah",
+    "vt": "vermont",
+    "va": "virginia",
+    "wa": "washington",
+    "wv": "west virginia",
+    "wi": "wisconsin",
+    "wy": "wyoming",
+    "dc": "district of columbia",
+}
+US_STATE_NAME_TO_CODE = {name: code for code, name in US_STATE_CODE_TO_NAME.items()}
+
 
 @dataclass(frozen=True)
 class JobFilterOptions:
@@ -133,11 +189,21 @@ class JobFilterOptions:
 
     selected_levels: set[str]
     selected_role_types: set[str]
+    selected_location_query: str | None = None
 
 
 def _normalize_text(value: str | None) -> str:
     """Normalize text for regex matching."""
     return " ".join(str(value or "").strip().lower().split())
+
+
+def _normalize_search_text(value: str | None) -> str:
+    """Normalize free-form search text for tolerant location matching."""
+    text = str(value or "").strip().lower()
+    text = re.sub(r"[|/]+", " ", text)
+    text = re.sub(r"[()]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 def _matches_any_pattern(text: str, patterns: list[str]) -> bool:
@@ -182,14 +248,22 @@ def normalize_role_types(role_types: Iterable[str] | None) -> set[str]:
     return normalized
 
 
+def normalize_location_query(location_query: str | None) -> str | None:
+    """Normalize a free-form location query."""
+    normalized = _normalize_search_text(location_query)
+    return normalized or None
+
+
 def build_filter_options(
     levels: Iterable[str] | None,
     role_types: Iterable[str] | None,
+    location_query: str | None = None,
 ) -> JobFilterOptions:
     """Build normalized filter options."""
     return JobFilterOptions(
         selected_levels=normalize_levels(levels),
         selected_role_types=normalize_role_types(role_types),
+        selected_location_query=normalize_location_query(location_query),
     )
 
 
@@ -257,9 +331,6 @@ def matches_level_filter(
     level = _normalize_text(normalized_level)
     title_text = _normalize_text(title)
 
-    # Always reject obvious senior roles, even when no explicit level filter
-    # was selected. This prevents senior titles from leaking into the default
-    # EarlyBloom browsing experience.
     if is_obviously_senior_title(title_text):
         return False
 
@@ -276,8 +347,6 @@ def matches_level_filter(
         if "mid-level" in selected_levels:
             return True
 
-        # If the user selected only entry/junior, still allow some realistic
-        # stretch titles that are not explicitly senior.
         if selected_levels.issubset(DEFAULT_LEVELS):
             return is_entry_junior_stretch_title(title_text)
 
@@ -295,7 +364,6 @@ def matches_level_filter(
 
         return is_unknown_level_safe_title(title_text)
 
-    # Any other weird value: be conservative but not overly harsh.
     return is_unknown_level_safe_title(title_text)
 
 
@@ -310,12 +378,89 @@ def matches_role_type_filter(
 
     role_type = _normalize_text(normalized_role_type)
     if not role_type:
-        # Until the pipeline consistently stores normalized role_type,
-        # do not auto-kill jobs here.
         return True
 
     role_type = ROLE_TYPE_ALIASES.get(role_type, role_type)
     return role_type in selected_role_types
+
+
+def _expand_location_query(location_query: str) -> set[str]:
+    """Expand a location query into tolerant equivalents."""
+    normalized = _normalize_search_text(location_query)
+    if not normalized:
+        return set()
+
+    values = {normalized}
+
+    if normalized == "remote":
+        values.update({"telework", "work from home", "wfh"})
+
+    if normalized == "hybrid":
+        values.add("flexible hybrid")
+
+    if normalized in {"onsite", "on-site", "on site"}:
+        values.update({"onsite", "on-site", "on site", "in office", "in-office"})
+
+    if normalized in US_STATE_CODE_TO_NAME:
+        values.add(US_STATE_CODE_TO_NAME[normalized])
+
+    if normalized in US_STATE_NAME_TO_CODE:
+        values.add(US_STATE_NAME_TO_CODE[normalized])
+
+    return values
+
+
+def should_match_location_query(
+    *,
+    location_query: str | None,
+    title: str | None,
+    location: str | None,
+    location_display: str | None,
+    description: str | None,
+    remote_flag: bool | None,
+    remote_type: str | None,
+) -> bool:
+    """Return True when a job matches a flexible location query."""
+    normalized_query = normalize_location_query(location_query)
+    if not normalized_query:
+        return True
+
+    haystack = _normalize_search_text(
+        " ".join(
+            part
+            for part in [
+                title or "",
+                location or "",
+                location_display or "",
+                description or "",
+                remote_type or "",
+                "remote" if remote_flag else "",
+            ]
+            if part
+        )
+    )
+
+    if not haystack:
+        return False
+
+    expanded = _expand_location_query(normalized_query)
+    if any(value in haystack for value in expanded):
+        return True
+
+    query_tokens = [token for token in re.split(r"[,\s]+", normalized_query) if token]
+    if len(query_tokens) <= 1:
+        return False
+
+    expanded_tokens = set(query_tokens)
+
+    for token in query_tokens:
+        if token in US_STATE_CODE_TO_NAME:
+            expanded_tokens.add(US_STATE_CODE_TO_NAME[token])
+
+        if token in US_STATE_NAME_TO_CODE:
+            expanded_tokens.add(US_STATE_NAME_TO_CODE[token])
+
+    return all(token in haystack for token in expanded_tokens)
 
 
 def should_include_job(

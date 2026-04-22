@@ -1,3 +1,4 @@
+# backend/app/api/routes/jobs.py
 """Jobs API routes for EarlyBloom.
 
 These routes provide:
@@ -24,6 +25,7 @@ from fastapi import (
     Depends,
     Header,
     HTTPException,
+    Query,
     Response,
     status,
 )
@@ -218,7 +220,12 @@ def _build_related_jobs_response(
     return JobsResponse(jobs=serialized_jobs, total=len(serialized_jobs))
 
 
-def _load_cached_public_jobs(repository: JobCacheRepository, limit: int = 160) -> list[dict[str, Any]]:
+def _load_cached_public_jobs(
+    repository: JobCacheRepository,
+    *,
+    limit: int = 160,
+    location_query: str | None = None,
+) -> list[dict[str, Any]]:
     """Fallback loader for cached jobs when live ingestion fails."""
     rows = repository.list_active_jobs(limit=limit)
     public_jobs: list[dict[str, Any]] = []
@@ -229,12 +236,34 @@ def _load_cached_public_jobs(repository: JobCacheRepository, limit: int = 160) -
             continue
         public_jobs.append(map_normalized_job_to_response(normalized))
 
-    return public_jobs
+    if not location_query:
+        return public_jobs
+
+    from app.services.jobs.job_filters import should_match_location_query
+
+    filtered_jobs: list[dict[str, Any]] = []
+    for job in public_jobs:
+        if should_match_location_query(
+            location_query=location_query,
+            title=job.get("title"),
+            location=job.get("location"),
+            location_display=job.get("location_display"),
+            description=job.get("description"),
+            remote_flag=job.get("remote"),
+            remote_type=job.get("remote_type"),
+        ):
+            filtered_jobs.append(job)
+
+    return filtered_jobs
 
 
 @router.get("", response_model=JobsResponse)
 async def list_jobs(
     response: Response,
+    location: str | None = Query(
+        default=None,
+        description="Optional flexible location query like Atlanta, Georgia, New York, NY, remote, or hybrid.",
+    ),
     current: ViewerContext = Depends(get_optional_viewer_context),
     job_ingestion_service: JobIngestionService = Depends(get_job_ingestion_service),
     repository: JobCacheRepository = Depends(get_job_cache_repository),
@@ -243,12 +272,15 @@ async def list_jobs(
     jobs: list[dict[str, Any]] = []
 
     try:
-        jobs = await job_ingestion_service.ingest_jobs()
+        jobs = await job_ingestion_service.ingest_jobs(location_query=location)
     except Exception:
         logger.exception("Live jobs ingestion failed. Falling back to shared cache.")
 
         try:
-            jobs = _load_cached_public_jobs(repository)
+            jobs = _load_cached_public_jobs(
+                repository,
+                location_query=location,
+            )
         except Exception:
             logger.exception("Shared cache fallback also failed.")
 

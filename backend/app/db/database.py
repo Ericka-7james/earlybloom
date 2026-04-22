@@ -1,3 +1,4 @@
+# backend/app/db/database.py
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -781,11 +782,13 @@ class JobCacheRepository:
         remote_only: bool,
         levels: list[str] | None,
         role_types: list[str] | None,
+        location_query: str | None = None,
     ) -> str:
         payload = {
             "remote_only": bool(remote_only),
             "levels": sorted(str(x).strip().lower() for x in (levels or [])),
             "role_types": sorted(str(x).strip().lower() for x in (role_types or [])),
+            "location_query": " ".join(str(location_query or "").strip().lower().split()),
         }
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return sha256(raw.encode("utf-8")).hexdigest()

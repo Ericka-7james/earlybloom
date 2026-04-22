@@ -1,3 +1,4 @@
+// frontend/src/lib/jobs/jobsApi.js
 /**
  * @fileoverview Jobs API client for EarlyBloom.
  *
@@ -154,7 +155,7 @@ async function requestJson(path, options = {}) {
       });
     } catch {
       throw new Error(
-        " the server. Check that the backend is running and try again."
+        "Unable to reach the server. Check that the backend is running and try again."
       );
     }
 
@@ -243,6 +244,24 @@ function setCachedResponse(cacheKey, payload) {
  */
 function clearJobsRequestCache() {
   _responseCache.clear();
+}
+
+/**
+ * Builds the public jobs path with optional query parameters.
+ *
+ * @param {{ locationQuery?: string }} [options] Query options.
+ * @returns {string} Jobs path.
+ */
+function buildJobsPath(options = {}) {
+  const { locationQuery = "" } = options;
+  const params = new URLSearchParams();
+
+  if (String(locationQuery || "").trim()) {
+    params.set("location", String(locationQuery).trim());
+  }
+
+  const query = params.toString();
+  return query ? `/jobs?${query}` : "/jobs";
 }
 
 /**
@@ -478,11 +497,11 @@ function normalizeJobsPayload(payload) {
 /**
  * Fetches the public jobs feed.
  *
- * @param {{ signal?: AbortSignal, force?: boolean }} [options] Fetch options.
+ * @param {{ signal?: AbortSignal, force?: boolean, locationQuery?: string }} [options] Fetch options.
  * @returns {Promise<Array<object>>} Normalized jobs array.
  */
 export async function fetchJobs(options = {}) {
-  const { signal, force = false } = options;
+  const { signal, force = false, locationQuery = "" } = options;
 
   if (USE_MOCK_JOBS) {
     return MOCK_RAW_JOBS;
@@ -492,7 +511,7 @@ export async function fetchJobs(options = {}) {
     clearJobsRequestCache();
   }
 
-  const payload = await requestJson("/jobs", {
+  const payload = await requestJson(buildJobsPath({ locationQuery }), {
     method: "GET",
     signal,
   });
