@@ -6,7 +6,9 @@ function toSafeArray(value) {
 }
 
 function toSafeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
 }
 
 function toSafeText(value, fallback = "") {
@@ -50,6 +52,37 @@ function getSafeRenderableJob(job, index) {
     sourceLabel: toSafeText(job.sourceLabel, ""),
     cardMeta: Array.isArray(job.cardMeta) ? job.cardMeta : [],
     matchedSkills: Array.isArray(job.matchedSkills) ? job.matchedSkills : [],
+  };
+}
+
+function getEmptyStateContent(hasActiveFilters, activeFilterTags) {
+  if (!hasActiveFilters) {
+    return {
+      title: "No roles available right now",
+      body: "Refresh and try again in a moment.",
+    };
+  }
+
+  const safeTags = toSafeArray(activeFilterTags)
+    .map((tag) => toSafeObject(tag))
+    .filter(Boolean);
+
+  const hasLocationFilter = safeTags.some((tag) => {
+    const type = toSafeText(tag.type, "").toLowerCase();
+    const group = toSafeText(tag.group, "").toLowerCase();
+    return type === "location" || group === "location";
+  });
+
+  if (hasLocationFilter) {
+    return {
+      title: "No roles match this location yet",
+      body: "Try a nearby city, a broader state search, or clear location to widen your view.",
+    };
+  }
+
+  return {
+    title: "No roles match these filters",
+    body: "Try clearing a few filters or widening your view.",
   };
 }
 
@@ -109,6 +142,8 @@ function JobsResultsPanel({
       return {
         key: String(key),
         label,
+        type: toSafeText(safeTag.type, ""),
+        group: toSafeText(safeTag.group, ""),
       };
     })
     .filter(Boolean);
@@ -126,6 +161,11 @@ function JobsResultsPanel({
   const safeTotalPages = Math.max(1, toSafeNumber(totalPages, 1));
   const safePageStartCount = Math.max(0, toSafeNumber(pageStartCount, 0));
   const safePageEndCount = Math.max(0, toSafeNumber(pageEndCount, 0));
+
+  const emptyStateContent = getEmptyStateContent(
+    hasActiveFilters,
+    safeActiveFilterTags
+  );
 
   return (
     <div className="jobs-results">
@@ -145,12 +185,15 @@ function JobsResultsPanel({
 
             {!showInitialLoadingState && safeJobs.length > 0 ? (
               <p className="jobs-results__subtext">
-                Showing {safePageStartCount} to {safePageEndCount} of {safeJobs.length} results.
+                Showing {safePageStartCount} to {safePageEndCount} of{" "}
+                {safeJobs.length} results.
               </p>
             ) : null}
 
             {isMockMode ? (
-              <p className="jobs-results__subtext">Mock mode is active right now.</p>
+              <p className="jobs-results__subtext">
+                Mock mode is active right now.
+              </p>
             ) : null}
           </div>
 
@@ -170,7 +213,11 @@ function JobsResultsPanel({
               <button
                 type="button"
                 className="jobs-chip jobs-chip--muted"
-                onClick={typeof onClearAllFilters === "function" ? onClearAllFilters : undefined}
+                onClick={
+                  typeof onClearAllFilters === "function"
+                    ? onClearAllFilters
+                    : undefined
+                }
               >
                 Clear all
               </button>
@@ -238,17 +285,9 @@ function JobsResultsPanel({
         {showJobsEmptyState ? (
           <div className="empty-state-card jobs-results__empty">
             <div className="empty-state-card__header">
-              <h3 className="card-title">
-                {hasActiveFilters
-                  ? "No roles match these filters"
-                  : "No roles available right now"}
-              </h3>
+              <h3 className="card-title">{emptyStateContent.title}</h3>
 
-              <p className="card-copy">
-                {hasActiveFilters
-                  ? "Try clearing a few filters or widening your view."
-                  : "Refresh and try again in a moment."}
-              </p>
+              <p className="card-copy">{emptyStateContent.body}</p>
             </div>
 
             {hasActiveFilters ? (
@@ -256,7 +295,11 @@ function JobsResultsPanel({
                 <button
                   type="button"
                   className="jobs-chip"
-                  onClick={typeof onClearAllFilters === "function" ? onClearAllFilters : undefined}
+                  onClick={
+                    typeof onClearAllFilters === "function"
+                      ? onClearAllFilters
+                      : undefined
+                  }
                 >
                   Clear filters
                 </button>
@@ -278,9 +321,19 @@ function JobsResultsPanel({
                   <JobCard
                     key={String(safeJobId)}
                     job={job}
-                    onOpenDetails={typeof onOpenDetails === "function" ? onOpenDetails : undefined}
-                    onSaveToggle={typeof onToggleSave === "function" ? onToggleSave : undefined}
-                    onHide={typeof onHideJob === "function" ? onHideJob : undefined}
+                    onOpenDetails={
+                      typeof onOpenDetails === "function"
+                        ? onOpenDetails
+                        : undefined
+                    }
+                    onSaveToggle={
+                      typeof onToggleSave === "function"
+                        ? onToggleSave
+                        : undefined
+                    }
+                    onHide={
+                      typeof onHideJob === "function" ? onHideJob : undefined
+                    }
                     isSavePending={Boolean(actionState.saving)}
                     isHidePending={Boolean(actionState.hiding)}
                   />
@@ -289,10 +342,7 @@ function JobsResultsPanel({
             </div>
 
             {safeTotalPages > 1 ? (
-              <nav
-                className="jobs-pagination"
-                aria-label="Job results pages"
-              >
+              <nav className="jobs-pagination" aria-label="Job results pages">
                 <div className="jobs-pagination__inner">
                   <button
                     type="button"
@@ -326,7 +376,9 @@ function JobsResultsPanel({
                           key={`page-${pageNumber}`}
                           type="button"
                           className={`jobs-chip ${
-                            pageNumber === safeCurrentPage ? "jobs-chip--active" : ""
+                            pageNumber === safeCurrentPage
+                              ? "jobs-chip--active"
+                              : ""
                           }`}
                           onClick={() =>
                             typeof onChangePage === "function" &&

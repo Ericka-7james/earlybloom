@@ -129,6 +129,7 @@ function FilterSection({
  * Jobs filter sidebar and modal panel.
  *
  * Includes:
+ * - location search
  * - experience level
  * - workplace
  * - role type
@@ -139,11 +140,13 @@ function FilterSection({
  */
 function JobsFiltersPanel({
   hasActiveFilters,
+  locationQuery = "",
   selectedExperienceLevels = [],
   selectedWorkplaces = [],
   selectedRoleTypes = [],
   selectedSkills = [],
   availableSkills = [],
+  setLocationQuery,
   setSelectedExperienceLevels,
   setSelectedWorkplaces,
   setSelectedRoleTypes,
@@ -151,6 +154,7 @@ function JobsFiltersPanel({
   onClearAll,
 }) {
   const [openSections, setOpenSections] = useState({
+    location: true,
     experience: true,
     workplace: false,
     roleType: false,
@@ -164,13 +168,17 @@ function JobsFiltersPanel({
   }, [availableSkills]);
 
   const totalSelectedCount = useMemo(() => {
+    const hasLocation = String(locationQuery || "").trim() ? 1 : 0;
+
     return (
+      hasLocation +
       selectedExperienceLevels.length +
       selectedWorkplaces.length +
       selectedRoleTypes.length +
       selectedSkills.length
     );
   }, [
+    locationQuery,
     selectedExperienceLevels,
     selectedWorkplaces,
     selectedRoleTypes,
@@ -219,7 +227,9 @@ function JobsFiltersPanel({
       return;
     }
 
-    setSelectedSkills((currentValues) => getNextSelectedValues(currentValues, value));
+    setSelectedSkills((currentValues) =>
+      getNextSelectedValues(currentValues, value)
+    );
   }
 
   return (
@@ -257,6 +267,41 @@ function JobsFiltersPanel({
       </div>
 
       <div className="jobs-filters-panel__groups">
+        <FilterSection
+          title="Location"
+          description="Search by city, state, region, or workplace style."
+          isOpen={openSections.location}
+          onToggleOpen={() => toggleSection("location")}
+        >
+          <div className="jobs-filters-panel__location-search">
+            <label
+              className="jobs-filters-panel__field-label"
+              htmlFor="jobs-location-query"
+            >
+              Location
+            </label>
+
+            <input
+              id="jobs-location-query"
+              type="text"
+              className="jobs-filters-panel__input"
+              value={locationQuery}
+              onChange={(event) => {
+                if (typeof setLocationQuery === "function") {
+                  setLocationQuery(event.target.value);
+                }
+              }}
+              placeholder="Atlanta, Georgia, New York, NY, remote..."
+              autoComplete="off"
+            />
+
+            <p className="jobs-filters-panel__field-help">
+              Flexible matching works with city, state, remote, hybrid, and
+              similar normalized location text.
+            </p>
+          </div>
+        </FilterSection>
+
         <FilterSection
           title="Experience level"
           description="Start with early-career ranges."

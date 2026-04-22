@@ -1,3 +1,4 @@
+// frontend/src/components/jobs/JobsPageModals.jsx
 import React from "react";
 import JobDetailsModal from "./JobDetailsModal.jsx";
 import ResumeUploadModal from "./ResumeUploadModal.jsx";
@@ -61,10 +62,12 @@ function JobsPageModals({
   hasActiveFilters = false,
   loginContent = null,
   availableSkillOptions = [],
+  locationQuery = "",
   selectedExperienceLevels = [],
   selectedWorkplaces = [],
   selectedRoleTypes = [],
   selectedSkills = [],
+  setLocationQuery,
   setSelectedExperienceLevels,
   setSelectedWorkplaces,
   setSelectedRoleTypes,
@@ -100,11 +103,13 @@ function JobsPageModals({
         <div className="jobs-filters jobs-filters--modal">
           <JobsFiltersPanel
             hasActiveFilters={Boolean(hasActiveFilters)}
+            locationQuery={locationQuery}
             selectedExperienceLevels={safeSelectedExperienceLevels}
             selectedWorkplaces={safeSelectedWorkplaces}
             selectedRoleTypes={safeSelectedRoleTypes}
             selectedSkills={safeSelectedSkills}
             availableSkills={safeAvailableSkillOptions}
+            setLocationQuery={setLocationQuery}
             setSelectedExperienceLevels={setSelectedExperienceLevels}
             setSelectedWorkplaces={setSelectedWorkplaces}
             setSelectedRoleTypes={setSelectedRoleTypes}

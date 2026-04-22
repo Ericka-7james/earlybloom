@@ -1,3 +1,4 @@
+// frontend/src/pages/Jobs.jsx
 /**
  * @fileoverview Jobs discovery page for EarlyBloom.
  *
@@ -103,11 +104,13 @@ function Jobs() {
             >
               <JobsFiltersPanel
                 hasActiveFilters={Boolean(jobsPage.hasActiveFilters)}
+                locationQuery={jobsPage.locationQuery ?? ""}
                 selectedExperienceLevels={selectedExperienceLevels}
                 selectedWorkplaces={selectedWorkplaces}
                 selectedRoleTypes={selectedRoleTypes}
                 selectedSkills={selectedSkills}
                 availableSkills={availableSkillOptions}
+                setLocationQuery={jobsPage.setLocationQuery}
                 setSelectedExperienceLevels={jobsPage.setSelectedExperienceLevels}
                 setSelectedWorkplaces={jobsPage.setSelectedWorkplaces}
                 setSelectedRoleTypes={jobsPage.setSelectedRoleTypes}
@@ -168,10 +171,12 @@ function Jobs() {
         hasActiveFilters={Boolean(jobsPage.hasActiveFilters)}
         loginContent={jobsPage.loginContent ?? null}
         availableSkillOptions={availableSkillOptions}
+        locationQuery={jobsPage.locationQuery ?? ""}
         selectedExperienceLevels={selectedExperienceLevels}
         selectedWorkplaces={selectedWorkplaces}
         selectedRoleTypes={selectedRoleTypes}
         selectedSkills={selectedSkills}
+        setLocationQuery={jobsPage.setLocationQuery}
         setSelectedExperienceLevels={jobsPage.setSelectedExperienceLevels}
         setSelectedWorkplaces={jobsPage.setSelectedWorkplaces}
         setSelectedRoleTypes={jobsPage.setSelectedRoleTypes}
