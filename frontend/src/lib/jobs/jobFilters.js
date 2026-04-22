@@ -1,3 +1,4 @@
+// src/lib/jobs/jobFilters.js
 /**
  * @fileoverview Shared frontend job filtering utilities for EarlyBloom.
  *
@@ -7,7 +8,7 @@
  * - define filter option groups used by the UI
  * - normalize and toggle selected filter values
  * - infer job metadata when backend fields are incomplete
- * - filter jobs by experience level, workplace, role type, and skills
+ * - filter jobs by experience level, workplace, role type, skills, and location
  * - derive active filter tags and summary text for compact UI display
  */
 
@@ -56,6 +57,60 @@ const FILTER_GROUPS = {
 const DEFAULT_SELECTED_EXPERIENCE_LEVELS = ["entry-level", "junior"];
 const MAX_VISIBLE_SKILL_OPTIONS = 16;
 
+const STATE_ALIASES = {
+  al: "alabama",
+  ak: "alaska",
+  az: "arizona",
+  ar: "arkansas",
+  ca: "california",
+  co: "colorado",
+  ct: "connecticut",
+  de: "delaware",
+  fl: "florida",
+  ga: "georgia",
+  hi: "hawaii",
+  id: "idaho",
+  il: "illinois",
+  in: "indiana",
+  ia: "iowa",
+  ks: "kansas",
+  ky: "kentucky",
+  la: "louisiana",
+  me: "maine",
+  md: "maryland",
+  ma: "massachusetts",
+  mi: "michigan",
+  mn: "minnesota",
+  ms: "mississippi",
+  mo: "missouri",
+  mt: "montana",
+  ne: "nebraska",
+  nv: "nevada",
+  nh: "new hampshire",
+  nj: "new jersey",
+  nm: "new mexico",
+  ny: "new york",
+  nc: "north carolina",
+  nd: "north dakota",
+  oh: "ohio",
+  ok: "oklahoma",
+  or: "oregon",
+  pa: "pennsylvania",
+  ri: "rhode island",
+  sc: "south carolina",
+  sd: "south dakota",
+  tn: "tennessee",
+  tx: "texas",
+  ut: "utah",
+  vt: "vermont",
+  va: "virginia",
+  wa: "washington",
+  wv: "west virginia",
+  wi: "wisconsin",
+  wy: "wyoming",
+  dc: "district of columbia",
+};
+
 /**
  * Normalizes a scalar value into a lowercase comparison-friendly string.
  *
@@ -64,6 +119,21 @@ const MAX_VISIBLE_SKILL_OPTIONS = 16;
  */
 function normalizeValue(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+/**
+ * Normalizes free text for tolerant matching.
+ *
+ * @param {unknown} value Raw text.
+ * @returns {string} Normalized text.
+ */
+function normalizeSearchText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[|/]+/g, " ")
+    .replace(/[()]/g, " ")
+    .replace(/\s+/g, " ");
 }
 
 /**
@@ -502,10 +572,124 @@ function matchesSelectedSkills(job, selectedSkills = []) {
 }
 
 /**
- * Filters jobs using selected experience, workplace, role type, and skills.
+ * Expands a location query into a few tolerant equivalents.
+ *
+ * @param {string} locationQuery User-entered location query.
+ * @returns {string[]} Normalized comparison tokens.
+ */
+function expandLocationQuery(locationQuery = "") {
+  const normalized = normalizeSearchText(locationQuery);
+  if (!normalized) {
+    return [];
+  }
+
+  const values = new Set([normalized]);
+
+  if (normalized === "remote") {
+    values.add("telework");
+    values.add("work from home");
+    values.add("wfh");
+  }
+
+  if (normalized === "hybrid") {
+    values.add("flexible hybrid");
+  }
+
+  if (normalized === "onsite" || normalized === "on-site" || normalized === "on site") {
+    values.add("onsite");
+    values.add("on-site");
+    values.add("on site");
+    values.add("in office");
+    values.add("in-office");
+  }
+
+  if (STATE_ALIASES[normalized]) {
+    values.add(STATE_ALIASES[normalized]);
+  }
+
+  Object.entries(STATE_ALIASES).forEach(([abbr, fullName]) => {
+    if (normalized === fullName) {
+      values.add(abbr);
+    }
+  });
+
+  return Array.from(values);
+}
+
+/**
+ * Returns whether a job matches a flexible location query.
+ *
+ * Matching rules:
+ * - empty query matches everything
+ * - workplace-like values such as remote/hybrid are supported
+ * - city/state text uses substring matching against normalized location text
+ * - multi-token queries like "new york ny" require all tokens to appear
+ *
+ * @param {object} job Job object.
+ * @param {string} locationQuery User-entered location query.
+ * @returns {boolean} Whether the job passes location filtering.
+ */
+function matchesLocationQuery(job, locationQuery = "") {
+  const normalizedQuery = normalizeSearchText(locationQuery);
+
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const haystack = normalizeSearchText(
+    [
+      job.location,
+      job.location_display,
+      job.cardLocation,
+      job.modalLocation,
+      job.fullLocation,
+      job.workplaceType,
+      job.remoteType,
+      job.summary,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  if (!haystack) {
+    return false;
+  }
+
+  const expandedQueries = expandLocationQuery(normalizedQuery);
+
+  if (expandedQueries.some((value) => haystack.includes(value))) {
+    return true;
+  }
+
+  const queryTokens = normalizedQuery.split(/[,\s]+/).filter(Boolean);
+  if (queryTokens.length <= 1) {
+    return false;
+  }
+
+  const expandedTokenSet = new Set(queryTokens);
+
+  queryTokens.forEach((token) => {
+    if (STATE_ALIASES[token]) {
+      expandedTokenSet.add(STATE_ALIASES[token]);
+    }
+
+    Object.entries(STATE_ALIASES).forEach(([abbr, fullName]) => {
+      if (token === fullName) {
+        expandedTokenSet.add(abbr);
+      }
+    });
+  });
+
+  return Array.from(expandedTokenSet).every((token) => haystack.includes(token));
+}
+
+/**
+ * Filters jobs using selected experience, workplace, role type, skills,
+ * and optional location query.
  *
  * @param {object[]} jobs Jobs array.
  * @param {{
+ *   locationQuery?: string,
  *   selectedExperienceLevels: string[],
  *   selectedWorkplaces: string[],
  *   selectedRoleTypes: string[],
@@ -516,6 +700,7 @@ function matchesSelectedSkills(job, selectedSkills = []) {
 function filterJobs(
   jobs,
   {
+    locationQuery = "",
     selectedExperienceLevels,
     selectedWorkplaces,
     selectedRoleTypes,
@@ -526,6 +711,8 @@ function filterJobs(
     const experienceLevel = getJobExperienceLevel(job);
     const workplace = getJobWorkplace(job);
     const roleType = inferRoleType(job);
+
+    const matchesLocation = matchesLocationQuery(job, locationQuery);
 
     const matchesExperienceLevel =
       selectedExperienceLevels.length === 0 ||
@@ -542,6 +729,7 @@ function filterJobs(
     const matchesSkills = matchesSelectedSkills(job, selectedSkills);
 
     return (
+      matchesLocation &&
       matchesExperienceLevel &&
       matchesWorkplace &&
       matchesRoleType &&
@@ -554,6 +742,7 @@ function filterJobs(
  * Builds compact summary text for the mobile filters trigger.
  *
  * @param {{
+ *   locationQuery?: string,
  *   selectedExperienceLevels: string[],
  *   selectedWorkplaces: string[],
  *   selectedRoleTypes: string[],
@@ -562,12 +751,17 @@ function filterJobs(
  * @returns {string} Summary text.
  */
 function getFilterSummary({
+  locationQuery = "",
   selectedExperienceLevels,
   selectedWorkplaces,
   selectedRoleTypes,
   selectedSkills = [],
 }) {
   const parts = [];
+
+  if (String(locationQuery || "").trim()) {
+    parts.push("1 location");
+  }
 
   if (selectedExperienceLevels.length > 0) {
     parts.push(`${selectedExperienceLevels.length} level`);
@@ -596,6 +790,7 @@ function getFilterSummary({
  * Builds visible active-filter tags for the jobs page.
  *
  * @param {{
+ *   locationQuery?: string,
  *   selectedExperienceLevels: string[],
  *   selectedWorkplaces: string[],
  *   selectedRoleTypes: string[],
@@ -604,12 +799,22 @@ function getFilterSummary({
  * @returns {Array<{group:string,label:string,value:string,type:string}>} Active tags.
  */
 function getActiveFilterTags({
+  locationQuery = "",
   selectedExperienceLevels,
   selectedWorkplaces,
   selectedRoleTypes,
   selectedSkills = [],
 }) {
   const tags = [];
+
+  if (String(locationQuery || "").trim()) {
+    tags.push({
+      group: "Location",
+      label: String(locationQuery).trim(),
+      value: String(locationQuery).trim(),
+      type: "location",
+    });
+  }
 
   FILTER_GROUPS.experienceLevel.forEach((option) => {
     if (selectedExperienceLevels.includes(option.value)) {
@@ -755,6 +960,7 @@ export {
   inferRoleType,
   getJobSkills,
   matchesSelectedSkills,
+  matchesLocationQuery,
   filterJobs,
   getFilterSummary,
   getActiveFilterTags,

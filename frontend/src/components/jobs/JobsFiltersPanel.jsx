@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from "react";
+// src/components/jobs/JobsFiltersPanel.jsx
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   FILTER_GROUPS,
   toggleSelectedValue,
 } from "../../lib/jobs/jobFilters";
+import { getLocationSuggestions } from "../../lib/jobs/locationSuggestions";
 
 /**
  * Renders a selectable chip button for a single filter option.
@@ -129,7 +131,7 @@ function FilterSection({
  * Jobs filter sidebar and modal panel.
  *
  * Includes:
- * - location search
+ * - location search with local autocomplete
  * - experience level
  * - workplace
  * - role type
@@ -160,8 +162,11 @@ function JobsFiltersPanel({
     roleType: false,
     skills: false,
   });
-
   const [showAllSkills, setShowAllSkills] = useState(false);
+  const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
+
+  const locationFieldRef = useRef(null);
 
   const safeAvailableSkills = useMemo(() => {
     return Array.isArray(availableSkills) ? availableSkills.filter(Boolean) : [];
@@ -189,12 +194,35 @@ function JobsFiltersPanel({
     return showAllSkills ? safeAvailableSkills : safeAvailableSkills.slice(0, 10);
   }, [safeAvailableSkills, showAllSkills]);
 
-  /**
-   * Toggles whether a section is open.
-   *
-   * @param {string} sectionKey Section key.
-   * @returns {void}
-   */
+  const locationSuggestions = useMemo(() => {
+    return getLocationSuggestions(locationQuery, 6);
+  }, [locationQuery]);
+
+  const safeActiveSuggestionIndex =
+    activeSuggestionIndex >= 0 &&
+    activeSuggestionIndex < locationSuggestions.length
+      ? activeSuggestionIndex
+      : -1;
+
+  useEffect(() => {
+    function handlePointerDown(event) {
+      if (!locationFieldRef.current) {
+        return;
+      }
+
+      if (!locationFieldRef.current.contains(event.target)) {
+        setIsSuggestionsOpen(false);
+        setActiveSuggestionIndex(-1);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, []);
+
   function toggleSection(sectionKey) {
     setOpenSections((current) => ({
       ...current,
@@ -202,13 +230,6 @@ function JobsFiltersPanel({
     }));
   }
 
-  /**
-   * Toggles a value inside a selected array.
-   *
-   * @param {string[]} currentValues Current values.
-   * @param {string} value Option value.
-   * @returns {string[]} Next selected values.
-   */
   function getNextSelectedValues(currentValues, value) {
     return toggleSelectedValue(
       Array.isArray(currentValues) ? currentValues : [],
@@ -216,12 +237,6 @@ function JobsFiltersPanel({
     );
   }
 
-  /**
-   * Toggles a selected skill.
-   *
-   * @param {string} value Skill value.
-   * @returns {void}
-   */
   function toggleSkills(value) {
     if (typeof setSelectedSkills !== "function") {
       return;
@@ -230,6 +245,78 @@ function JobsFiltersPanel({
     setSelectedSkills((currentValues) =>
       getNextSelectedValues(currentValues, value)
     );
+  }
+
+  function handleLocationInputChange(event) {
+    if (typeof setLocationQuery !== "function") {
+      return;
+    }
+
+    setLocationQuery(event.target.value);
+    setIsSuggestionsOpen(true);
+    setActiveSuggestionIndex(-1);
+  }
+
+  function handleSuggestionSelect(suggestionValue) {
+    if (typeof setLocationQuery !== "function") {
+      return;
+    }
+
+    setLocationQuery(suggestionValue);
+    setIsSuggestionsOpen(false);
+    setActiveSuggestionIndex(-1);
+  }
+
+  function handleLocationKeyDown(event) {
+    if (!locationSuggestions.length) {
+      if (event.key === "Escape") {
+        setIsSuggestionsOpen(false);
+        setActiveSuggestionIndex(-1);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setIsSuggestionsOpen(true);
+      setActiveSuggestionIndex((current) => {
+        const normalizedCurrent =
+          current >= 0 && current < locationSuggestions.length ? current : -1;
+
+        return normalizedCurrent >= locationSuggestions.length - 1
+          ? 0
+          : normalizedCurrent + 1;
+      });
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setIsSuggestionsOpen(true);
+      setActiveSuggestionIndex((current) => {
+        const normalizedCurrent =
+          current >= 0 && current < locationSuggestions.length ? current : -1;
+
+        return normalizedCurrent <= 0
+          ? locationSuggestions.length - 1
+          : normalizedCurrent - 1;
+      });
+    }
+
+    if (
+      event.key === "Enter" &&
+      isSuggestionsOpen &&
+      safeActiveSuggestionIndex >= 0
+    ) {
+      event.preventDefault();
+      handleSuggestionSelect(
+        locationSuggestions[safeActiveSuggestionIndex].value
+      );
+    }
+
+    if (event.key === "Escape") {
+      setIsSuggestionsOpen(false);
+      setActiveSuggestionIndex(-1);
+    }
   }
 
   return (
@@ -273,7 +360,10 @@ function JobsFiltersPanel({
           isOpen={openSections.location}
           onToggleOpen={() => toggleSection("location")}
         >
-          <div className="jobs-filters-panel__location-search">
+          <div
+            className="jobs-filters-panel__location-search"
+            ref={locationFieldRef}
+          >
             <label
               className="jobs-filters-panel__field-label"
               htmlFor="jobs-location-query"
@@ -281,19 +371,60 @@ function JobsFiltersPanel({
               Location
             </label>
 
-            <input
-              id="jobs-location-query"
-              type="text"
-              className="jobs-filters-panel__input"
-              value={locationQuery}
-              onChange={(event) => {
-                if (typeof setLocationQuery === "function") {
-                  setLocationQuery(event.target.value);
-                }
-              }}
-              placeholder="Atlanta, Georgia, New York, NY, remote..."
-              autoComplete="off"
-            />
+            <div className="jobs-filters-panel__autocomplete">
+              <input
+                id="jobs-location-query"
+                type="text"
+                className="jobs-filters-panel__input"
+                value={locationQuery}
+                onChange={handleLocationInputChange}
+                onFocus={() => setIsSuggestionsOpen(true)}
+                onKeyDown={handleLocationKeyDown}
+                placeholder="Atlanta, Georgia, New York, NY, remote..."
+                autoComplete="off"
+                aria-autocomplete="list"
+                aria-expanded={isSuggestionsOpen && locationSuggestions.length > 0}
+                aria-controls="jobs-location-suggestions"
+              />
+
+              {isSuggestionsOpen && locationSuggestions.length > 0 ? (
+                <div
+                  id="jobs-location-suggestions"
+                  className="jobs-filters-panel__suggestions"
+                  role="listbox"
+                  aria-label="Location suggestions"
+                >
+                  {locationSuggestions.map((suggestion, index) => {
+                    const isActive = index === safeActiveSuggestionIndex;
+
+                    return (
+                      <button
+                        key={`${suggestion.type}-${suggestion.label}`}
+                        type="button"
+                        className={`jobs-filters-panel__suggestion ${
+                          isActive
+                            ? "jobs-filters-panel__suggestion--active"
+                            : ""
+                        }`}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          handleSuggestionSelect(suggestion.value);
+                        }}
+                        role="option"
+                        aria-selected={isActive}
+                      >
+                        <span className="jobs-filters-panel__suggestion-label">
+                          {suggestion.label}
+                        </span>
+                        <span className="jobs-filters-panel__suggestion-type">
+                          {suggestion.type}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
 
             <p className="jobs-filters-panel__field-help">
               Flexible matching works with city, state, remote, hybrid, and
