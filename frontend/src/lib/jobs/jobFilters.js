@@ -1,4 +1,3 @@
-// src/lib/jobs/jobFilters.js
 /**
  * @fileoverview Shared frontend job filtering utilities for EarlyBloom.
  *
@@ -56,6 +55,7 @@ const FILTER_GROUPS = {
 
 const DEFAULT_SELECTED_EXPERIENCE_LEVELS = ["entry-level", "junior"];
 const MAX_VISIBLE_SKILL_OPTIONS = 16;
+const MAX_LOCATION_LABEL_LENGTH = 24;
 
 const STATE_ALIASES = {
   al: "alabama",
@@ -134,6 +134,42 @@ function normalizeSearchText(value) {
     .replace(/[|/]+/g, " ")
     .replace(/[()]/g, " ")
     .replace(/\s+/g, " ");
+}
+
+/**
+ * Builds a short, clean location label for UI surfaces.
+ *
+ * @param {string} locationQuery Raw location query.
+ * @param {{truncate?: boolean}} [options] Formatting options.
+ * @returns {string} Compact location label.
+ */
+function formatLocationLabel(locationQuery = "", options = {}) {
+  const { truncate = false } = options;
+  const cleaned = String(locationQuery || "").trim().replace(/\s+/g, " ");
+
+  if (!cleaned) {
+    return "";
+  }
+
+  const lower = cleaned.toLowerCase();
+
+  if (lower === "remote") {
+    return "Remote";
+  }
+
+  if (lower === "hybrid") {
+    return "Hybrid";
+  }
+
+  if (lower === "onsite" || lower === "on-site" || lower === "on site") {
+    return "Onsite";
+  }
+
+  if (!truncate || cleaned.length <= MAX_LOCATION_LABEL_LENGTH) {
+    return cleaned;
+  }
+
+  return `${cleaned.slice(0, MAX_LOCATION_LABEL_LENGTH - 1).trim()}…`;
 }
 
 /**
@@ -595,7 +631,11 @@ function expandLocationQuery(locationQuery = "") {
     values.add("flexible hybrid");
   }
 
-  if (normalized === "onsite" || normalized === "on-site" || normalized === "on site") {
+  if (
+    normalized === "onsite" ||
+    normalized === "on-site" ||
+    normalized === "on site"
+  ) {
     values.add("onsite");
     values.add("on-site");
     values.add("on site");
@@ -758,9 +798,10 @@ function getFilterSummary({
   selectedSkills = [],
 }) {
   const parts = [];
+  const locationLabel = formatLocationLabel(locationQuery, { truncate: true });
 
-  if (String(locationQuery || "").trim()) {
-    parts.push("1 location");
+  if (locationLabel) {
+    parts.push(locationLabel);
   }
 
   if (selectedExperienceLevels.length > 0) {
@@ -806,11 +847,12 @@ function getActiveFilterTags({
   selectedSkills = [],
 }) {
   const tags = [];
+  const locationLabel = formatLocationLabel(locationQuery);
 
-  if (String(locationQuery || "").trim()) {
+  if (locationLabel) {
     tags.push({
       group: "Location",
-      label: String(locationQuery).trim(),
+      label: locationLabel,
       value: String(locationQuery).trim(),
       type: "location",
     });
@@ -965,4 +1007,5 @@ export {
   getFilterSummary,
   getActiveFilterTags,
   getAvailableSkillOptions,
+  formatLocationLabel,
 };

@@ -7,44 +7,45 @@
  * - no network dependency
  * - curated major-city and state coverage
  * - includes common workplace shortcuts like remote and hybrid
+ * - keeps selected values compact and job-board friendly
  */
 
 const LOCATION_SUGGESTIONS = [
-  { label: "Remote", value: "remote", type: "workplace" },
-  { label: "Hybrid", value: "hybrid", type: "workplace" },
-  { label: "Onsite", value: "onsite", type: "workplace" },
+  { label: "Remote", value: "Remote", type: "workplace" },
+  { label: "Hybrid", value: "Hybrid", type: "workplace" },
+  { label: "Onsite", value: "Onsite", type: "workplace" },
 
-  { label: "Atlanta, GA", value: "atlanta", type: "city" },
-  { label: "Austin, TX", value: "austin", type: "city" },
-  { label: "Boston, MA", value: "boston", type: "city" },
-  { label: "Charlotte, NC", value: "charlotte", type: "city" },
-  { label: "Chicago, IL", value: "chicago", type: "city" },
-  { label: "Dallas, TX", value: "dallas", type: "city" },
-  { label: "Denver, CO", value: "denver", type: "city" },
-  { label: "Houston, TX", value: "houston", type: "city" },
-  { label: "Los Angeles, CA", value: "los angeles", type: "city" },
-  { label: "Miami, FL", value: "miami", type: "city" },
-  { label: "Nashville, TN", value: "nashville", type: "city" },
-  { label: "New York, NY", value: "new york", type: "city" },
-  { label: "Philadelphia, PA", value: "philadelphia", type: "city" },
-  { label: "Phoenix, AZ", value: "phoenix", type: "city" },
-  { label: "Raleigh, NC", value: "raleigh", type: "city" },
-  { label: "San Diego, CA", value: "san diego", type: "city" },
-  { label: "San Francisco, CA", value: "san francisco", type: "city" },
-  { label: "San Jose, CA", value: "san jose", type: "city" },
-  { label: "Seattle, WA", value: "seattle", type: "city" },
-  { label: "Washington, DC", value: "washington dc", type: "city" },
+  { label: "Atlanta, GA", value: "Atlanta, GA", type: "city" },
+  { label: "Austin, TX", value: "Austin, TX", type: "city" },
+  { label: "Boston, MA", value: "Boston, MA", type: "city" },
+  { label: "Charlotte, NC", value: "Charlotte, NC", type: "city" },
+  { label: "Chicago, IL", value: "Chicago, IL", type: "city" },
+  { label: "Dallas, TX", value: "Dallas, TX", type: "city" },
+  { label: "Denver, CO", value: "Denver, CO", type: "city" },
+  { label: "Houston, TX", value: "Houston, TX", type: "city" },
+  { label: "Los Angeles, CA", value: "Los Angeles, CA", type: "city" },
+  { label: "Miami, FL", value: "Miami, FL", type: "city" },
+  { label: "Nashville, TN", value: "Nashville, TN", type: "city" },
+  { label: "New York, NY", value: "New York, NY", type: "city" },
+  { label: "Philadelphia, PA", value: "Philadelphia, PA", type: "city" },
+  { label: "Phoenix, AZ", value: "Phoenix, AZ", type: "city" },
+  { label: "Raleigh, NC", value: "Raleigh, NC", type: "city" },
+  { label: "San Diego, CA", value: "San Diego, CA", type: "city" },
+  { label: "San Francisco, CA", value: "San Francisco, CA", type: "city" },
+  { label: "San Jose, CA", value: "San Jose, CA", type: "city" },
+  { label: "Seattle, WA", value: "Seattle, WA", type: "city" },
+  { label: "Washington, DC", value: "Washington, DC", type: "city" },
 
-  { label: "California", value: "california", type: "state" },
-  { label: "Colorado", value: "colorado", type: "state" },
-  { label: "Florida", value: "florida", type: "state" },
-  { label: "Georgia", value: "georgia", type: "state" },
-  { label: "Illinois", value: "illinois", type: "state" },
-  { label: "Massachusetts", value: "massachusetts", type: "state" },
-  { label: "New York", value: "new york", type: "state" },
-  { label: "North Carolina", value: "north carolina", type: "state" },
-  { label: "Texas", value: "texas", type: "state" },
-  { label: "Washington", value: "washington", type: "state" },
+  { label: "California", value: "California", type: "state" },
+  { label: "Colorado", value: "Colorado", type: "state" },
+  { label: "Florida", value: "Florida", type: "state" },
+  { label: "Georgia", value: "Georgia", type: "state" },
+  { label: "Illinois", value: "Illinois", type: "state" },
+  { label: "Massachusetts", value: "Massachusetts", type: "state" },
+  { label: "New York", value: "New York", type: "state" },
+  { label: "North Carolina", value: "North Carolina", type: "state" },
+  { label: "Texas", value: "Texas", type: "state" },
+  { label: "Washington", value: "Washington", type: "state" },
 ];
 
 function normalizeSuggestionText(value) {
@@ -97,7 +98,7 @@ export function getLocationSuggestions(query, limit = 6) {
       score += 2;
     }
 
-    const queryTokens = normalizedQuery.split(" ").filter(Boolean);
+    const queryTokens = normalizedQuery.split(/[,\s]+/).filter(Boolean);
     if (
       queryTokens.length > 1 &&
       queryTokens.every(
@@ -118,6 +119,19 @@ export function getLocationSuggestions(query, limit = 6) {
       const scoreDelta = right.score - left.score;
       if (scoreDelta !== 0) {
         return scoreDelta;
+      }
+
+      const workplacePriority = {
+        workplace: 0,
+        city: 1,
+        state: 2,
+      };
+
+      const typeDelta =
+        (workplacePriority[left.type] ?? 99) - (workplacePriority[right.type] ?? 99);
+
+      if (typeDelta !== 0) {
+        return typeDelta;
       }
 
       return left.label.localeCompare(right.label);
