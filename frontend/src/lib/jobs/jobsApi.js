@@ -1,4 +1,3 @@
-// frontend/src/lib/jobs/jobsApi.js
 /**
  * @fileoverview Jobs API client for EarlyBloom.
  *
@@ -53,6 +52,20 @@ function ensureApiBaseUrl() {
   if (!API_BASE_URL) {
     throw new Error("Missing VITE_API_BASE_URL.");
   }
+}
+
+/**
+ * Returns whether an error represents an aborted request.
+ *
+ * @param {unknown} error Possible error.
+ * @returns {boolean} True when this is an AbortError.
+ */
+function isAbortError(error) {
+  return (
+    error instanceof DOMException
+      ? error.name === "AbortError"
+      : error instanceof Error && error.name === "AbortError"
+  );
 }
 
 /**
@@ -117,6 +130,12 @@ async function readErrorMessage(response, fallbackMessage) {
  * GET requests are deduped in-flight and briefly cached in memory to reduce
  * repeated fetches during the same browsing session.
  *
+ * Important abort behavior:
+ * - do not share an in-flight GET request across callers that provide their own
+ *   AbortSignal, because one caller's cleanup can otherwise poison another caller
+ * - allow request cancellation to propagate as AbortError instead of being
+ *   re-labeled as a network failure
+ *
  * @param {string} path Backend API path.
  * @param {RequestInit} [options] Fetch options.
  * @returns {Promise<any>} Parsed JSON payload or null for 204 responses.
@@ -128,6 +147,7 @@ async function requestJson(path, options = {}) {
   const isGetRequest = method === "GET";
   const fullUrl = `${API_BASE_URL}${path}`;
   const cacheKey = `${method}:${fullUrl}`;
+  const hasExternalSignal = options.signal instanceof AbortSignal;
 
   if (isGetRequest) {
     const cached = getCachedResponse(cacheKey);
@@ -135,9 +155,11 @@ async function requestJson(path, options = {}) {
       return cached;
     }
 
-    const inflight = _inflightGetRequests.get(cacheKey);
-    if (inflight) {
-      return inflight;
+    if (!hasExternalSignal) {
+      const inflight = _inflightGetRequests.get(cacheKey);
+      if (inflight) {
+        return inflight;
+      }
     }
   }
 
@@ -153,7 +175,11 @@ async function requestJson(path, options = {}) {
           ...(options.headers || {}),
         },
       });
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+
       throw new Error(
         "Unable to reach the server. Check that the backend is running and try again."
       );
@@ -183,7 +209,7 @@ async function requestJson(path, options = {}) {
     return payload;
   })();
 
-  if (isGetRequest) {
+  if (isGetRequest && !hasExternalSignal) {
     _inflightGetRequests.set(cacheKey, requestPromise);
 
     try {

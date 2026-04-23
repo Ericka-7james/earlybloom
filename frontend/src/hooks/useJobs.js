@@ -1,4 +1,3 @@
-// frontend/src/hooks/useJobs.js
 /**
  * @fileoverview Jobs data hook for EarlyBloom.
  *
@@ -30,6 +29,8 @@ const DEFAULT_RESOLVED_USER_PROFILE = {
   skills: [],
   isLgbtFriendlyOnly: false,
 };
+
+const INITIAL_JOBS_RETRY_DELAYS_MS = [450, 1200];
 
 function getDefaultResolvedUserProfile() {
   return {
@@ -78,6 +79,94 @@ function getReadableErrorMessage(error, fallbackMessage) {
   return fallbackMessage;
 }
 
+function isAbortError(error) {
+  return (
+    error instanceof DOMException
+      ? error.name === "AbortError"
+      : error instanceof Error && error.name === "AbortError"
+  );
+}
+
+function isRetryableJobsError(error) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const status = Number(error.status);
+  if ([408, 429, 502, 503, 504].includes(status)) {
+    return true;
+  }
+
+  const message =
+    error instanceof Error && typeof error.message === "string"
+      ? error.message.toLowerCase()
+      : "";
+
+  return (
+    message.includes("unable to reach the server") ||
+    message.includes("failed to fetch") ||
+    message.includes("networkerror")
+  );
+}
+
+function waitForRetry(delayMs, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      cleanup();
+      resolve();
+    }, delayMs);
+
+    function handleAbort() {
+      cleanup();
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+    }
+
+    function cleanup() {
+      window.clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", handleAbort);
+    }
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+  });
+}
+
+async function fetchJobsWithInitialRetry({
+  signal,
+  locationQuery,
+  force = false,
+  shouldRetry = false,
+}) {
+  const delays = shouldRetry ? INITIAL_JOBS_RETRY_DELAYS_MS : [];
+
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    try {
+      return await fetchJobs({
+        signal,
+        locationQuery,
+        force: force || attempt > 0,
+      });
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+
+      const hasNextAttempt = attempt < delays.length;
+      if (!hasNextAttempt || !isRetryableJobsError(error)) {
+        throw error;
+      }
+
+      await waitForRetry(delays[attempt], signal);
+    }
+  }
+
+  return [];
+}
+
 export function useJobs(options = {}) {
   const {
     viewerKey = "guest",
@@ -118,6 +207,9 @@ export function useJobs(options = {}) {
       const hasExistingJobs =
         Array.isArray(existingJobs) && existingJobs.length > 0;
       const shouldUseRefreshState = existingHasLoadedOnce || hasExistingJobs;
+      const isManualRetry = reloadKey > 0;
+      const shouldRetryInitialJobsLoad =
+        !shouldUseRefreshState || isManualRetry;
 
       if (shouldUseRefreshState) {
         setIsRefreshing(true);
@@ -128,11 +220,16 @@ export function useJobs(options = {}) {
       setError("");
 
       const [jobsResult, profileResult] = await Promise.allSettled([
-        fetchJobs({
+        fetchJobsWithInitialRetry({
           signal: controller.signal,
           locationQuery,
+          force: isManualRetry,
+          shouldRetry: shouldRetryInitialJobsLoad,
         }),
-        fetchResolvedJobProfile({ signal: controller.signal }),
+        fetchResolvedJobProfile({
+          signal: controller.signal,
+          force: isManualRetry,
+        }),
       ]);
 
       if (controller.signal.aborted) {
@@ -144,6 +241,8 @@ export function useJobs(options = {}) {
       if (jobsResult.status === "fulfilled") {
         setJobs(Array.isArray(jobsResult.value) ? jobsResult.value : []);
         setHasLoadedOnce(true);
+      } else if (isAbortError(jobsResult.reason)) {
+        return;
       } else if (!hasExistingJobs && !existingHasLoadedOnce) {
         setJobs([]);
         nextError = getReadableErrorMessage(
@@ -161,6 +260,8 @@ export function useJobs(options = {}) {
         setResolvedUserProfile(
           normalizeResolvedUserProfile(profileResult.value)
         );
+      } else if (isAbortError(profileResult.reason)) {
+        return;
       } else if (!existingHasLoadedOnce && !hasExistingJobs) {
         setResolvedUserProfile(getDefaultResolvedUserProfile());
 
