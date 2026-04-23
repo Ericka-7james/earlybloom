@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import (
     APIRouter,
@@ -57,6 +57,9 @@ from app.services.jobs.user_profile import (
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 logger = logging.getLogger(__name__)
 
+MAX_LOCATION_QUERY_LENGTH = 120
+CACHED_FALLBACK_LIMIT = 160
+
 
 @dataclass
 class ViewerContext:
@@ -77,6 +80,19 @@ def get_job_ingestion_service() -> JobIngestionService:
 def get_job_cache_repository() -> JobCacheRepository:
     """Returns a job-cache repository instance."""
     return JobCacheRepository()
+
+
+def _normalize_text(value: object) -> str:
+    """Normalize arbitrary text into a single-space string."""
+    return " ".join(str(value or "").strip().split())
+
+
+def _normalize_location_query(location: str | None) -> str | None:
+    """Normalize and bound the public location query."""
+    normalized = _normalize_text(location)
+    if not normalized:
+        return None
+    return normalized[:MAX_LOCATION_QUERY_LENGTH]
 
 
 def _resolve_viewer_from_session(
@@ -153,7 +169,21 @@ def _set_refreshed_auth_cookies_if_needed(
 
 def _serialize_public_jobs(jobs: list[dict[str, Any]]) -> list[PublicJob]:
     """Validates and serializes public job payloads."""
-    return [PublicJob.model_validate(job) for job in jobs]
+    serialized_jobs: list[PublicJob] = []
+
+    for job in jobs:
+        try:
+            serialized_jobs.append(PublicJob.model_validate(job))
+        except Exception:
+            logger.exception("Failed to serialize public job payload. job_id=%s", job.get("id"))
+
+    return serialized_jobs
+
+
+def _build_jobs_response(jobs: list[dict[str, Any]]) -> JobsResponse:
+    """Build a jobs response from raw public-job payloads."""
+    serialized_jobs = _serialize_public_jobs(jobs)
+    return JobsResponse(jobs=serialized_jobs, total=len(serialized_jobs))
 
 
 def _build_tracker_mutation_response(
@@ -185,18 +215,17 @@ def _build_tracker_mutation_response(
     )
 
 
-def _build_related_jobs_response(
+def _build_related_jobs_payload(
     *,
-    response: Response,
-    current: ViewerContext,
     repository: JobCacheRepository,
+    user_id: str,
     relation_type: str,
-) -> JobsResponse:
-    """Builds a saved-jobs or hidden-jobs response."""
+) -> list[dict[str, Any]]:
+    """Build a saved-jobs or hidden-jobs payload."""
     if relation_type == "saved":
-        job_rows = repository.list_saved_jobs_for_user(user_id=current.user_id or "")
+        job_rows = repository.list_saved_jobs_for_user(user_id=user_id)
     elif relation_type == "hidden":
-        job_rows = repository.list_hidden_jobs_for_user(user_id=current.user_id or "")
+        job_rows = repository.list_hidden_jobs_for_user(user_id=user_id)
     else:
         raise ValueError(f"Unsupported relation_type={relation_type}")
 
@@ -208,22 +237,34 @@ def _build_related_jobs_response(
             continue
         public_jobs.append(map_normalized_job_to_response(normalized))
 
-    public_jobs = repository.apply_viewer_state_to_jobs(
-        user_id=current.user_id or "",
+    return repository.apply_viewer_state_to_jobs(
+        user_id=user_id,
         jobs=public_jobs,
         exclude_hidden=False,
     )
 
-    _set_refreshed_auth_cookies_if_needed(response, current)
 
-    serialized_jobs = _serialize_public_jobs(public_jobs)
-    return JobsResponse(jobs=serialized_jobs, total=len(serialized_jobs))
+def _build_related_jobs_response(
+    *,
+    response: Response,
+    current: ViewerContext,
+    repository: JobCacheRepository,
+    relation_type: str,
+) -> JobsResponse:
+    """Builds a saved-jobs or hidden-jobs response."""
+    public_jobs = _build_related_jobs_payload(
+        repository=repository,
+        user_id=current.user_id or "",
+        relation_type=relation_type,
+    )
+    _set_refreshed_auth_cookies_if_needed(response, current)
+    return _build_jobs_response(public_jobs)
 
 
 def _load_cached_public_jobs(
     repository: JobCacheRepository,
     *,
-    limit: int = 160,
+    limit: int = CACHED_FALLBACK_LIMIT,
     location_query: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fallback loader for cached jobs when live ingestion fails."""
@@ -257,6 +298,53 @@ def _load_cached_public_jobs(
     return filtered_jobs
 
 
+def _execute_tracker_mutation(
+    *,
+    operation_name: str,
+    repository_call: Callable[[], None],
+    response: Response,
+    current: ViewerContext,
+    repository: JobCacheRepository,
+    public_job_id: str,
+) -> JobTrackerMutationResponse:
+    """Execute a save/hide tracker mutation with shared error handling."""
+    try:
+        repository_call()
+        _set_refreshed_auth_cookies_if_needed(response, current)
+
+        return _build_tracker_mutation_response(
+            repository=repository,
+            user_id=current.user_id or "",
+            public_job_id=public_job_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed tracker mutation. operation=%s job_id=%s", operation_name, public_job_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unable to {operation_name} this job right now.",
+        ) from exc
+
+
+def _execute_related_jobs_read(
+    *,
+    operation_name: str,
+    builder: Callable[[], JobsResponse],
+) -> JobsResponse:
+    """Execute a related-jobs read with shared error handling."""
+    try:
+        return builder()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed related jobs read. operation=%s", operation_name)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unable to load {operation_name} right now.",
+        ) from exc
+
+
 @router.get("", response_model=JobsResponse)
 async def list_jobs(
     response: Response,
@@ -269,20 +357,27 @@ async def list_jobs(
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobsResponse:
     """Returns normalized jobs for browsing, scoring, and UI display."""
+    normalized_location = _normalize_location_query(location)
     jobs: list[dict[str, Any]] = []
 
     try:
-        jobs = await job_ingestion_service.ingest_jobs(location_query=location)
+        jobs = await job_ingestion_service.ingest_jobs(location_query=normalized_location)
     except Exception:
-        logger.exception("Live jobs ingestion failed. Falling back to shared cache.")
+        logger.exception(
+            "Live jobs ingestion failed. Falling back to shared cache. location_query=%s",
+            normalized_location,
+        )
 
         try:
             jobs = _load_cached_public_jobs(
                 repository,
-                location_query=location,
+                location_query=normalized_location,
             )
         except Exception:
-            logger.exception("Shared cache fallback also failed.")
+            logger.exception(
+                "Shared cache fallback also failed. location_query=%s",
+                normalized_location,
+            )
 
     if not jobs:
         raise HTTPException(
@@ -298,8 +393,7 @@ async def list_jobs(
         )
         _set_refreshed_auth_cookies_if_needed(response, current)
 
-    serialized_jobs = _serialize_public_jobs(jobs)
-    return JobsResponse(jobs=serialized_jobs, total=len(serialized_jobs))
+    return _build_jobs_response(jobs)
 
 
 @router.get("/profile", response_model=ResolvedJobProfileResponse)
@@ -335,26 +429,17 @@ def save_job(
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobTrackerMutationResponse:
     """Saves a shared cached job for the authenticated user."""
-    try:
-        repository.save_job_for_user(
+    return _execute_tracker_mutation(
+        operation_name="save",
+        repository_call=lambda: repository.save_job_for_user(
             user_id=current.user_id or "",
             public_job_id=payload.job_id,
-        )
-        _set_refreshed_auth_cookies_if_needed(response, current)
-
-        return _build_tracker_mutation_response(
-            repository=repository,
-            user_id=current.user_id or "",
-            public_job_id=payload.job_id,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Failed to save job.")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to save this job right now.",
-        ) from exc
+        ),
+        response=response,
+        current=current,
+        repository=repository,
+        public_job_id=payload.job_id,
+    )
 
 
 @router.delete("/saved/{job_id}", response_model=JobTrackerMutationResponse)
@@ -365,26 +450,17 @@ def unsave_job(
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobTrackerMutationResponse:
     """Removes a saved-job relationship for the authenticated user."""
-    try:
-        repository.unsave_job_for_user(
+    return _execute_tracker_mutation(
+        operation_name="remove this saved",
+        repository_call=lambda: repository.unsave_job_for_user(
             user_id=current.user_id or "",
             public_job_id=job_id,
-        )
-        _set_refreshed_auth_cookies_if_needed(response, current)
-
-        return _build_tracker_mutation_response(
-            repository=repository,
-            user_id=current.user_id or "",
-            public_job_id=job_id,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Failed to unsave job.")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to remove this saved job right now.",
-        ) from exc
+        ),
+        response=response,
+        current=current,
+        repository=repository,
+        public_job_id=job_id,
+    )
 
 
 @router.post(
@@ -399,26 +475,17 @@ def hide_job(
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobTrackerMutationResponse:
     """Hides a shared cached job for the authenticated user."""
-    try:
-        repository.hide_job_for_user(
+    return _execute_tracker_mutation(
+        operation_name="hide",
+        repository_call=lambda: repository.hide_job_for_user(
             user_id=current.user_id or "",
             public_job_id=payload.job_id,
-        )
-        _set_refreshed_auth_cookies_if_needed(response, current)
-
-        return _build_tracker_mutation_response(
-            repository=repository,
-            user_id=current.user_id or "",
-            public_job_id=payload.job_id,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Failed to hide job.")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to hide this job right now.",
-        ) from exc
+        ),
+        response=response,
+        current=current,
+        repository=repository,
+        public_job_id=payload.job_id,
+    )
 
 
 @router.delete("/hidden/{job_id}", response_model=JobTrackerMutationResponse)
@@ -429,26 +496,17 @@ def unhide_job(
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobTrackerMutationResponse:
     """Removes a hidden-job relationship for the authenticated user."""
-    try:
-        repository.unhide_job_for_user(
+    return _execute_tracker_mutation(
+        operation_name="unhide",
+        repository_call=lambda: repository.unhide_job_for_user(
             user_id=current.user_id or "",
             public_job_id=job_id,
-        )
-        _set_refreshed_auth_cookies_if_needed(response, current)
-
-        return _build_tracker_mutation_response(
-            repository=repository,
-            user_id=current.user_id or "",
-            public_job_id=job_id,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Failed to unhide job.")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to unhide this job right now.",
-        ) from exc
+        ),
+        response=response,
+        current=current,
+        repository=repository,
+        public_job_id=job_id,
+    )
 
 
 @router.get("/saved", response_model=JobsResponse)
@@ -458,21 +516,15 @@ def list_saved_jobs(
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobsResponse:
     """Lists saved jobs for the authenticated user."""
-    try:
-        return _build_related_jobs_response(
+    return _execute_related_jobs_read(
+        operation_name="saved jobs",
+        builder=lambda: _build_related_jobs_response(
             response=response,
             current=current,
             repository=repository,
             relation_type="saved",
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Failed to list saved jobs.")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to load saved jobs right now.",
-        ) from exc
+        ),
+    )
 
 
 @router.get("/hidden", response_model=JobsResponse)
@@ -482,18 +534,12 @@ def list_hidden_jobs(
     repository: JobCacheRepository = Depends(get_job_cache_repository),
 ) -> JobsResponse:
     """Lists hidden jobs for the authenticated user."""
-    try:
-        return _build_related_jobs_response(
+    return _execute_related_jobs_read(
+        operation_name="hidden jobs",
+        builder=lambda: _build_related_jobs_response(
             response=response,
             current=current,
             repository=repository,
             relation_type="hidden",
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Failed to list hidden jobs.")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to load hidden jobs right now.",
-        ) from exc
+        ),
+    )

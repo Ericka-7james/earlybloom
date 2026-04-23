@@ -36,6 +36,24 @@ from app.services.jobs.job_filters import (
     should_include_job,
     should_match_location_query,
 )
+from app.services.jobs.job_logger import (
+    log_cleanup_complete,
+    log_db_only_reads_return,
+    log_final_return,
+    log_ingestion_start,
+    log_live_refresh_complete,
+    log_live_refresh_start,
+    log_memory_cache_hit,
+    log_non_list_provider_payload,
+    log_provider_complete,
+    log_provider_failure,
+    log_provider_skipped_cooldown,
+    log_provider_skipped_running,
+    log_query_cache_hit,
+    log_query_cache_write,
+    log_shared_cache_result,
+    log_shared_cache_return,
+)
 from app.services.jobs.normalizer import normalize_provider_job
 from app.services.jobs.providers import get_configured_providers
 from app.services.jobs.us_filters import should_keep_us_focused_job
@@ -77,6 +95,9 @@ async def get_jobs(
 ) -> list[dict[str, Any]]:
     """Public entry point for jobs ingestion."""
     settings = get_settings()
+    normalized_levels = _normalize_string_list(levels)
+    normalized_role_types = _normalize_string_list(role_types)
+    normalized_location_query = (location_query or "").strip() or None
 
     if settings.JOB_DATA_MODE == "mock":
         logger.warning("JOB_DATA_MODE=mock. Returning mock jobs.")
@@ -85,13 +106,12 @@ async def get_jobs(
     provider_registry = providers or get_configured_providers()
     repository = JobCacheRepository()
 
-    logger.warning(
-        "get_jobs called remote_only=%s levels=%s role_types=%s location_query=%s providers=%s",
-        remote_only,
-        levels,
-        role_types,
-        location_query,
-        list(provider_registry.keys()),
+    log_ingestion_start(
+        remote_only=remote_only,
+        levels=normalized_levels,
+        role_types=normalized_role_types,
+        location_query=normalized_location_query,
+        providers=list(provider_registry.keys()),
     )
 
     use_memory_cache = providers is None
@@ -101,23 +121,24 @@ async def get_jobs(
         memory_cache_key = build_jobs_cache_key(
             remote_only=remote_only,
             provider_names=list(provider_registry.keys()),
+            levels=normalized_levels,
+            role_types=normalized_role_types,
+            location_query=normalized_location_query,
         )
-        if location_query:
-            memory_cache_key = f"{memory_cache_key}:location:{_normalize_text(location_query)}"
 
         cached_memory_jobs = get_cached_value(memory_cache_key)
         if cached_memory_jobs is not None:
-            logger.warning(
-                "Returning jobs from memory cache. count=%s",
-                len(cached_memory_jobs),
+            log_memory_cache_hit(
+                count=len(cached_memory_jobs),
+                cache_key=memory_cache_key,
             )
             return _cap_jobs_for_response(cached_memory_jobs)
 
     query_key = repository.build_query_cache_key(
         remote_only=remote_only,
-        levels=levels,
-        role_types=role_types,
-        location_query=location_query,
+        levels=normalized_levels,
+        role_types=normalized_role_types,
+        location_query=normalized_location_query,
     )
 
     cached_query_jobs = _get_cached_jobs_from_query_cache(
@@ -125,11 +146,7 @@ async def get_jobs(
         query_key=query_key,
     )
     if cached_query_jobs:
-        logger.warning(
-            "Returning jobs from query cache. count=%s query_key=%s",
-            len(cached_query_jobs),
-            query_key,
-        )
+        log_query_cache_hit(count=len(cached_query_jobs), query_key=query_key)
         capped_query_jobs = _cap_jobs_for_response(cached_query_jobs)
         if use_memory_cache and memory_cache_key is not None:
             set_cached_value(memory_cache_key, capped_query_jobs)
@@ -138,17 +155,13 @@ async def get_jobs(
     shared_jobs = _get_cached_jobs_from_db(
         repository=repository,
         remote_only=remote_only,
-        levels=levels,
-        role_types=role_types,
-        location_query=location_query,
+        levels=normalized_levels,
+        role_types=normalized_role_types,
+        location_query=normalized_location_query,
         limit=settings.JOBS_MAX_DB_SCAN_ROWS,
     )
 
-    logger.warning(
-        "Shared cache returned count=%s query_key=%s",
-        len(shared_jobs),
-        query_key,
-    )
+    log_shared_cache_result(count=len(shared_jobs), query_key=query_key)
 
     if shared_jobs:
         capped_shared_jobs = _cap_jobs_for_response(shared_jobs)
@@ -158,56 +171,45 @@ async def get_jobs(
             query_key=query_key,
             jobs=capped_shared_jobs,
             remote_only=remote_only,
-            levels=levels,
-            role_types=role_types,
-            location_query=location_query,
+            levels=normalized_levels,
+            role_types=normalized_role_types,
+            location_query=normalized_location_query,
         )
 
         if _should_return_shared_jobs_immediately(shared_jobs):
-            logger.warning(
-                "Returning jobs from shared DB cache immediately. count=%s threshold=%s immediate_min=%s",
-                len(shared_jobs),
-                settings.JOBS_SHARED_CACHE_MIN_RESULTS,
-                settings.JOBS_MIN_IMMEDIATE_RESULTS,
+            log_shared_cache_return(
+                count=len(shared_jobs),
+                shared_cache_min_results=settings.JOBS_SHARED_CACHE_MIN_RESULTS,
+                immediate_min_results=settings.JOBS_MIN_IMMEDIATE_RESULTS,
             )
             if use_memory_cache and memory_cache_key is not None:
                 set_cached_value(memory_cache_key, capped_shared_jobs)
             return capped_shared_jobs
 
     if settings.JOBS_DB_ONLY_READS:
-        logger.warning(
-            "JOBS_DB_ONLY_READS enabled. Returning shared jobs without live refresh. count=%s",
-            len(shared_jobs),
-        )
         capped_shared_jobs = _cap_jobs_for_response(shared_jobs)
+        log_db_only_reads_return(count=len(capped_shared_jobs))
         if use_memory_cache and memory_cache_key is not None:
             set_cached_value(memory_cache_key, capped_shared_jobs)
         return capped_shared_jobs
 
-    logger.warning(
-        "Shared cache below threshold or empty. Triggering live refresh. cached_count=%s threshold=%s",
-        len(shared_jobs),
-        settings.JOBS_SHARED_CACHE_MIN_RESULTS,
+    log_live_refresh_start(
+        cached_count=len(shared_jobs),
+        threshold=settings.JOBS_SHARED_CACHE_MIN_RESULTS,
     )
 
     live_normalized_jobs = await _refresh_jobs_from_providers_if_allowed(
         repository=repository,
         query_key=query_key,
         remote_only=remote_only,
-        levels=levels,
-        role_types=role_types,
-        location_query=location_query,
+        levels=normalized_levels,
+        role_types=normalized_role_types,
+        location_query=normalized_location_query,
         providers=provider_registry,
     )
 
     live_jobs = [map_normalized_job_to_response(job) for job in live_normalized_jobs]
     live_jobs = _cap_jobs_for_response(live_jobs)
-
-    logger.warning(
-        "Live provider refresh returned count=%s query_key=%s",
-        len(live_jobs),
-        query_key,
-    )
 
     final_jobs = live_jobs or _cap_jobs_for_response(shared_jobs)
 
@@ -217,15 +219,15 @@ async def get_jobs(
             query_key=query_key,
             jobs=live_jobs,
             remote_only=remote_only,
-            levels=levels,
-            role_types=role_types,
-            location_query=location_query,
+            levels=normalized_levels,
+            role_types=normalized_role_types,
+            location_query=normalized_location_query,
         )
 
     if use_memory_cache and memory_cache_key is not None:
         set_cached_value(memory_cache_key, final_jobs)
 
-    logger.warning("Returning final jobs count=%s", len(final_jobs))
+    log_final_return(count=len(final_jobs))
     return final_jobs
 
 
@@ -283,12 +285,10 @@ def _get_cached_jobs_from_query_cache(
         return []
 
     if not row:
-        logger.warning("No valid query cache row found. query_key=%s", query_key)
         return []
 
     job_ids = row.get("job_ids") or []
     if not isinstance(job_ids, list) or not job_ids:
-        logger.warning("Query cache row had no job_ids. query_key=%s", query_key)
         return []
 
     try:
@@ -308,15 +308,6 @@ def _get_cached_jobs_from_query_cache(
             jobs.append(normalized)
 
     deduped_jobs = dedupe_jobs(jobs)
-
-    logger.warning(
-        "Loaded jobs from query cache. query_key=%s requested_ids=%s hydrated=%s deduped=%s",
-        query_key,
-        len(job_ids),
-        len(jobs),
-        len(deduped_jobs),
-    )
-
     return [map_normalized_job_to_response(job) for job in deduped_jobs]
 
 
@@ -338,7 +329,6 @@ def _get_cached_jobs_from_db(
         return []
 
     if not rows:
-        logger.warning("No active jobs found in Supabase cache after cleanup.")
         return []
 
     normalized_jobs: list[NormalizedJob] = []
@@ -356,15 +346,6 @@ def _get_cached_jobs_from_db(
     )
 
     deduped_jobs = dedupe_jobs(filtered_jobs)
-
-    logger.warning(
-        "Loaded jobs from Supabase cache. rows=%s normalized=%s filtered=%s deduped=%s",
-        len(rows),
-        len(normalized_jobs),
-        len(filtered_jobs),
-        len(deduped_jobs),
-    )
-
     return [map_normalized_job_to_response(job) for job in deduped_jobs]
 
 
@@ -399,11 +380,7 @@ def _write_query_cache(
             ttl_seconds=get_settings().JOBS_QUERY_CACHE_TTL_SECONDS,
         )
 
-        logger.warning(
-            "Upserted query cache. query_key=%s job_count=%s",
-            query_key,
-            len(job_ids),
-        )
+        log_query_cache_write(query_key=query_key, job_count=len(job_ids))
     except Exception as exc:
         logger.exception(
             "Failed to write query cache. query_key=%s",
@@ -428,11 +405,6 @@ def _write_jobs_to_db_cache(
             jobs,
             ttl_days=settings.JOBS_SHARED_CACHE_TTL_DAYS,
             ingestion_run_id=ingestion_run_id,
-        )
-        logger.warning(
-            "Upserted jobs into Supabase cache. count=%s ingestion_run_id=%s",
-            len(jobs),
-            ingestion_run_id,
         )
     except Exception as exc:
         logger.exception("Failed to upsert jobs into Supabase cache.", exc_info=exc)
@@ -463,10 +435,9 @@ async def _refresh_jobs_from_providers_if_allowed(
             query_key=query_key,
             within_seconds=settings.JOBS_INGESTION_RUNNING_TTL_SECONDS,
         ):
-            logger.warning(
-                "Skipping provider refresh because a run is already active. provider=%s query_key=%s",
-                provider_name,
-                query_key,
+            log_provider_skipped_running(
+                provider_name=provider_name,
+                query_key=query_key,
             )
             continue
 
@@ -475,10 +446,9 @@ async def _refresh_jobs_from_providers_if_allowed(
             query_key=query_key,
             within_seconds=settings.JOBS_PROVIDER_REFRESH_COOLDOWN_SECONDS,
         ):
-            logger.warning(
-                "Skipping provider refresh because cooldown is active. provider=%s query_key=%s",
-                provider_name,
-                query_key,
+            log_provider_skipped_cooldown(
+                provider_name=provider_name,
+                query_key=query_key,
             )
             continue
 
@@ -497,7 +467,7 @@ async def _refresh_jobs_from_providers_if_allowed(
         eligible_runs.append((provider_name, provider, run_id))
 
     if not eligible_runs:
-        logger.warning("No eligible providers available for live refresh.")
+        logger.info("No eligible providers available for live refresh.")
         return []
 
     semaphore = asyncio.Semaphore(max(1, settings.JOBS_PROVIDER_MAX_CONCURRENCY))
@@ -524,17 +494,15 @@ async def _refresh_jobs_from_providers_if_allowed(
         if isinstance(result, Exception):
             logger.exception("Parallel provider refresh task failed.", exc_info=result)
             continue
-
         all_jobs.extend(result)
 
     deduped_all_jobs = dedupe_jobs(all_jobs)
     capped_jobs = deduped_all_jobs[: settings.JOBS_MAX_LIVE_AGGREGATE_JOBS]
 
-    logger.warning(
-        "Live refresh complete. aggregated=%s deduped=%s capped=%s",
-        len(all_jobs),
-        len(deduped_all_jobs),
-        len(capped_jobs),
+    log_live_refresh_complete(
+        aggregated_count=len(all_jobs),
+        deduped_count=len(deduped_all_jobs),
+        capped_count=len(capped_jobs),
     )
 
     return capped_jobs
@@ -601,23 +569,18 @@ async def _refresh_single_provider(
                     metadata={"provider": provider_name},
                 )
 
-            logger.warning(
-                "Provider refresh complete. provider=%s raw=%s normalized=%s filtered=%s kept=%s",
-                provider_name,
-                raw_count,
-                normalized_count,
-                len(filtered_provider_jobs),
-                deduped_count,
+            log_provider_complete(
+                provider_name=provider_name,
+                raw_count=raw_count,
+                normalized_count=normalized_count,
+                filtered_count=len(filtered_provider_jobs),
+                kept_count=deduped_count,
             )
 
             return deduped_provider_jobs
 
         except Exception as exc:
-            logger.exception(
-                "Provider refresh failed. provider=%s error=%s",
-                provider_name,
-                exc,
-            )
+            log_provider_failure(provider_name=provider_name, error=exc)
             if run_id:
                 repository.complete_ingestion_run(
                     run_id=run_id,
@@ -696,10 +659,9 @@ async def _fetch_provider_jobs(
         jobs = await jobs
 
     if not isinstance(jobs, list):
-        logger.warning(
-            "Provider returned non-list payload. provider=%s type=%s",
-            provider_name,
-            type(jobs).__name__,
+        log_non_list_provider_payload(
+            provider_name=provider_name,
+            payload_type=type(jobs).__name__,
         )
         return []
 
@@ -764,10 +726,9 @@ def _cleanup_shared_cache_if_due(repository: JobCacheRepository) -> None:
     try:
         cleanup_result = repository.cleanup_expired_jobs(grace_hours=48)
         _LAST_SHARED_CACHE_CLEANUP_AT = now
-        logger.warning(
-            "Jobs cache cleanup complete. marked_inactive=%s deleted=%s",
-            cleanup_result["marked_inactive"],
-            cleanup_result["deleted"],
+        log_cleanup_complete(
+            marked_inactive=cleanup_result.get("marked_inactive"),
+            deleted=cleanup_result.get("deleted"),
         )
     except Exception as exc:
         logger.exception("Failed during jobs cache cleanup.", exc_info=exc)
@@ -851,3 +812,21 @@ def _canonical_url(url: str) -> str:
 def _normalize_text(value: Any) -> str:
     """Normalize arbitrary text for matching."""
     return " ".join(str(value or "").strip().lower().split())
+
+
+def _normalize_string_list(values: list[str] | None) -> list[str]:
+    """Normalize a list of strings for consistent cache and query behavior."""
+    if not values:
+        return []
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for value in values:
+        text = _normalize_text(value)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+
+    return normalized

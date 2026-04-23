@@ -27,43 +27,55 @@ class CacheEntry(Generic[T]):
     value: T
 
 
-# OrderedDict lets us cheaply evict the oldest entry when the cache grows too large.
 _CACHE: OrderedDict[str, CacheEntry[T]] = OrderedDict()
+
+
+def _normalize_text(value: object) -> str:
+    """Normalize arbitrary values for deterministic cache-key use."""
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _normalize_list(values: list[str] | tuple[str, ...] | set[str] | None) -> str:
+    """Normalize a collection into a stable comma-separated string."""
+    if not values:
+        return ""
+    normalized = sorted(
+        {
+            _normalize_text(value)
+            for value in values
+            if _normalize_text(value)
+        }
+    )
+    return ",".join(normalized)
 
 
 def build_jobs_cache_key(
     *,
     remote_only: bool,
     provider_names: list[str] | tuple[str, ...] | set[str],
+    levels: list[str] | tuple[str, ...] | set[str] | None = None,
+    role_types: list[str] | tuple[str, ...] | set[str] | None = None,
+    location_query: str | None = None,
 ) -> str:
-    """Build a deterministic cache key for a job-ingestion request.
-
-    Args:
-        remote_only: Whether only remote jobs are requested.
-        provider_names: Enabled provider names for this request.
-
-    Returns:
-        A deterministic cache key string.
-    """
-    ordered_providers = ",".join(
-        sorted(str(name).strip().lower() for name in provider_names)
-    )
+    """Build a deterministic cache key for a job-ingestion request."""
+    ordered_providers = _normalize_list(provider_names)
+    ordered_levels = _normalize_list(levels)
+    ordered_role_types = _normalize_list(role_types)
+    normalized_location = _normalize_text(location_query)
     scope = "remote" if remote_only else "all"
-    return f"jobs:v4:{scope}:providers:{ordered_providers}"
+
+    return (
+        "jobs:v5:"
+        f"scope:{scope}:"
+        f"providers:{ordered_providers}:"
+        f"levels:{ordered_levels or 'none'}:"
+        f"roles:{ordered_role_types or 'none'}:"
+        f"location:{normalized_location or 'none'}"
+    )
 
 
 def get_cached_value(cache_key: str) -> T | None:
-    """Return a cached value if the entry is still fresh.
-
-    Accessing a live key also refreshes its recency so the cache behaves
-    roughly like a lightweight LRU.
-
-    Args:
-        cache_key: Cache key to lookup.
-
-    Returns:
-        Cached value when present and unexpired, otherwise None.
-    """
+    """Return a cached value if the entry is still fresh."""
     settings = get_settings()
     entry = _CACHE.get(cache_key)
 
@@ -75,21 +87,12 @@ def get_cached_value(cache_key: str) -> T | None:
         _CACHE.pop(cache_key, None)
         return None
 
-    # Refresh recency for hot keys.
     _CACHE.move_to_end(cache_key)
     return entry.value
 
 
 def set_cached_value(cache_key: str, value: T) -> None:
-    """Store a value in the in-memory cache.
-
-    Existing keys are replaced in place and become the most recently used.
-    When capacity is exceeded, the oldest entry is evicted.
-
-    Args:
-        cache_key: Cache key to store.
-        value: Value to cache.
-    """
+    """Store a value in the in-memory cache."""
     settings = get_settings()
     now = time.time()
 
@@ -101,11 +104,7 @@ def set_cached_value(cache_key: str, value: T) -> None:
 
 
 def clear_cache_key(cache_key: str) -> None:
-    """Remove a single cache key if present.
-
-    Args:
-        cache_key: Cache key to remove.
-    """
+    """Remove a single cache key if present."""
     _CACHE.pop(cache_key, None)
 
 
@@ -123,10 +122,10 @@ def get_cache_stats() -> dict[str, int]:
     expired_entries = 0
 
     for entry in _CACHE.values():
-      if (now - entry.stored_at) > ttl_seconds:
-          expired_entries += 1
-      else:
-          live_entries += 1
+        if (now - entry.stored_at) > ttl_seconds:
+            expired_entries += 1
+        else:
+            live_entries += 1
 
     return {
         "total_entries": len(_CACHE),
@@ -136,11 +135,7 @@ def get_cache_stats() -> dict[str, int]:
 
 
 def _prune_expired_entries(*, now: float | None = None) -> None:
-    """Remove expired entries opportunistically.
-
-    This keeps the cache from accumulating dead entries indefinitely without
-    requiring a background worker.
-    """
+    """Remove expired entries opportunistically."""
     current_time = now if now is not None else time.time()
     ttl_seconds = get_settings().JOB_CACHE_TTL_SECONDS
 
